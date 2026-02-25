@@ -10,3 +10,4 @@ noise = "0.9"
 serde = { version = "1", features = ["derive"] }
 ron = "0.10"
 thiserror = "2"
+bevy_egui = "0.39"

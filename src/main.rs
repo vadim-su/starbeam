@@ -5,8 +5,10 @@ mod registry;
 mod ui;
 mod world;
 
+use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
 use bevy_ecs_tilemap::prelude::*;
+use bevy_egui::EguiPlugin;
 
 fn main() {
     App::new()
@@ -23,6 +25,8 @@ fn main() {
                 }),
         )
         .add_plugins(TilemapPlugin)
+        .add_plugins(EguiPlugin::default())
+        .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_plugins(registry::RegistryPlugin)
         .add_plugins(world::WorldPlugin)
         .add_plugins(player::PlayerPlugin)
