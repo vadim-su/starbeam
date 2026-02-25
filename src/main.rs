@@ -1,4 +1,5 @@
 mod camera;
+mod interaction;
 mod player;
 mod world;
 
@@ -23,6 +24,7 @@ fn main() {
         .add_plugins(world::WorldPlugin)
         .add_plugins(player::PlayerPlugin)
         .add_plugins(camera::CameraPlugin)
+        .add_plugins(interaction::InteractionPlugin)
         .add_systems(Startup, setup)
         .run();
 }
