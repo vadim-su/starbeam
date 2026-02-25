@@ -39,8 +39,8 @@ impl Plugin for WorldPlugin {
 fn create_tilemap_texture(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     let image = Image::new_fill(
         Extent3d {
-            width: 1,
-            height: 1,
+            width: 32,
+            height: 32,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
