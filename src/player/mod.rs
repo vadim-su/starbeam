@@ -9,8 +9,8 @@ use crate::world::terrain_gen;
 pub const PLAYER_SPEED: f32 = 200.0;
 pub const JUMP_VELOCITY: f32 = 400.0;
 pub const GRAVITY: f32 = 800.0;
-pub const PLAYER_WIDTH: f32 = 24.0;
-pub const PLAYER_HEIGHT: f32 = 48.0;
+pub const PLAYER_WIDTH: f32 = 64.0;
+pub const PLAYER_HEIGHT: f32 = 128.0;
 
 #[derive(Component)]
 pub struct Player;
@@ -44,7 +44,7 @@ fn spawn_player(mut commands: Commands) {
     let spawn_tile_x = world::WORLD_WIDTH_TILES / 2;
     let surface_y = terrain_gen::surface_height(42, spawn_tile_x);
     let spawn_pixel_x = spawn_tile_x as f32 * world::TILE_SIZE + world::TILE_SIZE / 2.0;
-    let spawn_pixel_y = (surface_y + 2) as f32 * world::TILE_SIZE + PLAYER_HEIGHT / 2.0;
+    let spawn_pixel_y = (surface_y + 5) as f32 * world::TILE_SIZE + PLAYER_HEIGHT / 2.0;
 
     commands.spawn((
         Player,

@@ -184,6 +184,7 @@ pub fn spawn_chunk(
                 render_chunk_size: UVec2::new(CHUNK_SIZE, CHUNK_SIZE),
                 y_sort: false,
             },
+            anchor: TilemapAnchor::BottomLeft,
             ..Default::default()
         },
         ChunkCoord {
