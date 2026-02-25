@@ -1,3 +1,4 @@
+pub mod terrain_gen;
 pub mod tile;
 
 use bevy::prelude::*;
