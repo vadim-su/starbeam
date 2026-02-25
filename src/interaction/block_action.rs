@@ -3,11 +3,10 @@ use bevy::window::PrimaryWindow;
 use bevy_ecs_tilemap::prelude::*;
 
 use crate::player::{Player, PLAYER_HEIGHT, PLAYER_WIDTH};
-use crate::world::chunk::{
-    tile_to_chunk, tile_to_local, world_to_tile, ChunkCoord, LoadedChunks, WorldMap,
-};
+use crate::world::chunk::{tile_to_local, world_to_tile, ChunkCoord, WorldMap};
 use crate::world::tile::TileType;
-use crate::world::{TILE_SIZE, WORLD_WIDTH_TILES};
+use crate::world::CHUNK_SIZE;
+use crate::world::{wrap_chunk_x, TILE_SIZE, WORLD_WIDTH_TILES};
 
 const BLOCK_REACH: f32 = 5.0; // tiles
 
@@ -18,7 +17,6 @@ pub fn block_interaction_system(
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
     player_query: Query<&Transform, With<Player>>,
     mut world_map: ResMut<WorldMap>,
-    loaded_chunks: Res<LoadedChunks>,
     mut tilemap_query: Query<(&ChunkCoord, &mut TileStorage, Entity)>,
 ) {
     let left_click = mouse.just_pressed(MouseButton::Left);
@@ -54,7 +52,10 @@ pub fn block_interaction_system(
         return;
     }
 
-    let (chunk_x, chunk_y) = tile_to_chunk(tile_x, tile_y);
+    // Compute data chunk coords (wrapped) and local tile position
+    let wrapped_tile_x = crate::world::wrap_tile_x(tile_x);
+    let data_chunk_x = wrapped_tile_x.div_euclid(CHUNK_SIZE as i32);
+    let data_chunk_y = tile_y.div_euclid(CHUNK_SIZE as i32);
     let (local_x, local_y) = tile_to_local(tile_x, tile_y);
     let tile_pos = TilePos::new(local_x, local_y);
 
@@ -67,14 +68,11 @@ pub fn block_interaction_system(
 
         world_map.set_tile(tile_x, tile_y, TileType::Air);
 
-        // Update ECS tilemap
-        if loaded_chunks.map.contains_key(&(chunk_x, chunk_y)) {
-            for (coord, mut storage, _entity) in &mut tilemap_query {
-                if coord.x == chunk_x && coord.y == chunk_y {
-                    if let Some(tile_entity) = storage.remove(&tile_pos) {
-                        commands.entity(tile_entity).despawn();
-                    }
-                    break;
+        // Update ALL display tilemaps that show this data chunk
+        for (coord, mut storage, _entity) in &mut tilemap_query {
+            if wrap_chunk_x(coord.x) == data_chunk_x && coord.y == data_chunk_y {
+                if let Some(tile_entity) = storage.remove(&tile_pos) {
+                    commands.entity(tile_entity).despawn();
                 }
             }
         }
@@ -107,25 +105,22 @@ pub fn block_interaction_system(
         let place_type = TileType::Dirt;
         world_map.set_tile(tile_x, tile_y, place_type);
 
-        // Update ECS tilemap
-        if loaded_chunks.map.contains_key(&(chunk_x, chunk_y)) {
-            for (coord, mut storage, entity) in &mut tilemap_query {
-                if coord.x == chunk_x && coord.y == chunk_y {
-                    let tilemap_id = TilemapId(entity);
-                    let color = place_type.color().unwrap();
-                    let tile_entity = commands
-                        .spawn(TileBundle {
-                            position: tile_pos,
-                            tilemap_id,
-                            texture_index: TileTextureIndex(0),
-                            color: TileColor(color),
-                            ..Default::default()
-                        })
-                        .id();
-                    commands.entity(entity).add_child(tile_entity);
-                    storage.set(&tile_pos, tile_entity);
-                    break;
-                }
+        // Update ALL display tilemaps that show this data chunk
+        for (coord, mut storage, entity) in &mut tilemap_query {
+            if wrap_chunk_x(coord.x) == data_chunk_x && coord.y == data_chunk_y {
+                let tilemap_id = TilemapId(entity);
+                let color = place_type.color().unwrap();
+                let tile_entity = commands
+                    .spawn(TileBundle {
+                        position: tile_pos,
+                        tilemap_id,
+                        texture_index: TileTextureIndex(0),
+                        color: TileColor(color),
+                        ..Default::default()
+                    })
+                    .id();
+                commands.entity(entity).add_child(tile_entity);
+                storage.set(&tile_pos, tile_entity);
             }
         }
     }
