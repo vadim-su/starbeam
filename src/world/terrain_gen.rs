@@ -11,18 +11,29 @@ const CAVE_THRESHOLD: f64 = 0.3;
 const DIRT_DEPTH: i32 = 4;
 
 /// Get the surface height (in tile Y) at a given tile X coordinate.
+/// Uses cylindrical noise sampling for seamless horizontal wrap-around.
 pub fn surface_height(seed: u32, tile_x: i32) -> i32 {
     let perlin = Perlin::new(seed);
     let base = SURFACE_BASE * WORLD_HEIGHT_TILES as f64;
-    let noise_val = perlin.get([tile_x as f64 * SURFACE_FREQUENCY, 0.0]);
+
+    let angle = tile_x as f64 / WORLD_WIDTH_TILES as f64 * 2.0 * std::f64::consts::PI;
+    let radius = WORLD_WIDTH_TILES as f64 * SURFACE_FREQUENCY / (2.0 * std::f64::consts::PI);
+    let nx = radius * angle.cos();
+    let ny = radius * angle.sin();
+    let noise_val = perlin.get([nx, ny]);
+
     (base + noise_val * SURFACE_AMPLITUDE) as i32
 }
 
 /// Generate tile type at an absolute tile position.
+/// X coordinate wraps horizontally. Y is bounded [0, WORLD_HEIGHT_TILES).
 pub fn generate_tile(seed: u32, tile_x: i32, tile_y: i32) -> TileType {
-    if tile_x < 0 || tile_x >= WORLD_WIDTH_TILES || tile_y < 0 || tile_y >= WORLD_HEIGHT_TILES {
+    if tile_y < 0 || tile_y >= WORLD_HEIGHT_TILES {
         return TileType::Air;
     }
+
+    // Wrap X for cylindrical world
+    let tile_x = crate::world::wrap_tile_x(tile_x);
 
     let surface_y = surface_height(seed, tile_x);
 
@@ -36,10 +47,13 @@ pub fn generate_tile(seed: u32, tile_x: i32, tile_y: i32) -> TileType {
         return TileType::Dirt;
     }
 
-    // Below dirt layer: stone with caves
+    // Below dirt layer: stone with caves (cylindrical 3D noise)
     let cave_perlin = Perlin::new(seed.wrapping_add(1));
+    let angle = tile_x as f64 / WORLD_WIDTH_TILES as f64 * 2.0 * std::f64::consts::PI;
+    let radius = WORLD_WIDTH_TILES as f64 * CAVE_FREQUENCY / (2.0 * std::f64::consts::PI);
     let cave_val = cave_perlin.get([
-        tile_x as f64 * CAVE_FREQUENCY,
+        radius * angle.cos(),
+        radius * angle.sin(),
         tile_y as f64 * CAVE_FREQUENCY,
     ]);
     if cave_val.abs() < CAVE_THRESHOLD {
@@ -121,11 +135,37 @@ mod tests {
     }
 
     #[test]
-    fn out_of_bounds_is_air() {
-        assert_eq!(generate_tile(TEST_SEED, -1, 500), TileType::Air);
+    fn out_of_bounds_y_is_air() {
+        assert_eq!(generate_tile(TEST_SEED, 500, -1), TileType::Air);
         assert_eq!(
-            generate_tile(TEST_SEED, WORLD_WIDTH_TILES, 500),
+            generate_tile(TEST_SEED, 500, WORLD_HEIGHT_TILES),
             TileType::Air
         );
+    }
+
+    #[test]
+    fn x_wraps_around() {
+        // tile_x = -1 should equal tile_x = WORLD_WIDTH_TILES - 1
+        let t1 = generate_tile(TEST_SEED, -1, 500);
+        let t2 = generate_tile(TEST_SEED, WORLD_WIDTH_TILES - 1, 500);
+        assert_eq!(t1, t2);
+
+        // tile_x = WORLD_WIDTH_TILES should equal tile_x = 0
+        let t3 = generate_tile(TEST_SEED, WORLD_WIDTH_TILES, 500);
+        let t4 = generate_tile(TEST_SEED, 0, 500);
+        assert_eq!(t3, t4);
+    }
+
+    #[test]
+    fn surface_height_wraps_seamlessly() {
+        // Surface at x=0 should equal surface at x=WORLD_WIDTH_TILES (wrapped)
+        let h0 = surface_height(TEST_SEED, 0);
+        let h_wrap = surface_height(TEST_SEED, WORLD_WIDTH_TILES);
+        assert_eq!(h0, h_wrap);
+
+        // Also check negative
+        let h_neg = surface_height(TEST_SEED, -1);
+        let h_pos = surface_height(TEST_SEED, WORLD_WIDTH_TILES - 1);
+        assert_eq!(h_neg, h_pos);
     }
 }
