@@ -1,7 +1,7 @@
 (
-  speed: 200.0,
-  jump_velocity: 400.0,
-  gravity: 800.0,
+  speed: 450.0,
+  jump_velocity: 1400.0,
+  gravity: 1800.0,
   width: 64.0,
   height: 128.0,
 )
