@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
 use crate::player::Player;
-use crate::world::{TILE_SIZE, WORLD_HEIGHT_TILES, WORLD_WIDTH_TILES};
+use crate::world::{TILE_SIZE, WORLD_HEIGHT_TILES};
 
 pub fn camera_follow_player(
     player_query: Query<&Transform, (With<Player>, Without<Camera2d>)>,
@@ -23,14 +23,13 @@ pub fn camera_follow_player(
         Projection::Orthographic(ortho) => ortho.scale,
         _ => 1.0,
     };
-    let half_w = window.width() / 2.0 * proj_scale;
     let half_h = window.height() / 2.0 * proj_scale;
-    let world_w = WORLD_WIDTH_TILES as f32 * TILE_SIZE;
     let world_h = WORLD_HEIGHT_TILES as f32 * TILE_SIZE;
 
     let mut target = player_transform.translation;
 
-    target.x = target.x.clamp(half_w, (world_w - half_w).max(half_w));
+    // X follows player freely (world wraps horizontally)
+    // Y is still clamped to world bounds
     target.y = target.y.clamp(half_h, (world_h - half_h).max(half_h));
 
     camera_transform.translation.x = target.x;
