@@ -136,14 +136,16 @@ pub fn spawn_chunk(
     world_map: &mut WorldMap,
     loaded_chunks: &mut LoadedChunks,
     texture_handle: &Handle<Image>,
-    chunk_x: i32,
+    display_chunk_x: i32,
     chunk_y: i32,
 ) {
-    if loaded_chunks.map.contains_key(&(chunk_x, chunk_y)) {
-        return; // already loaded
+    if loaded_chunks.map.contains_key(&(display_chunk_x, chunk_y)) {
+        return; // already loaded at this display position
     }
 
-    let chunk_data = world_map.get_or_generate_chunk(chunk_x, chunk_y);
+    // Wrap X for data access
+    let data_chunk_x = crate::world::wrap_chunk_x(display_chunk_x);
+    let chunk_data = world_map.get_or_generate_chunk(data_chunk_x, chunk_y);
     let tilemap_size = TilemapSize::new(CHUNK_SIZE, CHUNK_SIZE);
     let mut tile_storage = TileStorage::empty(tilemap_size);
     let tile_size = TilemapTileSize::new(TILE_SIZE, TILE_SIZE);
@@ -173,6 +175,13 @@ pub fn spawn_chunk(
         }
     });
 
+    // Display position uses display_chunk_x (may be outside [0, WORLD_WIDTH_CHUNKS))
+    let display_position = Vec3::new(
+        display_chunk_x as f32 * CHUNK_SIZE as f32 * TILE_SIZE,
+        chunk_y as f32 * CHUNK_SIZE as f32 * TILE_SIZE,
+        0.0,
+    );
+
     let grid_size: TilemapGridSize = tile_size.into();
     commands.entity(tilemap_entity).insert((
         TilemapBundle {
@@ -182,7 +191,7 @@ pub fn spawn_chunk(
             storage: tile_storage,
             texture: TilemapTexture::Single(texture_handle.clone()),
             tile_size,
-            transform: Transform::from_translation(chunk_world_position(chunk_x, chunk_y)),
+            transform: Transform::from_translation(display_position),
             render_settings: TilemapRenderSettings {
                 render_chunk_size: UVec2::new(CHUNK_SIZE, CHUNK_SIZE),
                 y_sort: false,
@@ -191,12 +200,14 @@ pub fn spawn_chunk(
             ..Default::default()
         },
         ChunkCoord {
-            x: chunk_x,
+            x: display_chunk_x,
             y: chunk_y,
         },
     ));
 
-    loaded_chunks.map.insert((chunk_x, chunk_y), tilemap_entity);
+    loaded_chunks
+        .map
+        .insert((display_chunk_x, chunk_y), tilemap_entity);
 }
 
 pub fn despawn_chunk(
@@ -226,30 +237,27 @@ pub fn chunk_loading_system(
     let (cam_tile_x, cam_tile_y) = world_to_tile(camera_pos.x, camera_pos.y);
     let (cam_chunk_x, cam_chunk_y) = tile_to_chunk(cam_tile_x, cam_tile_y);
 
-    // Determine which chunks should be loaded
+    // Determine which chunks should be loaded (display coords, may be outside [0, WORLD_WIDTH_CHUNKS))
     let mut desired: HashSet<(i32, i32)> = HashSet::new();
     let load_radius = crate::world::CHUNK_LOAD_RADIUS;
-    for cx in (cam_chunk_x - load_radius)..=(cam_chunk_x + load_radius) {
+    for display_cx in (cam_chunk_x - load_radius)..=(cam_chunk_x + load_radius) {
         for cy in (cam_chunk_y - load_radius)..=(cam_chunk_y + load_radius) {
-            if cx >= 0
-                && cx < crate::world::WORLD_WIDTH_CHUNKS
-                && cy >= 0
-                && cy < crate::world::WORLD_HEIGHT_CHUNKS
-            {
-                desired.insert((cx, cy));
+            // Y is still bounded, X wraps (handled in spawn_chunk)
+            if cy >= 0 && cy < crate::world::WORLD_HEIGHT_CHUNKS {
+                desired.insert((display_cx, cy));
             }
         }
     }
 
     // Spawn missing chunks
-    for &(cx, cy) in &desired {
-        if !loaded_chunks.map.contains_key(&(cx, cy)) {
+    for &(display_cx, cy) in &desired {
+        if !loaded_chunks.map.contains_key(&(display_cx, cy)) {
             spawn_chunk(
                 &mut commands,
                 &mut world_map,
                 &mut loaded_chunks,
                 &texture_handle.0,
-                cx,
+                display_cx,
                 cy,
             );
         }
