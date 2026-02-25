@@ -1,6 +1,7 @@
 mod camera;
 mod interaction;
 mod player;
+mod ui;
 mod world;
 
 use bevy::prelude::*;
@@ -25,6 +26,7 @@ fn main() {
         .add_plugins(player::PlayerPlugin)
         .add_plugins(camera::CameraPlugin)
         .add_plugins(interaction::InteractionPlugin)
+        .add_plugins(ui::UiPlugin)
         .add_systems(Startup, setup)
         .run();
 }
