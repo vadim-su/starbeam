@@ -1,3 +1,4 @@
+pub mod chunk;
 pub mod terrain_gen;
 pub mod tile;
 
