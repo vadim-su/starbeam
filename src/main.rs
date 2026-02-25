@@ -23,6 +23,7 @@ fn main() {
                 }),
         )
         .add_plugins(TilemapPlugin)
+        .add_plugins(registry::RegistryPlugin)
         .add_plugins(world::WorldPlugin)
         .add_plugins(player::PlayerPlugin)
         .add_plugins(camera::CameraPlugin)
