@@ -1,6 +1,8 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use bevy::prelude::*;
+use bevy_ecs_tilemap::prelude::*;
 
 use crate::world::terrain_gen;
 use crate::world::tile::TileType;
@@ -124,6 +126,141 @@ pub fn chunk_world_position(chunk_x: i32, chunk_y: i32) -> Vec3 {
         chunk_y as f32 * CHUNK_SIZE as f32 * TILE_SIZE,
         0.0,
     )
+}
+
+pub fn spawn_chunk(
+    commands: &mut Commands,
+    world_map: &mut WorldMap,
+    loaded_chunks: &mut LoadedChunks,
+    texture_handle: &Handle<Image>,
+    chunk_x: i32,
+    chunk_y: i32,
+) {
+    if loaded_chunks.map.contains_key(&(chunk_x, chunk_y)) {
+        return; // already loaded
+    }
+
+    let chunk_data = world_map.get_or_generate_chunk(chunk_x, chunk_y);
+    let tilemap_size = TilemapSize::new(CHUNK_SIZE, CHUNK_SIZE);
+    let mut tile_storage = TileStorage::empty(tilemap_size);
+    let tile_size = TilemapTileSize::new(TILE_SIZE, TILE_SIZE);
+
+    let tilemap_entity = commands.spawn_empty().id();
+    let tilemap_id = TilemapId(tilemap_entity);
+
+    // Spawn tile entities as children (skip Air tiles — sparse storage)
+    commands.entity(tilemap_entity).with_children(|parent| {
+        for local_y in 0..CHUNK_SIZE {
+            for local_x in 0..CHUNK_SIZE {
+                let tile_type = chunk_data.get(local_x, local_y);
+                if let Some(color) = tile_type.color() {
+                    let tile_pos = TilePos::new(local_x, local_y);
+                    let tile_entity = parent
+                        .spawn(TileBundle {
+                            position: tile_pos,
+                            tilemap_id,
+                            texture_index: TileTextureIndex(0),
+                            color: TileColor(color),
+                            ..Default::default()
+                        })
+                        .id();
+                    tile_storage.set(&tile_pos, tile_entity);
+                }
+            }
+        }
+    });
+
+    let grid_size: TilemapGridSize = tile_size.into();
+    commands.entity(tilemap_entity).insert((
+        TilemapBundle {
+            grid_size,
+            map_type: TilemapType::Square,
+            size: tilemap_size,
+            storage: tile_storage,
+            texture: TilemapTexture::Single(texture_handle.clone()),
+            tile_size,
+            transform: Transform::from_translation(chunk_world_position(chunk_x, chunk_y)),
+            render_settings: TilemapRenderSettings {
+                render_chunk_size: UVec2::new(CHUNK_SIZE, CHUNK_SIZE),
+                y_sort: false,
+            },
+            ..Default::default()
+        },
+        ChunkCoord {
+            x: chunk_x,
+            y: chunk_y,
+        },
+    ));
+
+    loaded_chunks.map.insert((chunk_x, chunk_y), tilemap_entity);
+}
+
+pub fn despawn_chunk(
+    commands: &mut Commands,
+    loaded_chunks: &mut LoadedChunks,
+    chunk_x: i32,
+    chunk_y: i32,
+) {
+    if let Some(entity) = loaded_chunks.map.remove(&(chunk_x, chunk_y)) {
+        commands.entity(entity).despawn();
+    }
+}
+
+pub fn chunk_loading_system(
+    mut commands: Commands,
+    camera_query: Query<&Transform, With<Camera2d>>,
+    mut world_map: ResMut<WorldMap>,
+    mut loaded_chunks: ResMut<LoadedChunks>,
+    texture_handle: Res<TilemapTextureHandle>,
+) {
+    let Ok(camera_transform) = camera_query.single() else {
+        return;
+    };
+    let camera_pos = camera_transform.translation.truncate();
+
+    // Which chunk is the camera in?
+    let (cam_tile_x, cam_tile_y) = world_to_tile(camera_pos.x, camera_pos.y);
+    let (cam_chunk_x, cam_chunk_y) = tile_to_chunk(cam_tile_x, cam_tile_y);
+
+    // Determine which chunks should be loaded
+    let mut desired: HashSet<(i32, i32)> = HashSet::new();
+    let load_radius = crate::world::CHUNK_LOAD_RADIUS;
+    for cx in (cam_chunk_x - load_radius)..=(cam_chunk_x + load_radius) {
+        for cy in (cam_chunk_y - load_radius)..=(cam_chunk_y + load_radius) {
+            if cx >= 0
+                && cx < crate::world::WORLD_WIDTH_CHUNKS
+                && cy >= 0
+                && cy < crate::world::WORLD_HEIGHT_CHUNKS
+            {
+                desired.insert((cx, cy));
+            }
+        }
+    }
+
+    // Spawn missing chunks
+    for &(cx, cy) in &desired {
+        if !loaded_chunks.map.contains_key(&(cx, cy)) {
+            spawn_chunk(
+                &mut commands,
+                &mut world_map,
+                &mut loaded_chunks,
+                &texture_handle.0,
+                cx,
+                cy,
+            );
+        }
+    }
+
+    // Despawn chunks that are no longer needed
+    let to_remove: Vec<(i32, i32)> = loaded_chunks
+        .map
+        .keys()
+        .filter(|k| !desired.contains(k))
+        .copied()
+        .collect();
+    for (cx, cy) in to_remove {
+        despawn_chunk(&mut commands, &mut loaded_chunks, cx, cy);
+    }
 }
 
 #[cfg(test)]

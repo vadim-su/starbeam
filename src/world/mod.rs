@@ -2,7 +2,11 @@ pub mod chunk;
 pub mod terrain_gen;
 pub mod tile;
 
+use bevy::image::Image;
 use bevy::prelude::*;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+
+use crate::world::chunk::{LoadedChunks, TilemapTextureHandle, WorldMap};
 
 // World dimensions in tiles
 pub const WORLD_WIDTH_TILES: i32 = 2048;
@@ -24,7 +28,26 @@ pub const CHUNK_LOAD_RADIUS: i32 = 3;
 pub struct WorldPlugin;
 
 impl Plugin for WorldPlugin {
-    fn build(&self, _app: &mut App) {
-        // Systems will be added in later tasks
+    fn build(&self, app: &mut App) {
+        app.init_resource::<WorldMap>()
+            .init_resource::<LoadedChunks>()
+            .add_systems(Startup, create_tilemap_texture)
+            .add_systems(Update, chunk::chunk_loading_system);
     }
+}
+
+fn create_tilemap_texture(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+    let image = Image::new_fill(
+        Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[255, 255, 255, 255],
+        TextureFormat::Rgba8UnormSrgb,
+        default(),
+    );
+    let handle = images.add(image);
+    commands.insert_resource(TilemapTextureHandle(handle));
 }
