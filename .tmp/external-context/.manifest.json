@@ -1,0 +1,59 @@
+{
+  "version": "1.0",
+  "last_updated": "2025-02-25T00:00:00Z",
+  "libraries": {
+    "bevy": {
+      "version": "0.18.0",
+      "files": [
+        {
+          "filename": "app-setup-plugins.md",
+          "topic": "App setup, plugins, DefaultPlugins, Plugin trait",
+          "fetched": "2025-02-25T00:00:00Z",
+          "source": "Context7 API + docs.rs"
+        },
+        {
+          "filename": "entity-spawning-bundles.md",
+          "topic": "Entity spawning, Commands, Bundles, Components",
+          "fetched": "2025-02-25T00:00:00Z",
+          "source": "Context7 API + docs.rs"
+        },
+        {
+          "filename": "system-ordering-scheduling.md",
+          "topic": "System ordering, scheduling, SystemSet, chain, before/after",
+          "fetched": "2025-02-25T00:00:00Z",
+          "source": "Context7 API + docs.rs"
+        },
+        {
+          "filename": "input-handling.md",
+          "topic": "Keyboard input, mouse buttons, cursor position, KeyCode",
+          "fetched": "2025-02-25T00:00:00Z",
+          "source": "Context7 API + docs.rs + bevy-cheatbook"
+        },
+        {
+          "filename": "camera2d-transforms.md",
+          "topic": "Camera2d, Transform, GlobalTransform, z-ordering",
+          "fetched": "2025-02-25T00:00:00Z",
+          "source": "Context7 API + docs.rs"
+        },
+        {
+          "filename": "sprite-rendering.md",
+          "topic": "Sprite, from_color, colored rectangles, Color API, Mesh2d",
+          "fetched": "2025-02-25T00:00:00Z",
+          "source": "Context7 API + docs.rs"
+        },
+        {
+          "filename": "resources-queries.md",
+          "topic": "Resource, Res, ResMut, Query, With, Without, Changed, system params",
+          "fetched": "2025-02-25T00:00:00Z",
+          "source": "Context7 API + docs.rs"
+        },
+        {
+          "filename": "window-time.md",
+          "topic": "Window, PrimaryWindow, Time, delta_secs, pause",
+          "fetched": "2025-02-25T00:00:00Z",
+          "source": "Context7 API + docs.rs"
+        }
+      ]
+    }
+  }
+}

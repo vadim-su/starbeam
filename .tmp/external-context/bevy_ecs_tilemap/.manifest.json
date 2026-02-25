@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "last_updated": "2026-02-25T12:00:00Z",
+  "libraries": {
+    "bevy_ecs_tilemap": {
+      "crate_version": "0.18.1",
+      "bevy_version": "0.18.x",
+      "files": [
+        {
+          "filename": "api-reference.md",
+          "topic": "Complete API reference - all structs, enums, bundles, components",
+          "tech_stack": "Bevy 0.18",
+          "fetched": "2026-02-25T12:00:00Z",
+          "source": "Context7 API + docs.rs source code"
+        },
+        {
+          "filename": "chunk-based-sandbox-patterns.md",
+          "topic": "Chunk-based sandbox patterns - dynamic spawn/despawn, tile modification, camera loading",
+          "tech_stack": "Bevy 0.18",
+          "fetched": "2026-02-25T12:00:00Z",
+          "source": "Context7 API + docs.rs source code"
+        }
+      ]
+    }
+  }
+}
