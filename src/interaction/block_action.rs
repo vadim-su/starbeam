@@ -7,7 +7,7 @@ use crate::world::chunk::{
     tile_to_chunk, tile_to_local, world_to_tile, ChunkCoord, LoadedChunks, WorldMap,
 };
 use crate::world::tile::TileType;
-use crate::world::TILE_SIZE;
+use crate::world::{TILE_SIZE, WORLD_WIDTH_TILES};
 
 const BLOCK_REACH: f32 = 5.0; // tiles
 
@@ -44,10 +44,11 @@ pub fn block_interaction_system(
 
     let (tile_x, tile_y) = world_to_tile(world_pos.x, world_pos.y);
 
-    // Range check
+    // Range check (wrap-aware on X axis)
     let player_tile_x = (player_tf.translation.x / TILE_SIZE).floor();
     let player_tile_y = (player_tf.translation.y / TILE_SIZE).floor();
-    let dx = (tile_x as f32 - player_tile_x).abs();
+    let raw_dx = (tile_x as f32 - player_tile_x).abs();
+    let dx = raw_dx.min(WORLD_WIDTH_TILES as f32 - raw_dx); // shortest distance on ring
     let dy = (tile_y as f32 - player_tile_y).abs();
     if dx > BLOCK_REACH || dy > BLOCK_REACH {
         return;
