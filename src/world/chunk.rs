@@ -57,26 +57,29 @@ impl WorldMap {
     }
 
     /// Get tile type at absolute tile coordinates.
+    /// X wraps horizontally. Y is bounded (below=Stone, above=Air).
     pub fn get_tile(&mut self, tile_x: i32, tile_y: i32) -> TileType {
-        if tile_x < 0 || tile_x >= WORLD_WIDTH_TILES || tile_y < 0 || tile_y >= WORLD_HEIGHT_TILES {
-            if tile_y >= WORLD_HEIGHT_TILES {
-                return TileType::Air; // sky
-            }
-            return TileType::Stone; // walls/floor
+        if tile_y < 0 {
+            return TileType::Stone; // bedrock
         }
-        let (cx, cy) = tile_to_chunk(tile_x, tile_y);
-        let (lx, ly) = tile_to_local(tile_x, tile_y);
+        if tile_y >= WORLD_HEIGHT_TILES {
+            return TileType::Air; // sky
+        }
+        let wrapped_x = crate::world::wrap_tile_x(tile_x);
+        let (cx, cy) = tile_to_chunk(wrapped_x, tile_y);
+        let (lx, ly) = tile_to_local(wrapped_x, tile_y);
         self.get_or_generate_chunk(cx, cy).get(lx, ly)
     }
 
     /// Set tile type at absolute tile coordinates.
+    /// X wraps horizontally. Y out of bounds is ignored.
     pub fn set_tile(&mut self, tile_x: i32, tile_y: i32, tile: TileType) {
-        if tile_x < 0 || tile_x >= WORLD_WIDTH_TILES || tile_y < 0 || tile_y >= WORLD_HEIGHT_TILES {
+        if tile_y < 0 || tile_y >= WORLD_HEIGHT_TILES {
             return;
         }
-        let (cx, cy) = tile_to_chunk(tile_x, tile_y);
-        let (lx, ly) = tile_to_local(tile_x, tile_y);
-        // Ensure chunk exists
+        let wrapped_x = crate::world::wrap_tile_x(tile_x);
+        let (cx, cy) = tile_to_chunk(wrapped_x, tile_y);
+        let (lx, ly) = tile_to_local(wrapped_x, tile_y);
         self.get_or_generate_chunk(cx, cy);
         self.chunks.get_mut(&(cx, cy)).unwrap().set(lx, ly, tile);
     }
@@ -322,12 +325,30 @@ mod tests {
     }
 
     #[test]
-    fn worldmap_out_of_bounds() {
+    fn worldmap_y_out_of_bounds() {
         let mut map = WorldMap::default();
         // Above world is Air
         assert_eq!(map.get_tile(0, WORLD_HEIGHT_TILES), TileType::Air);
-        // Below/sides are Stone
-        assert_eq!(map.get_tile(-1, 500), TileType::Stone);
+        // Below world is Stone
         assert_eq!(map.get_tile(0, -1), TileType::Stone);
+    }
+
+    #[test]
+    fn worldmap_x_wraps() {
+        let mut map = WorldMap::default();
+        let t1 = map.get_tile(-1, 500);
+        let t2 = map.get_tile(WORLD_WIDTH_TILES - 1, 500);
+        assert_eq!(t1, t2);
+
+        let t3 = map.get_tile(WORLD_WIDTH_TILES, 500);
+        let t4 = map.get_tile(0, 500);
+        assert_eq!(t3, t4);
+    }
+
+    #[test]
+    fn worldmap_set_tile_wraps() {
+        let mut map = WorldMap::default();
+        map.set_tile(-1, 500, TileType::Air);
+        assert_eq!(map.get_tile(WORLD_WIDTH_TILES - 1, 500), TileType::Air);
     }
 }
