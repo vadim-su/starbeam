@@ -43,7 +43,7 @@ impl Plugin for PlayerPlugin {
 }
 
 fn spawn_player(mut commands: Commands) {
-    let spawn_tile_x = world::WORLD_WIDTH_TILES / 2;
+    let spawn_tile_x = 0;
     let surface_y = terrain_gen::surface_height(42, spawn_tile_x);
     let spawn_pixel_x = spawn_tile_x as f32 * world::TILE_SIZE + world::TILE_SIZE / 2.0;
     let spawn_pixel_y = (surface_y + 5) as f32 * world::TILE_SIZE + PLAYER_HEIGHT / 2.0;

@@ -240,13 +240,29 @@ pub fn chunk_loading_system(
     // Determine which chunks should be loaded (display coords, may be outside [0, WORLD_WIDTH_CHUNKS))
     let mut desired: HashSet<(i32, i32)> = HashSet::new();
     let load_radius = crate::world::CHUNK_LOAD_RADIUS;
-    for display_cx in (cam_chunk_x - load_radius)..=(cam_chunk_x + load_radius) {
-        for cy in (cam_chunk_y - load_radius)..=(cam_chunk_y + load_radius) {
-            // Y is still bounded, X wraps (handled in spawn_chunk)
-            if cy >= 0 && cy < crate::world::WORLD_HEIGHT_CHUNKS {
-                desired.insert((display_cx, cy));
+    let world_chunks = crate::world::WORLD_WIDTH_CHUNKS;
+
+    // Helper: add all chunks in radius around a center chunk X
+    let mut add_chunks_around = |center_cx: i32| {
+        for display_cx in (center_cx - load_radius)..=(center_cx + load_radius) {
+            for cy in (cam_chunk_y - load_radius)..=(cam_chunk_y + load_radius) {
+                if cy >= 0 && cy < crate::world::WORLD_HEIGHT_CHUNKS {
+                    desired.insert((display_cx, cy));
+                }
             }
         }
+    };
+
+    // Load chunks around camera
+    add_chunks_around(cam_chunk_x);
+
+    // Pre-load chunks at the wrapped position when near horizontal edge.
+    // This prevents a black flash when the player teleports across the boundary,
+    // because the destination chunks are already loaded and rendered.
+    if cam_chunk_x < load_radius {
+        add_chunks_around(cam_chunk_x + world_chunks);
+    } else if cam_chunk_x >= world_chunks - load_radius {
+        add_chunks_around(cam_chunk_x - world_chunks);
     }
 
     // Spawn missing chunks
