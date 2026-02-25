@@ -1,3 +1,4 @@
+pub mod collision;
 pub mod movement;
 
 use bevy::prelude::*;
@@ -32,7 +33,7 @@ impl Plugin for PlayerPlugin {
             (
                 movement::player_input,
                 movement::apply_gravity,
-                movement::apply_velocity,
+                collision::collision_system,
             )
                 .chain(),
         );

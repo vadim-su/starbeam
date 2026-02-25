@@ -26,14 +26,3 @@ pub fn apply_gravity(time: Res<Time>, mut query: Query<&mut Velocity, With<Playe
         vel.y -= GRAVITY * dt;
     }
 }
-
-pub fn apply_velocity(
-    time: Res<Time>,
-    mut query: Query<(&Velocity, &mut Transform), With<Player>>,
-) {
-    let dt = time.delta_secs();
-    for (vel, mut transform) in &mut query {
-        transform.translation.x += vel.x * dt;
-        transform.translation.y += vel.y * dt;
-    }
-}
