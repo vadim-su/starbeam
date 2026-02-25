@@ -158,14 +158,13 @@ pub fn spawn_chunk(
         for local_y in 0..CHUNK_SIZE {
             for local_x in 0..CHUNK_SIZE {
                 let tile_type = chunk_data.get(local_x, local_y);
-                if let Some(color) = tile_type.color() {
+                if let Some(tex_idx) = tile_type.texture_index() {
                     let tile_pos = TilePos::new(local_x, local_y);
                     let tile_entity = parent
                         .spawn(TileBundle {
                             position: tile_pos,
                             tilemap_id,
-                            texture_index: TileTextureIndex(0),
-                            color: TileColor(color),
+                            texture_index: TileTextureIndex(tex_idx),
                             ..Default::default()
                         })
                         .id();

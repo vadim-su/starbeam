@@ -109,13 +109,12 @@ pub fn block_interaction_system(
         for (coord, mut storage, entity) in &mut tilemap_query {
             if wrap_chunk_x(coord.x) == data_chunk_x && coord.y == data_chunk_y {
                 let tilemap_id = TilemapId(entity);
-                let color = place_type.color().unwrap();
+                let tex_idx = place_type.texture_index().unwrap();
                 let tile_entity = commands
                     .spawn(TileBundle {
                         position: tile_pos,
                         tilemap_id,
-                        texture_index: TileTextureIndex(0),
-                        color: TileColor(color),
+                        texture_index: TileTextureIndex(tex_idx),
                         ..Default::default()
                     })
                     .id();

@@ -1,5 +1,3 @@
-use bevy::prelude::*;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TileType {
     #[default]
@@ -10,12 +8,13 @@ pub enum TileType {
 }
 
 impl TileType {
-    pub fn color(self) -> Option<Color> {
+    /// Atlas texture index for this tile type, or `None` for Air.
+    pub fn texture_index(self) -> Option<u32> {
         match self {
             TileType::Air => None,
-            TileType::Grass => Some(Color::srgb(0.2, 0.7, 0.2)),
-            TileType::Dirt => Some(Color::srgb(0.55, 0.35, 0.15)),
-            TileType::Stone => Some(Color::srgb(0.5, 0.5, 0.5)),
+            TileType::Grass => Some(0),
+            TileType::Dirt => Some(1),
+            TileType::Stone => Some(2),
         }
     }
 
@@ -29,15 +28,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn air_has_no_color() {
-        assert!(TileType::Air.color().is_none());
+    fn air_has_no_texture_index() {
+        assert!(TileType::Air.texture_index().is_none());
     }
 
     #[test]
-    fn solid_tiles_have_colors() {
-        assert!(TileType::Grass.color().is_some());
-        assert!(TileType::Dirt.color().is_some());
-        assert!(TileType::Stone.color().is_some());
+    fn solid_tiles_have_texture_indices() {
+        assert_eq!(TileType::Grass.texture_index(), Some(0));
+        assert_eq!(TileType::Dirt.texture_index(), Some(1));
+        assert_eq!(TileType::Stone.texture_index(), Some(2));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::player::{Grounded, Player, Velocity, PLAYER_HEIGHT, PLAYER_WIDTH};
+use crate::player::{Grounded, Player, Velocity, MAX_DELTA_SECS, PLAYER_HEIGHT, PLAYER_WIDTH};
 use crate::world::chunk::WorldMap;
 use crate::world::TILE_SIZE;
 
@@ -54,7 +54,7 @@ pub fn collision_system(
     mut world_map: ResMut<WorldMap>,
     mut query: Query<(&mut Transform, &mut Velocity, &mut Grounded), With<Player>>,
 ) {
-    let dt = time.delta_secs();
+    let dt = time.delta_secs().min(MAX_DELTA_SECS);
 
     for (mut transform, mut vel, mut grounded) in &mut query {
         let pos = &mut transform.translation;

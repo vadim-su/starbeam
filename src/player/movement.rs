@@ -1,6 +1,8 @@
 use bevy::prelude::*;
 
-use crate::player::{Grounded, Player, Velocity, GRAVITY, JUMP_VELOCITY, PLAYER_SPEED};
+use crate::player::{
+    Grounded, Player, Velocity, GRAVITY, JUMP_VELOCITY, MAX_DELTA_SECS, PLAYER_SPEED,
+};
 
 pub fn player_input(
     keys: Res<ButtonInput<KeyCode>>,
@@ -21,7 +23,7 @@ pub fn player_input(
 }
 
 pub fn apply_gravity(time: Res<Time>, mut query: Query<&mut Velocity, With<Player>>) {
-    let dt = time.delta_secs();
+    let dt = time.delta_secs().min(MAX_DELTA_SECS);
     for mut vel in &mut query {
         vel.y -= GRAVITY * dt;
     }
