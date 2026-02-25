@@ -1,3 +1,5 @@
+mod camera;
+mod player;
 mod world;
 
 use bevy::prelude::*;
@@ -19,6 +21,8 @@ fn main() {
         )
         .add_plugins(TilemapPlugin)
         .add_plugins(world::WorldPlugin)
+        .add_plugins(player::PlayerPlugin)
+        .add_plugins(camera::CameraPlugin)
         .add_systems(Startup, setup)
         .run();
 }
