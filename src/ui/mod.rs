@@ -1,4 +1,3 @@
-pub mod debug_hud;
 pub mod debug_panel;
 
 use bevy::prelude::*;
@@ -11,11 +10,9 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<debug_panel::DebugUiState>()
-            .add_systems(OnEnter(AppState::InGame), debug_hud::spawn_debug_hud)
             .add_systems(
                 Update,
-                (debug_hud::update_debug_hud, debug_panel::toggle_debug_panel)
-                    .run_if(in_state(AppState::InGame)),
+                debug_panel::toggle_debug_panel.run_if(in_state(AppState::InGame)),
             )
             .add_systems(
                 EguiPrimaryContextPass,
