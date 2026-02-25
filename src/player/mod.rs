@@ -1,5 +1,6 @@
 pub mod collision;
 pub mod movement;
+pub mod wrap;
 
 use bevy::prelude::*;
 
@@ -34,6 +35,7 @@ impl Plugin for PlayerPlugin {
                 movement::player_input,
                 movement::apply_gravity,
                 collision::collision_system,
+                wrap::player_wrap_system,
             )
                 .chain(),
         );
