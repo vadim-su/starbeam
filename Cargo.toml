@@ -7,3 +7,6 @@ edition = "2024"
 bevy = "0.18.0"
 bevy_ecs_tilemap = "0.18"
 noise = "0.9"
+serde = { version = "1", features = ["derive"] }
+ron = "0.10"
+thiserror = "2"

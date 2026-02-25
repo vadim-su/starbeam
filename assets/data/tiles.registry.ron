@@ -1,0 +1,8 @@
+(
+  tiles: [
+    ( id: "air",   texture_index: None,    solid: false, hardness: 0.0, friction: 0.0, viscosity: 0.0 ),
+    ( id: "grass", texture_index: Some(0), solid: true,  hardness: 1.0, friction: 0.8, viscosity: 0.0 ),
+    ( id: "dirt",  texture_index: Some(1), solid: true,  hardness: 2.0, friction: 0.7, viscosity: 0.0 ),
+    ( id: "stone", texture_index: Some(2), solid: true,  hardness: 5.0, friction: 0.6, viscosity: 0.0 ),
+  ]
+)
