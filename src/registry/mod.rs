@@ -72,7 +72,14 @@ fn check_loading(
     };
 
     // Build resources from loaded assets
-    commands.insert_resource(TileRegistry::from_defs(tiles.tiles.clone()));
+    let registry_ref = TileRegistry::from_defs(tiles.tiles.clone());
+    commands.insert_resource(tile::TerrainTiles {
+        air: registry_ref.by_name("air"),
+        grass: registry_ref.by_name("grass"),
+        dirt: registry_ref.by_name("dirt"),
+        stone: registry_ref.by_name("stone"),
+    });
+    commands.insert_resource(registry_ref);
     commands.insert_resource(PlayerConfig {
         speed: player.speed,
         jump_velocity: player.jump_velocity,

@@ -4,14 +4,12 @@ pub mod wrap;
 
 use bevy::prelude::*;
 
-use crate::world;
+use crate::registry::player::PlayerConfig;
+use crate::registry::tile::TerrainTiles;
+use crate::registry::world::WorldConfig;
+use crate::registry::AppState;
 use crate::world::terrain_gen;
 
-pub const PLAYER_SPEED: f32 = 200.0;
-pub const JUMP_VELOCITY: f32 = 400.0;
-pub const GRAVITY: f32 = 800.0;
-pub const PLAYER_WIDTH: f32 = 64.0;
-pub const PLAYER_HEIGHT: f32 = 128.0;
 pub const MAX_DELTA_SECS: f32 = 1.0 / 20.0;
 
 #[derive(Component)]
@@ -30,24 +28,32 @@ pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_player).add_systems(
-            Update,
-            (
-                movement::player_input,
-                movement::apply_gravity,
-                collision::collision_system,
-                wrap::player_wrap_system,
-            )
-                .chain(),
-        );
+        app.add_systems(OnEnter(AppState::InGame), spawn_player)
+            .add_systems(
+                Update,
+                (
+                    movement::player_input,
+                    movement::apply_gravity,
+                    collision::collision_system,
+                    wrap::player_wrap_system,
+                )
+                    .chain()
+                    .run_if(in_state(AppState::InGame)),
+            );
     }
 }
 
-fn spawn_player(mut commands: Commands) {
+fn spawn_player(
+    mut commands: Commands,
+    player_config: Res<PlayerConfig>,
+    world_config: Res<WorldConfig>,
+    _terrain_tiles: Res<TerrainTiles>,
+) {
     let spawn_tile_x = 0;
-    let surface_y = terrain_gen::surface_height(42, spawn_tile_x);
-    let spawn_pixel_x = spawn_tile_x as f32 * world::TILE_SIZE + world::TILE_SIZE / 2.0;
-    let spawn_pixel_y = (surface_y + 5) as f32 * world::TILE_SIZE + PLAYER_HEIGHT / 2.0;
+    let surface_y = terrain_gen::surface_height(world_config.seed, spawn_tile_x, &world_config);
+    let spawn_pixel_x = spawn_tile_x as f32 * world_config.tile_size + world_config.tile_size / 2.0;
+    let spawn_pixel_y =
+        (surface_y + 5) as f32 * world_config.tile_size + player_config.height / 2.0;
 
     commands.spawn((
         Player,
@@ -55,7 +61,7 @@ fn spawn_player(mut commands: Commands) {
         Grounded(false),
         Sprite::from_color(
             Color::srgb(0.2, 0.4, 0.9),
-            Vec2::new(PLAYER_WIDTH, PLAYER_HEIGHT),
+            Vec2::new(player_config.width, player_config.height),
         ),
         Transform::from_xyz(spawn_pixel_x, spawn_pixel_y, 1.0),
     ));

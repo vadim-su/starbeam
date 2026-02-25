@@ -4,9 +4,9 @@ use std::collections::HashSet;
 use bevy::prelude::*;
 use bevy_ecs_tilemap::prelude::*;
 
+use crate::registry::tile::{TerrainTiles, TileId, TileRegistry};
+use crate::registry::world::WorldConfig;
 use crate::world::terrain_gen;
-use crate::world::tile::TileType;
-use crate::world::{CHUNK_SIZE, TILE_SIZE, WORLD_HEIGHT_TILES, WORLD_WIDTH_TILES};
 
 /// Marker component on tilemap entities to identify which chunk they represent.
 #[derive(Component)]
@@ -15,78 +15,92 @@ pub struct ChunkCoord {
     pub y: i32,
 }
 
-/// Tile data for a single chunk. Row-major: index = local_y * CHUNK_SIZE + local_x.
+/// Tile data for a single chunk. Row-major: index = local_y * chunk_size + local_x.
 pub struct ChunkData {
-    pub tiles: Vec<TileType>,
+    pub tiles: Vec<TileId>,
 }
 
 impl ChunkData {
-    pub fn get(&self, local_x: u32, local_y: u32) -> TileType {
-        self.tiles[(local_y * CHUNK_SIZE + local_x) as usize]
+    pub fn get(&self, local_x: u32, local_y: u32, chunk_size: u32) -> TileId {
+        self.tiles[(local_y * chunk_size + local_x) as usize]
     }
 
-    pub fn set(&mut self, local_x: u32, local_y: u32, tile: TileType) {
-        self.tiles[(local_y * CHUNK_SIZE + local_x) as usize] = tile;
+    pub fn set(&mut self, local_x: u32, local_y: u32, tile: TileId, chunk_size: u32) {
+        self.tiles[(local_y * chunk_size + local_x) as usize] = tile;
     }
 }
 
 /// Authoritative world tile data. Chunks are lazily generated and cached.
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct WorldMap {
-    pub seed: u32,
     pub chunks: HashMap<(i32, i32), ChunkData>,
 }
 
-impl Default for WorldMap {
-    fn default() -> Self {
-        Self {
-            seed: 42,
-            chunks: HashMap::new(),
-        }
-    }
-}
-
 impl WorldMap {
-    /// Get or generate chunk data at the given chunk coordinates.
-    pub fn get_or_generate_chunk(&mut self, chunk_x: i32, chunk_y: i32) -> &ChunkData {
+    pub fn get_or_generate_chunk(
+        &mut self,
+        chunk_x: i32,
+        chunk_y: i32,
+        wc: &WorldConfig,
+        tt: &TerrainTiles,
+    ) -> &ChunkData {
         self.chunks
             .entry((chunk_x, chunk_y))
             .or_insert_with(|| ChunkData {
-                tiles: terrain_gen::generate_chunk_tiles(self.seed, chunk_x, chunk_y),
+                tiles: terrain_gen::generate_chunk_tiles(wc.seed, chunk_x, chunk_y, wc, tt),
             })
     }
 
-    /// Get tile type at absolute tile coordinates.
-    /// X wraps horizontally. Y is bounded (below=Stone, above=Air).
-    pub fn get_tile(&mut self, tile_x: i32, tile_y: i32) -> TileType {
+    pub fn get_tile(
+        &mut self,
+        tile_x: i32,
+        tile_y: i32,
+        wc: &WorldConfig,
+        tt: &TerrainTiles,
+    ) -> TileId {
         if tile_y < 0 {
-            return TileType::Stone; // bedrock
+            return tt.stone; // bedrock
         }
-        if tile_y >= WORLD_HEIGHT_TILES {
-            return TileType::Air; // sky
+        if tile_y >= wc.height_tiles {
+            return tt.air; // sky
         }
-        let wrapped_x = crate::world::wrap_tile_x(tile_x);
-        let (cx, cy) = tile_to_chunk(wrapped_x, tile_y);
-        let (lx, ly) = tile_to_local(wrapped_x, tile_y);
-        self.get_or_generate_chunk(cx, cy).get(lx, ly)
+        let wrapped_x = wc.wrap_tile_x(tile_x);
+        let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, wc.chunk_size);
+        let (lx, ly) = tile_to_local(wrapped_x, tile_y, wc.chunk_size);
+        self.get_or_generate_chunk(cx, cy, wc, tt)
+            .get(lx, ly, wc.chunk_size)
     }
 
-    /// Set tile type at absolute tile coordinates.
-    /// X wraps horizontally. Y out of bounds is ignored.
-    pub fn set_tile(&mut self, tile_x: i32, tile_y: i32, tile: TileType) {
-        if tile_y < 0 || tile_y >= WORLD_HEIGHT_TILES {
+    pub fn set_tile(
+        &mut self,
+        tile_x: i32,
+        tile_y: i32,
+        tile: TileId,
+        wc: &WorldConfig,
+        tt: &TerrainTiles,
+    ) {
+        if tile_y < 0 || tile_y >= wc.height_tiles {
             return;
         }
-        let wrapped_x = crate::world::wrap_tile_x(tile_x);
-        let (cx, cy) = tile_to_chunk(wrapped_x, tile_y);
-        let (lx, ly) = tile_to_local(wrapped_x, tile_y);
-        self.get_or_generate_chunk(cx, cy);
-        self.chunks.get_mut(&(cx, cy)).unwrap().set(lx, ly, tile);
+        let wrapped_x = wc.wrap_tile_x(tile_x);
+        let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, wc.chunk_size);
+        let (lx, ly) = tile_to_local(wrapped_x, tile_y, wc.chunk_size);
+        self.get_or_generate_chunk(cx, cy, wc, tt);
+        self.chunks
+            .get_mut(&(cx, cy))
+            .unwrap()
+            .set(lx, ly, tile, wc.chunk_size);
     }
 
-    /// Check if a tile is solid at absolute tile coordinates.
-    pub fn is_solid(&mut self, tile_x: i32, tile_y: i32) -> bool {
-        self.get_tile(tile_x, tile_y).is_solid()
+    pub fn is_solid(
+        &mut self,
+        tile_x: i32,
+        tile_y: i32,
+        wc: &WorldConfig,
+        tt: &TerrainTiles,
+        registry: &TileRegistry,
+    ) -> bool {
+        registry.is_solid(self.get_tile(tile_x, tile_y, wc, tt))
     }
 }
 
@@ -96,38 +110,30 @@ pub struct LoadedChunks {
     pub map: HashMap<(i32, i32), Entity>,
 }
 
-/// Handle to the 1x1 white pixel texture used for color-only tiles.
+/// Handle to the tile atlas texture.
 #[derive(Resource)]
 pub struct TilemapTextureHandle(pub Handle<Image>);
 
 // --- Coordinate conversion helpers ---
 
-pub fn tile_to_chunk(tile_x: i32, tile_y: i32) -> (i32, i32) {
+pub fn tile_to_chunk(tile_x: i32, tile_y: i32, chunk_size: u32) -> (i32, i32) {
     (
-        tile_x.div_euclid(CHUNK_SIZE as i32),
-        tile_y.div_euclid(CHUNK_SIZE as i32),
+        tile_x.div_euclid(chunk_size as i32),
+        tile_y.div_euclid(chunk_size as i32),
     )
 }
 
-pub fn tile_to_local(tile_x: i32, tile_y: i32) -> (u32, u32) {
+pub fn tile_to_local(tile_x: i32, tile_y: i32, chunk_size: u32) -> (u32, u32) {
     (
-        tile_x.rem_euclid(CHUNK_SIZE as i32) as u32,
-        tile_y.rem_euclid(CHUNK_SIZE as i32) as u32,
+        tile_x.rem_euclid(chunk_size as i32) as u32,
+        tile_y.rem_euclid(chunk_size as i32) as u32,
     )
 }
 
-pub fn world_to_tile(world_x: f32, world_y: f32) -> (i32, i32) {
+pub fn world_to_tile(world_x: f32, world_y: f32, tile_size: f32) -> (i32, i32) {
     (
-        (world_x / TILE_SIZE).floor() as i32,
-        (world_y / TILE_SIZE).floor() as i32,
-    )
-}
-
-pub fn chunk_world_position(chunk_x: i32, chunk_y: i32) -> Vec3 {
-    Vec3::new(
-        chunk_x as f32 * CHUNK_SIZE as f32 * TILE_SIZE,
-        chunk_y as f32 * CHUNK_SIZE as f32 * TILE_SIZE,
-        0.0,
+        (world_x / tile_size).floor() as i32,
+        (world_y / tile_size).floor() as i32,
     )
 }
 
@@ -136,29 +142,30 @@ pub fn spawn_chunk(
     world_map: &mut WorldMap,
     loaded_chunks: &mut LoadedChunks,
     texture_handle: &Handle<Image>,
+    registry: &TileRegistry,
+    wc: &WorldConfig,
+    tt: &TerrainTiles,
     display_chunk_x: i32,
     chunk_y: i32,
 ) {
     if loaded_chunks.map.contains_key(&(display_chunk_x, chunk_y)) {
-        return; // already loaded at this display position
+        return;
     }
 
-    // Wrap X for data access
-    let data_chunk_x = crate::world::wrap_chunk_x(display_chunk_x);
-    let chunk_data = world_map.get_or_generate_chunk(data_chunk_x, chunk_y);
-    let tilemap_size = TilemapSize::new(CHUNK_SIZE, CHUNK_SIZE);
+    let data_chunk_x = wc.wrap_chunk_x(display_chunk_x);
+    let chunk_data = world_map.get_or_generate_chunk(data_chunk_x, chunk_y, wc, tt);
+    let tilemap_size = TilemapSize::new(wc.chunk_size, wc.chunk_size);
     let mut tile_storage = TileStorage::empty(tilemap_size);
-    let tile_size = TilemapTileSize::new(TILE_SIZE, TILE_SIZE);
+    let tile_size = TilemapTileSize::new(wc.tile_size, wc.tile_size);
 
     let tilemap_entity = commands.spawn_empty().id();
     let tilemap_id = TilemapId(tilemap_entity);
 
-    // Spawn tile entities as children (skip Air tiles — sparse storage)
     commands.entity(tilemap_entity).with_children(|parent| {
-        for local_y in 0..CHUNK_SIZE {
-            for local_x in 0..CHUNK_SIZE {
-                let tile_type = chunk_data.get(local_x, local_y);
-                if let Some(tex_idx) = tile_type.texture_index() {
+        for local_y in 0..wc.chunk_size {
+            for local_x in 0..wc.chunk_size {
+                let tile_id = chunk_data.get(local_x, local_y, wc.chunk_size);
+                if let Some(tex_idx) = registry.texture_index(tile_id) {
                     let tile_pos = TilePos::new(local_x, local_y);
                     let tile_entity = parent
                         .spawn(TileBundle {
@@ -174,10 +181,9 @@ pub fn spawn_chunk(
         }
     });
 
-    // Display position uses display_chunk_x (may be outside [0, WORLD_WIDTH_CHUNKS))
     let display_position = Vec3::new(
-        display_chunk_x as f32 * CHUNK_SIZE as f32 * TILE_SIZE,
-        chunk_y as f32 * CHUNK_SIZE as f32 * TILE_SIZE,
+        display_chunk_x as f32 * wc.chunk_size as f32 * wc.tile_size,
+        chunk_y as f32 * wc.chunk_size as f32 * wc.tile_size,
         0.0,
     );
 
@@ -192,7 +198,7 @@ pub fn spawn_chunk(
             tile_size,
             transform: Transform::from_translation(display_position),
             render_settings: TilemapRenderSettings {
-                render_chunk_size: UVec2::new(CHUNK_SIZE, CHUNK_SIZE),
+                render_chunk_size: UVec2::new(wc.chunk_size, wc.chunk_size),
                 y_sort: false,
             },
             anchor: TilemapAnchor::BottomLeft,
@@ -226,45 +232,40 @@ pub fn chunk_loading_system(
     mut world_map: ResMut<WorldMap>,
     mut loaded_chunks: ResMut<LoadedChunks>,
     texture_handle: Res<TilemapTextureHandle>,
+    registry: Res<TileRegistry>,
+    wc: Res<WorldConfig>,
+    tt: Res<TerrainTiles>,
 ) {
     let Ok(camera_transform) = camera_query.single() else {
         return;
     };
     let camera_pos = camera_transform.translation.truncate();
 
-    // Which chunk is the camera in?
-    let (cam_tile_x, cam_tile_y) = world_to_tile(camera_pos.x, camera_pos.y);
-    let (cam_chunk_x, cam_chunk_y) = tile_to_chunk(cam_tile_x, cam_tile_y);
+    let (cam_tile_x, cam_tile_y) = world_to_tile(camera_pos.x, camera_pos.y, wc.tile_size);
+    let (cam_chunk_x, cam_chunk_y) = tile_to_chunk(cam_tile_x, cam_tile_y, wc.chunk_size);
 
-    // Determine which chunks should be loaded (display coords, may be outside [0, WORLD_WIDTH_CHUNKS))
     let mut desired: HashSet<(i32, i32)> = HashSet::new();
-    let load_radius = crate::world::CHUNK_LOAD_RADIUS;
-    let world_chunks = crate::world::WORLD_WIDTH_CHUNKS;
+    let load_radius = wc.chunk_load_radius;
+    let world_chunks = wc.width_chunks();
 
-    // Helper: add all chunks in radius around a center chunk X
     let mut add_chunks_around = |center_cx: i32| {
         for display_cx in (center_cx - load_radius)..=(center_cx + load_radius) {
             for cy in (cam_chunk_y - load_radius)..=(cam_chunk_y + load_radius) {
-                if cy >= 0 && cy < crate::world::WORLD_HEIGHT_CHUNKS {
+                if cy >= 0 && cy < wc.height_chunks() {
                     desired.insert((display_cx, cy));
                 }
             }
         }
     };
 
-    // Load chunks around camera
     add_chunks_around(cam_chunk_x);
 
-    // Pre-load chunks at the wrapped position when near horizontal edge.
-    // This prevents a black flash when the player teleports across the boundary,
-    // because the destination chunks are already loaded and rendered.
     if cam_chunk_x < load_radius {
         add_chunks_around(cam_chunk_x + world_chunks);
     } else if cam_chunk_x >= world_chunks - load_radius {
         add_chunks_around(cam_chunk_x - world_chunks);
     }
 
-    // Spawn missing chunks
     for &(display_cx, cy) in &desired {
         if !loaded_chunks.map.contains_key(&(display_cx, cy)) {
             spawn_chunk(
@@ -272,13 +273,15 @@ pub fn chunk_loading_system(
                 &mut world_map,
                 &mut loaded_chunks,
                 &texture_handle.0,
+                &registry,
+                &wc,
+                &tt,
                 display_cx,
                 cy,
             );
         }
     }
 
-    // Despawn chunks that are no longer needed
     let to_remove: Vec<(i32, i32)> = loaded_chunks
         .map
         .keys()
@@ -294,84 +297,108 @@ pub fn chunk_loading_system(
 mod tests {
     use super::*;
 
+    fn test_wc() -> WorldConfig {
+        WorldConfig {
+            width_tiles: 2048,
+            height_tiles: 1024,
+            chunk_size: 32,
+            tile_size: 32.0,
+            chunk_load_radius: 3,
+            seed: 42,
+        }
+    }
+
+    fn test_tt() -> TerrainTiles {
+        TerrainTiles {
+            air: TileId(0),
+            grass: TileId(1),
+            dirt: TileId(2),
+            stone: TileId(3),
+        }
+    }
+
     #[test]
     fn tile_to_chunk_basic() {
-        assert_eq!(tile_to_chunk(0, 0), (0, 0));
-        assert_eq!(tile_to_chunk(31, 31), (0, 0));
-        assert_eq!(tile_to_chunk(32, 0), (1, 0));
-        assert_eq!(tile_to_chunk(63, 63), (1, 1));
+        let wc = test_wc();
+        assert_eq!(tile_to_chunk(0, 0, wc.chunk_size), (0, 0));
+        assert_eq!(tile_to_chunk(31, 31, wc.chunk_size), (0, 0));
+        assert_eq!(tile_to_chunk(32, 0, wc.chunk_size), (1, 0));
+        assert_eq!(tile_to_chunk(63, 63, wc.chunk_size), (1, 1));
     }
 
     #[test]
     fn tile_to_local_basic() {
-        assert_eq!(tile_to_local(0, 0), (0, 0));
-        assert_eq!(tile_to_local(31, 31), (31, 31));
-        assert_eq!(tile_to_local(32, 0), (0, 0));
-        assert_eq!(tile_to_local(33, 35), (1, 3));
+        let wc = test_wc();
+        assert_eq!(tile_to_local(0, 0, wc.chunk_size), (0, 0));
+        assert_eq!(tile_to_local(31, 31, wc.chunk_size), (31, 31));
+        assert_eq!(tile_to_local(32, 0, wc.chunk_size), (0, 0));
+        assert_eq!(tile_to_local(33, 35, wc.chunk_size), (1, 3));
     }
 
     #[test]
     fn world_to_tile_basic() {
-        assert_eq!(world_to_tile(0.0, 0.0), (0, 0));
-        assert_eq!(world_to_tile(32.0, 0.0), (1, 0));
-        assert_eq!(world_to_tile(31.9, 63.9), (0, 1));
-        assert_eq!(world_to_tile(64.0, 64.0), (2, 2));
+        let wc = test_wc();
+        assert_eq!(world_to_tile(0.0, 0.0, wc.tile_size), (0, 0));
+        assert_eq!(world_to_tile(32.0, 0.0, wc.tile_size), (1, 0));
+        assert_eq!(world_to_tile(31.9, 63.9, wc.tile_size), (0, 1));
+        assert_eq!(world_to_tile(64.0, 64.0, wc.tile_size), (2, 2));
     }
 
     #[test]
     fn world_to_tile_negative() {
-        assert_eq!(world_to_tile(-1.0, -1.0), (-1, -1));
-        assert_eq!(world_to_tile(-32.0, 0.0), (-1, 0));
-    }
-
-    #[test]
-    fn chunk_world_position_basic() {
-        let pos = chunk_world_position(0, 0);
-        assert_eq!(pos, Vec3::new(0.0, 0.0, 0.0));
-        let pos = chunk_world_position(1, 2);
-        assert_eq!(pos, Vec3::new(1024.0, 2048.0, 0.0));
+        let wc = test_wc();
+        assert_eq!(world_to_tile(-1.0, -1.0, wc.tile_size), (-1, -1));
+        assert_eq!(world_to_tile(-32.0, 0.0, wc.tile_size), (-1, 0));
     }
 
     #[test]
     fn worldmap_get_tile_deterministic() {
+        let wc = test_wc();
+        let tt = test_tt();
         let mut map = WorldMap::default();
-        let t1 = map.get_tile(100, 500);
-        let t2 = map.get_tile(100, 500);
+        let t1 = map.get_tile(100, 500, &wc, &tt);
+        let t2 = map.get_tile(100, 500, &wc, &tt);
         assert_eq!(t1, t2);
     }
 
     #[test]
     fn worldmap_set_tile() {
+        let wc = test_wc();
+        let tt = test_tt();
         let mut map = WorldMap::default();
-        map.set_tile(100, 500, TileType::Air);
-        assert_eq!(map.get_tile(100, 500), TileType::Air);
+        map.set_tile(100, 500, TileId::AIR, &wc, &tt);
+        assert_eq!(map.get_tile(100, 500, &wc, &tt), TileId::AIR);
     }
 
     #[test]
     fn worldmap_y_out_of_bounds() {
+        let wc = test_wc();
+        let tt = test_tt();
         let mut map = WorldMap::default();
-        // Above world is Air
-        assert_eq!(map.get_tile(0, WORLD_HEIGHT_TILES), TileType::Air);
-        // Below world is Stone
-        assert_eq!(map.get_tile(0, -1), TileType::Stone);
+        assert_eq!(map.get_tile(0, wc.height_tiles, &wc, &tt), tt.air);
+        assert_eq!(map.get_tile(0, -1, &wc, &tt), tt.stone);
     }
 
     #[test]
     fn worldmap_x_wraps() {
+        let wc = test_wc();
+        let tt = test_tt();
         let mut map = WorldMap::default();
-        let t1 = map.get_tile(-1, 500);
-        let t2 = map.get_tile(WORLD_WIDTH_TILES - 1, 500);
+        let t1 = map.get_tile(-1, 500, &wc, &tt);
+        let t2 = map.get_tile(wc.width_tiles - 1, 500, &wc, &tt);
         assert_eq!(t1, t2);
 
-        let t3 = map.get_tile(WORLD_WIDTH_TILES, 500);
-        let t4 = map.get_tile(0, 500);
+        let t3 = map.get_tile(wc.width_tiles, 500, &wc, &tt);
+        let t4 = map.get_tile(0, 500, &wc, &tt);
         assert_eq!(t3, t4);
     }
 
     #[test]
     fn worldmap_set_tile_wraps() {
+        let wc = test_wc();
+        let tt = test_tt();
         let mut map = WorldMap::default();
-        map.set_tile(-1, 500, TileType::Air);
-        assert_eq!(map.get_tile(WORLD_WIDTH_TILES - 1, 500), TileType::Air);
+        map.set_tile(-1, 500, TileId::AIR, &wc, &tt);
+        assert_eq!(map.get_tile(wc.width_tiles - 1, 500, &wc, &tt), TileId::AIR);
     }
 }
