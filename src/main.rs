@@ -1,6 +1,7 @@
 mod camera;
 mod interaction;
 mod player;
+mod registry;
 mod ui;
 mod world;
 
