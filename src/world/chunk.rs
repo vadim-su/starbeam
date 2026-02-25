@@ -51,6 +51,29 @@ impl WorldMap {
             })
     }
 
+    /// Returns the tile at the given coordinates if the chunk is already loaded.
+    /// Unlike `get_tile`, this does not generate chunks and takes `&self`.
+    pub fn get_tile_if_loaded(
+        &self,
+        tile_x: i32,
+        tile_y: i32,
+        wc: &WorldConfig,
+        tt: &TerrainTiles,
+    ) -> Option<TileId> {
+        if tile_y < 0 {
+            return Some(tt.stone);
+        }
+        if tile_y >= wc.height_tiles {
+            return Some(tt.air);
+        }
+        let wrapped_x = wc.wrap_tile_x(tile_x);
+        let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, wc.chunk_size);
+        let (lx, ly) = tile_to_local(wrapped_x, tile_y, wc.chunk_size);
+        self.chunks
+            .get(&(cx, cy))
+            .map(|chunk| chunk.get(lx, ly, wc.chunk_size))
+    }
+
     pub fn get_tile(
         &mut self,
         tile_x: i32,

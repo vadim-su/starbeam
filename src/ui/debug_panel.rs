@@ -8,26 +8,10 @@ use crate::registry::tile::{TerrainTiles, TileRegistry};
 use crate::registry::world::WorldConfig;
 use crate::world::chunk::{tile_to_chunk, world_to_tile, LoadedChunks, WorldMap};
 
-/// Tracks debug panel visibility and section collapsed states.
-#[derive(Resource)]
+/// Tracks debug panel visibility.
+#[derive(Resource, Default)]
 pub struct DebugUiState {
     pub visible: bool,
-    pub show_performance: bool,
-    pub show_player: bool,
-    pub show_cursor: bool,
-    pub show_world: bool,
-}
-
-impl Default for DebugUiState {
-    fn default() -> Self {
-        Self {
-            visible: false,
-            show_performance: true,
-            show_player: true,
-            show_cursor: true,
-            show_world: true,
-        }
-    }
 }
 
 /// Toggles debug panel visibility on F3 press.
@@ -47,7 +31,7 @@ pub fn draw_debug_panel(
     windows: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
     // World
-    mut world_map: ResMut<WorldMap>,
+    world_map: Res<WorldMap>,
     world_config: Res<WorldConfig>,
     terrain_tiles: Res<TerrainTiles>,
     tile_registry: Res<TileRegistry>,
@@ -90,6 +74,15 @@ pub fn draw_debug_panel(
                                 .map(|v| format!("{v:.1}"))
                                 .unwrap_or_else(|| "...".to_string());
                             ui.colored_label(egui::Color32::LIGHT_GREEN, &fps_text);
+                            ui.end_row();
+
+                            ui.label("Frame time:");
+                            let ft_text = diagnostics
+                                .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
+                                .and_then(|d| d.smoothed())
+                                .map(|v| format!("{v:.1}ms"))
+                                .unwrap_or_else(|| "...".to_string());
+                            ui.label(&ft_text);
                             ui.end_row();
 
                             ui.label("Entities:");
@@ -155,41 +148,69 @@ pub fn draw_debug_panel(
                         let wrapped_tx = world_config.wrap_tile_x(tx);
                         let (cx, cy) = tile_to_chunk(wrapped_tx, ty, world_config.chunk_size);
 
-                        // Get tile info
-                        let tile_id = world_map.get_tile(tx, ty, &world_config, &terrain_tiles);
-                        let tile_def = tile_registry.get(tile_id);
+                        // Get tile info (read-only, no chunk generation)
+                        let tile_info =
+                            world_map.get_tile_if_loaded(tx, ty, &world_config, &terrain_tiles);
 
-                        egui::Grid::new("cursor_grid")
-                            .num_columns(2)
-                            .spacing([20.0, 4.0])
-                            .show(ui, |ui| {
-                                ui.label("World:");
-                                ui.monospace(format!("{:.1}, {:.1}", world_pos.x, world_pos.y));
-                                ui.end_row();
+                        if let Some(tile_id) = tile_info {
+                            let tile_def = tile_registry.get(tile_id);
 
-                                ui.label("Tile:");
-                                ui.monospace(format!("{tx}, {ty}"));
-                                ui.end_row();
+                            egui::Grid::new("cursor_grid")
+                                .num_columns(2)
+                                .spacing([20.0, 4.0])
+                                .show(ui, |ui| {
+                                    ui.label("World:");
+                                    ui.monospace(format!("{:.1}, {:.1}", world_pos.x, world_pos.y));
+                                    ui.end_row();
 
-                                ui.label("Block:");
-                                ui.colored_label(
-                                    if tile_def.solid {
-                                        egui::Color32::LIGHT_BLUE
-                                    } else {
-                                        egui::Color32::GRAY
-                                    },
-                                    &tile_def.id,
-                                );
-                                ui.end_row();
+                                    ui.label("Tile:");
+                                    ui.monospace(format!("{tx}, {ty}"));
+                                    ui.end_row();
 
-                                ui.label("Solid:");
-                                ui.label(if tile_def.solid { "true" } else { "false" });
-                                ui.end_row();
+                                    ui.label("Block:");
+                                    ui.colored_label(
+                                        if tile_def.solid {
+                                            egui::Color32::LIGHT_BLUE
+                                        } else {
+                                            egui::Color32::GRAY
+                                        },
+                                        &tile_def.id,
+                                    );
+                                    ui.end_row();
 
-                                ui.label("Chunk:");
-                                ui.monospace(format!("{cx}, {cy}"));
-                                ui.end_row();
-                            });
+                                    ui.label("Solid:");
+                                    ui.label(if tile_def.solid { "true" } else { "false" });
+                                    ui.end_row();
+
+                                    ui.label("Chunk:");
+                                    ui.monospace(format!("{cx}, {cy}"));
+                                    ui.end_row();
+                                });
+                        } else {
+                            egui::Grid::new("cursor_grid")
+                                .num_columns(2)
+                                .spacing([20.0, 4.0])
+                                .show(ui, |ui| {
+                                    ui.label("World:");
+                                    ui.monospace(format!("{:.1}, {:.1}", world_pos.x, world_pos.y));
+                                    ui.end_row();
+
+                                    ui.label("Tile:");
+                                    ui.monospace(format!("{tx}, {ty}"));
+                                    ui.end_row();
+
+                                    ui.label("Block:");
+                                    ui.colored_label(
+                                        egui::Color32::DARK_GRAY,
+                                        "(chunk not loaded)",
+                                    );
+                                    ui.end_row();
+
+                                    ui.label("Chunk:");
+                                    ui.monospace(format!("{cx}, {cy}"));
+                                    ui.end_row();
+                                });
+                        }
                     } else {
                         ui.label("— (cursor outside)");
                     }
