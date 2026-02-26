@@ -1,0 +1,24 @@
+(
+  name: "adventurer",
+  size: (width: 44, height: 44),
+  animations: {
+    "staying": [
+      "characters/adventurer/sprites/staying/frame_000.png",
+    ],
+    "running": [
+      "characters/adventurer/sprites/running/frame_000.png",
+      "characters/adventurer/sprites/running/frame_001.png",
+      "characters/adventurer/sprites/running/frame_002.png",
+      "characters/adventurer/sprites/running/frame_003.png",
+    ],
+    "jumping": [
+      "characters/adventurer/sprites/jumping/frame_000.png",
+      "characters/adventurer/sprites/jumping/frame_001.png",
+      "characters/adventurer/sprites/jumping/frame_002.png",
+      "characters/adventurer/sprites/jumping/frame_003.png",
+      "characters/adventurer/sprites/jumping/frame_004.png",
+      "characters/adventurer/sprites/jumping/frame_005.png",
+      "characters/adventurer/sprites/jumping/frame_006.png",
+    ],
+  },
+)

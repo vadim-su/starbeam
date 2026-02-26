@@ -22,6 +22,6 @@ impl Plugin for WorldPlugin {
 }
 
 fn load_tile_atlas(mut commands: Commands, asset_server: Res<AssetServer>) {
-    let handle: Handle<Image> = asset_server.load("terrain/tiles.png");
+    let handle: Handle<Image> = asset_server.load("world/terrain/tiles.png");
     commands.insert_resource(TilemapTextureHandle(handle));
 }

@@ -32,21 +32,21 @@ pub enum AnimationKind {
 /// Load character animation frames (runs once on InGame enter, before spawn_player).
 pub fn load_character_animations(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.insert_resource(CharacterAnimations {
-        idle: vec![asset_server.load("characters/advanturer/animations/staying/frame_000.png")],
+        idle: vec![asset_server.load("characters/adventurer/sprites/staying/frame_000.png")],
         running: vec![
-            asset_server.load("characters/advanturer/animations/running/frame_000.png"),
-            asset_server.load("characters/advanturer/animations/running/frame_001.png"),
-            asset_server.load("characters/advanturer/animations/running/frame_002.png"),
-            asset_server.load("characters/advanturer/animations/running/frame_003.png"),
+            asset_server.load("characters/adventurer/sprites/running/frame_000.png"),
+            asset_server.load("characters/adventurer/sprites/running/frame_001.png"),
+            asset_server.load("characters/adventurer/sprites/running/frame_002.png"),
+            asset_server.load("characters/adventurer/sprites/running/frame_003.png"),
         ],
         jumping: vec![
-            asset_server.load("characters/advanturer/animations/jumping/frame_000.png"),
-            asset_server.load("characters/advanturer/animations/jumping/frame_001.png"),
-            asset_server.load("characters/advanturer/animations/jumping/frame_002.png"),
-            asset_server.load("characters/advanturer/animations/jumping/frame_003.png"),
-            asset_server.load("characters/advanturer/animations/jumping/frame_004.png"),
-            asset_server.load("characters/advanturer/animations/jumping/frame_005.png"),
-            asset_server.load("characters/advanturer/animations/jumping/frame_006.png"),
+            asset_server.load("characters/adventurer/sprites/jumping/frame_000.png"),
+            asset_server.load("characters/adventurer/sprites/jumping/frame_001.png"),
+            asset_server.load("characters/adventurer/sprites/jumping/frame_002.png"),
+            asset_server.load("characters/adventurer/sprites/jumping/frame_003.png"),
+            asset_server.load("characters/adventurer/sprites/jumping/frame_004.png"),
+            asset_server.load("characters/adventurer/sprites/jumping/frame_005.png"),
+            asset_server.load("characters/adventurer/sprites/jumping/frame_006.png"),
         ],
     });
 }

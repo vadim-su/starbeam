@@ -71,10 +71,10 @@ impl Plugin for RegistryPlugin {
 }
 
 fn start_loading(mut commands: Commands, asset_server: Res<AssetServer>) {
-    let tiles = asset_server.load::<TileRegistryAsset>("data/tiles.registry.ron");
-    let player = asset_server.load::<PlayerDefAsset>("data/player.def.ron");
-    let world_config = asset_server.load::<WorldConfigAsset>("data/world.config.ron");
-    let parallax = asset_server.load::<ParallaxConfigAsset>("data/bg.parallax.ron");
+    let tiles = asset_server.load::<TileRegistryAsset>("world/tiles.registry.ron");
+    let player = asset_server.load::<PlayerDefAsset>("characters/adventurer/adventurer.def.ron");
+    let world_config = asset_server.load::<WorldConfigAsset>("world/world.config.ron");
+    let parallax = asset_server.load::<ParallaxConfigAsset>("world/parallax.ron");
     commands.insert_resource(LoadingAssets {
         tiles,
         player,

@@ -2,7 +2,7 @@
     layers: [
         (
             name: "sky",
-            image: "backgrounds/sky.png",
+            image: "world/backgrounds/sky.png",
             speed_x: 0.0,
             speed_y: 0.0,
             repeat_x: false,
@@ -11,7 +11,7 @@
         ),
         (
             name: "far_mountains",
-            image: "backgrounds/far_mountains.png",
+            image: "world/backgrounds/far_mountains.png",
             speed_x: 0.1,
             speed_y: 0.05,
             repeat_x: true,
@@ -20,7 +20,7 @@
         ),
         (
             name: "near_mountains",
-            image: "backgrounds/near_mountains.png",
+            image: "world/backgrounds/near_mountains.png",
             speed_x: 0.3,
             speed_y: 0.15,
             repeat_x: true,
