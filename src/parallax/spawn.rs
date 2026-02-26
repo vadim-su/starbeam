@@ -40,7 +40,6 @@ pub fn spawn_parallax_layers(
             },
             Sprite::from_image(image_handle),
             Transform::from_xyz(0.0, 0.0, layer_def.z_order),
-            Visibility::default(),
         ));
     }
 
