@@ -15,6 +15,9 @@ use tile::TileRegistry;
 use world::WorldConfig;
 
 use crate::parallax::config::ParallaxConfig;
+use crate::world::atlas::{build_combined_atlas, AtlasParams, TileAtlas};
+use crate::world::autotile::{AutotileEntry, AutotileRegistry};
+use crate::world::tile_renderer::{SharedTileMaterial, TileMaterial};
 
 /// Keeps asset handles alive for hot-reload detection.
 #[derive(Resource)]
@@ -30,6 +33,7 @@ pub struct RegistryHandles {
 pub enum AppState {
     #[default]
     Loading,
+    LoadingAutotile,
     InGame,
 }
 
@@ -40,6 +44,13 @@ struct LoadingAssets {
     player: Handle<PlayerDefAsset>,
     world_config: Handle<WorldConfigAsset>,
     parallax: Handle<ParallaxConfigAsset>,
+}
+
+/// Intermediate resource holding autotile asset handles during loading.
+#[derive(Resource)]
+struct LoadingAutotileAssets {
+    rons: Vec<(String, Handle<AutotileAsset>)>,
+    images: Vec<(String, Handle<Image>)>,
 }
 
 pub struct RegistryPlugin;
@@ -59,6 +70,11 @@ impl Plugin for RegistryPlugin {
             .register_asset_loader(RonLoader::<AutotileAsset>::new(&["autotile.ron"]))
             .add_systems(Startup, start_loading)
             .add_systems(Update, check_loading.run_if(in_state(AppState::Loading)))
+            .add_systems(OnEnter(AppState::LoadingAutotile), start_autotile_loading)
+            .add_systems(
+                Update,
+                check_autotile_loading.run_if(in_state(AppState::LoadingAutotile)),
+            )
             .add_systems(
                 Update,
                 (
@@ -139,8 +155,99 @@ fn check_loading(
         parallax: loading.parallax.clone(),
     });
     commands.remove_resource::<LoadingAssets>();
+    next_state.set(AppState::LoadingAutotile);
+    info!("Base registry assets loaded, loading autotile assets...");
+}
+
+fn start_autotile_loading(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    registry: Res<TileRegistry>,
+) {
+    let mut rons = Vec::new();
+    let mut imgs = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for def in &registry.defs {
+        if let Some(ref name) = def.autotile {
+            if seen.insert(name.clone()) {
+                let ron_handle =
+                    asset_server.load::<AutotileAsset>(format!("world/terrain/{name}.autotile.ron"));
+                let img_handle =
+                    asset_server.load::<Image>(format!("world/terrain/{name}.png"));
+                rons.push((name.clone(), ron_handle));
+                imgs.push((name.clone(), img_handle));
+            }
+        }
+    }
+
+    info!("Loading {} autotile assets...", rons.len());
+    commands.insert_resource(LoadingAutotileAssets { rons, images: imgs });
+}
+
+fn check_autotile_loading(
+    mut commands: Commands,
+    loading: Res<LoadingAutotileAssets>,
+    autotile_assets: Res<Assets<AutotileAsset>>,
+    mut image_assets: ResMut<Assets<Image>>,
+    mut tile_materials: ResMut<Assets<TileMaterial>>,
+    mut next_state: ResMut<NextState<AppState>>,
+) {
+    // Wait until all .autotile.ron and .png assets are loaded
+    let all_rons = loading.rons.iter().all(|(_, h)| autotile_assets.contains(h));
+    let all_imgs = loading.images.iter().all(|(_, h)| image_assets.contains(h));
+    if !all_rons || !all_imgs {
+        return;
+    }
+
+    // Build combined atlas from per-type spritesheet images
+    let sources: Vec<(&str, &Image)> = loading
+        .images
+        .iter()
+        .map(|(name, handle)| (name.as_str(), image_assets.get(handle).unwrap()))
+        .collect();
+
+    let (atlas_image, column_map) = build_combined_atlas(&sources, 16, 47);
+    let num_types = sources.len() as u32;
+    let params = AtlasParams {
+        tile_size: 16,
+        rows: 47,
+        atlas_width: num_types * 16,
+        atlas_height: 47 * 16,
+    };
+    let atlas_handle = image_assets.add(atlas_image);
+
+    // Build AutotileRegistry from loaded .autotile.ron assets
+    let mut autotile_reg = AutotileRegistry::default();
+    for (name, handle) in &loading.rons {
+        let asset = autotile_assets.get(handle).unwrap();
+        let col_idx = column_map[name.as_str()];
+        autotile_reg
+            .entries
+            .insert(name.clone(), AutotileEntry::from_asset(asset, col_idx));
+    }
+
+    // Create shared tile material with the combined atlas
+    let material_handle = tile_materials.add(TileMaterial {
+        atlas: atlas_handle.clone(),
+    });
+
+    // Insert all autotile resources
+    commands.insert_resource(TileAtlas {
+        image: atlas_handle,
+        params,
+    });
+    commands.insert_resource(autotile_reg);
+    commands.insert_resource(SharedTileMaterial {
+        handle: material_handle,
+    });
+
+    commands.remove_resource::<LoadingAutotileAssets>();
     next_state.set(AppState::InGame);
-    info!("All registry assets loaded, entering InGame state");
+    info!(
+        "Autotile atlas built ({} types), entering InGame",
+        num_types
+    );
 }
 
 fn hot_reload_player(
