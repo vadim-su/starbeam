@@ -213,20 +213,24 @@ fn hot_reload_tiles(
 }
 
 fn hot_reload_parallax(
+    mut commands: Commands,
     mut events: MessageReader<AssetEvent<ParallaxConfigAsset>>,
     handles: Res<RegistryHandles>,
     assets: Res<Assets<ParallaxConfigAsset>>,
     mut config: ResMut<ParallaxConfig>,
+    layer_query: Query<Entity, With<crate::parallax::spawn::ParallaxLayer>>,
 ) {
     for event in events.read() {
         if let AssetEvent::Modified { id } = event {
             if *id == handles.parallax.id() {
                 if let Some(asset) = assets.get(&handles.parallax) {
                     config.layers = asset.layers.clone();
-                    // ParallaxLayer entities will be despawned/respawned by the parallax
-                    // spawn system once it detects the config change (added in a later task).
+                    // Despawn existing layers so spawn system recreates them next frame
+                    for entity in &layer_query {
+                        commands.entity(entity).despawn();
+                    }
                     info!(
-                        "Hot-reloaded ParallaxConfig ({} layers)",
+                        "Hot-reloaded ParallaxConfig ({} layers), despawned old entities",
                         asset.layers.len()
                     );
                 }

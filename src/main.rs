@@ -32,6 +32,7 @@ fn main() {
         .add_plugins(world::WorldPlugin)
         .add_plugins(player::PlayerPlugin)
         .add_plugins(camera::CameraPlugin)
+        .add_plugins(parallax::ParallaxPlugin)
         .add_plugins(interaction::InteractionPlugin)
         .add_plugins(ui::UiPlugin)
         .add_systems(Startup, setup)
