@@ -64,7 +64,7 @@ pub struct AutotileRegistry {
 ///
 /// Corner bits (NE, SE, SW, NW) are only set when both adjacent cardinal
 /// neighbors are also solid, matching the Blob47 autotile scheme.
-pub fn compute_bitmask(is_solid_at: impl Fn(i32, i32) -> bool, x: i32, y: i32) -> u8 {
+pub fn compute_bitmask(mut is_solid_at: impl FnMut(i32, i32) -> bool, x: i32, y: i32) -> u8 {
     let n = is_solid_at(x, y + 1);
     let e = is_solid_at(x + 1, y);
     let s = is_solid_at(x, y - 1);

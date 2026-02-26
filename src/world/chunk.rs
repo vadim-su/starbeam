@@ -1,10 +1,15 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use bevy::prelude::*;
+
 use crate::registry::tile::{TerrainTiles, TileId, TileRegistry};
 use crate::registry::world::WorldConfig;
+use crate::world::atlas::TileAtlas;
+use crate::world::autotile::{compute_bitmask, AutotileRegistry};
+use crate::world::mesh_builder::{build_chunk_mesh, MeshBuildBuffers};
 use crate::world::terrain_gen;
-use bevy::prelude::*;
+use crate::world::tile_renderer::SharedTileMaterial;
 
 /// Marker component on tilemap entities to identify which chunk they represent.
 #[derive(Component)]
@@ -13,9 +18,15 @@ pub struct ChunkCoord {
     pub y: i32,
 }
 
+/// Marker component indicating a chunk's mesh needs rebuilding.
+#[derive(Component)]
+pub struct ChunkDirty;
+
 /// Tile data for a single chunk. Row-major: index = local_y * chunk_size + local_x.
 pub struct ChunkData {
     pub tiles: Vec<TileId>,
+    pub bitmasks: Vec<u8>,
+    pub damage: Vec<u8>,
 }
 
 impl ChunkData {
@@ -42,11 +53,15 @@ impl WorldMap {
         wc: &WorldConfig,
         tt: &TerrainTiles,
     ) -> &ChunkData {
-        self.chunks
-            .entry((chunk_x, chunk_y))
-            .or_insert_with(|| ChunkData {
-                tiles: terrain_gen::generate_chunk_tiles(wc.seed, chunk_x, chunk_y, wc, tt),
-            })
+        self.chunks.entry((chunk_x, chunk_y)).or_insert_with(|| {
+            let tiles = terrain_gen::generate_chunk_tiles(wc.seed, chunk_x, chunk_y, wc, tt);
+            let len = tiles.len();
+            ChunkData {
+                tiles,
+                bitmasks: vec![0; len],
+                damage: vec![0; len],
+            }
+        })
     }
 
     /// Returns the tile at the given coordinates if the chunk is already loaded.
@@ -154,14 +169,51 @@ pub fn world_to_tile(world_x: f32, world_y: f32, tile_size: f32) -> (i32, i32) {
     )
 }
 
-/// Spawn a stub entity for a chunk. Generates terrain data but does not create
-/// any visual representation yet — the mesh-per-chunk renderer will handle that.
+/// Compute bitmasks for all tiles in a chunk using neighbor solidity checks.
+pub fn init_chunk_bitmasks(
+    world_map: &mut WorldMap,
+    chunk_x: i32,
+    chunk_y: i32,
+    wc: &WorldConfig,
+    tt: &TerrainTiles,
+    registry: &TileRegistry,
+) -> Vec<u8> {
+    let chunk_size = wc.chunk_size;
+    let mut bitmasks = vec![0u8; (chunk_size * chunk_size) as usize];
+    let base_x = chunk_x * chunk_size as i32;
+    let base_y = chunk_y * chunk_size as i32;
+
+    for local_y in 0..chunk_size {
+        for local_x in 0..chunk_size {
+            let world_x = base_x + local_x as i32;
+            let world_y = base_y + local_y as i32;
+            let idx = (local_y * chunk_size + local_x) as usize;
+            bitmasks[idx] = compute_bitmask(
+                |x, y| {
+                    let tile = world_map.get_tile(x, y, wc, tt);
+                    registry.is_solid(tile)
+                },
+                world_x,
+                world_y,
+            );
+        }
+    }
+    bitmasks
+}
+
+/// Spawn a chunk entity with a built mesh and material.
 pub fn spawn_chunk(
     commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
     world_map: &mut WorldMap,
     loaded_chunks: &mut LoadedChunks,
     wc: &WorldConfig,
     tt: &TerrainTiles,
+    registry: &TileRegistry,
+    autotile_registry: &AutotileRegistry,
+    atlas: &TileAtlas,
+    material: &SharedTileMaterial,
+    buffers: &mut MeshBuildBuffers,
     display_chunk_x: i32,
     chunk_y: i32,
 ) {
@@ -169,15 +221,42 @@ pub fn spawn_chunk(
         return;
     }
 
-    // Ensure chunk data is generated and cached in WorldMap
     let data_chunk_x = wc.wrap_chunk_x(display_chunk_x);
     world_map.get_or_generate_chunk(data_chunk_x, chunk_y, wc, tt);
 
+    let bitmasks = init_chunk_bitmasks(world_map, data_chunk_x, chunk_y, wc, tt, registry);
+    if let Some(chunk) = world_map.chunks.get_mut(&(data_chunk_x, chunk_y)) {
+        chunk.bitmasks = bitmasks;
+    }
+
+    let chunk_data = &world_map.chunks[&(data_chunk_x, chunk_y)];
+    let mesh = build_chunk_mesh(
+        &chunk_data.tiles,
+        &chunk_data.bitmasks,
+        display_chunk_x,
+        chunk_y,
+        wc.chunk_size,
+        wc.tile_size,
+        wc.seed,
+        registry,
+        autotile_registry,
+        &atlas.params,
+        buffers,
+    );
+
+    let mesh_handle = meshes.add(mesh);
+
     let entity = commands
-        .spawn(ChunkCoord {
-            x: display_chunk_x,
-            y: chunk_y,
-        })
+        .spawn((
+            ChunkCoord {
+                x: display_chunk_x,
+                y: chunk_y,
+            },
+            Mesh2d(mesh_handle),
+            MeshMaterial2d(material.handle.clone()),
+            Transform::from_translation(Vec3::ZERO),
+            Visibility::default(),
+        ))
         .id();
 
     loaded_chunks.map.insert((display_chunk_x, chunk_y), entity);
@@ -199,6 +278,12 @@ pub fn chunk_loading_system(
     camera_query: Query<&Transform, With<Camera2d>>,
     mut world_map: ResMut<WorldMap>,
     mut loaded_chunks: ResMut<LoadedChunks>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    registry: Res<TileRegistry>,
+    autotile_registry: Res<AutotileRegistry>,
+    atlas: Res<TileAtlas>,
+    material: Res<SharedTileMaterial>,
+    mut buffers: ResMut<MeshBuildBuffers>,
     wc: Res<WorldConfig>,
     tt: Res<TerrainTiles>,
 ) {
@@ -236,10 +321,16 @@ pub fn chunk_loading_system(
         if !loaded_chunks.map.contains_key(&(display_cx, cy)) {
             spawn_chunk(
                 &mut commands,
+                &mut meshes,
                 &mut world_map,
                 &mut loaded_chunks,
                 &wc,
                 &tt,
+                &registry,
+                &autotile_registry,
+                &atlas,
+                &material,
+                &mut buffers,
                 display_cx,
                 cy,
             );
@@ -254,6 +345,46 @@ pub fn chunk_loading_system(
         .collect();
     for (cx, cy) in to_remove {
         despawn_chunk(&mut commands, &mut loaded_chunks, cx, cy);
+    }
+}
+
+/// Rebuild meshes for chunks marked as dirty (e.g. after tile modification).
+pub fn rebuild_dirty_chunks(
+    mut commands: Commands,
+    query: Query<(Entity, &ChunkCoord), With<ChunkDirty>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    world_map: Res<WorldMap>,
+    wc: Res<WorldConfig>,
+    registry: Res<TileRegistry>,
+    autotile_registry: Res<AutotileRegistry>,
+    atlas: Res<TileAtlas>,
+    mut buffers: ResMut<MeshBuildBuffers>,
+) {
+    for (entity, coord) in &query {
+        let data_chunk_x = wc.wrap_chunk_x(coord.x);
+        let Some(chunk_data) = world_map.chunks.get(&(data_chunk_x, coord.y)) else {
+            continue;
+        };
+
+        let mesh = build_chunk_mesh(
+            &chunk_data.tiles,
+            &chunk_data.bitmasks,
+            coord.x,
+            coord.y,
+            wc.chunk_size,
+            wc.tile_size,
+            wc.seed,
+            &registry,
+            &autotile_registry,
+            &atlas.params,
+            &mut buffers,
+        );
+
+        let mesh_handle = meshes.add(mesh);
+        commands
+            .entity(entity)
+            .insert(Mesh2d(mesh_handle))
+            .remove::<ChunkDirty>();
     }
 }
 
