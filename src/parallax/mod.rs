@@ -1,4 +1,5 @@
 pub mod config;
+pub mod scroll;
 pub mod spawn;
 
 use bevy::prelude::*;
@@ -13,7 +14,8 @@ impl Plugin for ParallaxPlugin {
         app.add_systems(OnEnter(AppState::InGame), spawn::spawn_parallax_layers)
             .add_systems(
                 Update,
-                spawn::spawn_parallax_layers
+                (spawn::spawn_parallax_layers, scroll::parallax_scroll)
+                    .chain()
                     .after(camera_follow_player)
                     .run_if(in_state(AppState::InGame)),
             );
