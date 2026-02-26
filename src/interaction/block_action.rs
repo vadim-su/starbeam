@@ -11,6 +11,7 @@ use crate::world::chunk::{
 
 const BLOCK_REACH: f32 = 5.0;
 
+#[allow(clippy::too_many_arguments)]
 pub fn block_interaction_system(
     mut commands: Commands,
     mouse: Res<ButtonInput<MouseButton>>,

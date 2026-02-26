@@ -4,6 +4,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 /// Parameters of the combined atlas for UV computation.
 #[derive(Resource, Debug, Clone)]
+#[allow(dead_code)]
 pub struct AtlasParams {
     pub tile_size: u32,    // 16
     pub rows: u32,         // 47
@@ -13,6 +14,7 @@ pub struct AtlasParams {
 
 /// Combined atlas texture handle + layout parameters.
 #[derive(Resource)]
+#[allow(dead_code)]
 pub struct TileAtlas {
     pub image: Handle<Image>,
     pub params: AtlasParams,

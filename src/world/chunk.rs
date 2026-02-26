@@ -26,6 +26,7 @@ pub struct ChunkDirty;
 pub struct ChunkData {
     pub tiles: Vec<TileId>,
     pub bitmasks: Vec<u8>,
+    #[allow(dead_code)] // Reserved for future block-damage system
     pub damage: Vec<u8>,
 }
 
@@ -247,6 +248,7 @@ pub fn init_chunk_bitmasks(
 }
 
 /// Spawn a chunk entity with a built mesh and material.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_chunk(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -318,6 +320,7 @@ pub fn despawn_chunk(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn chunk_loading_system(
     mut commands: Commands,
     camera_query: Query<&Transform, With<Camera2d>>,
@@ -394,6 +397,7 @@ pub fn chunk_loading_system(
 }
 
 /// Rebuild meshes for chunks marked as dirty (e.g. after tile modification).
+#[allow(clippy::too_many_arguments)]
 pub fn rebuild_dirty_chunks(
     mut commands: Commands,
     query: Query<(Entity, &ChunkCoord), With<ChunkDirty>>,

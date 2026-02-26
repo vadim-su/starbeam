@@ -13,6 +13,7 @@ impl TileId {
 
 /// Properties of a single tile type, deserialized from RON.
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)] // Fields reserved for future gameplay systems
 pub struct TileDef {
     pub id: String,
     pub autotile: Option<String>,

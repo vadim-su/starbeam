@@ -28,6 +28,7 @@ impl Default for MeshBuildBuffers {
 ///
 /// Each non-air tile becomes a textured quad. The mesh uses the combined atlas
 /// for UV coordinates, selecting the correct autotile variant per tile.
+#[allow(clippy::too_many_arguments)]
 pub fn build_chunk_mesh(
     tiles: &[TileId],
     bitmasks: &[u8],
