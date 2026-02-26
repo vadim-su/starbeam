@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::{egui, EguiContexts};
 
+use crate::parallax::config::ParallaxConfig;
 use crate::player::{Grounded, Player, Velocity};
 use crate::registry::tile::{TerrainTiles, TileRegistry};
 use crate::registry::world::WorldConfig;
@@ -39,6 +40,8 @@ pub fn draw_debug_panel(
     // Performance
     diagnostics: Res<DiagnosticsStore>,
     entities: Query<Entity>,
+    // Parallax
+    parallax_config: Option<Res<ParallaxConfig>>,
 ) -> Result {
     if !state.visible {
         return Ok(());
@@ -240,6 +243,40 @@ pub fn draw_debug_panel(
                             ui.end_row();
                         });
                 });
+
+            // --- Parallax ---
+            if let Some(ref parallax_config) = parallax_config {
+                egui::CollapsingHeader::new(egui::RichText::new("Parallax").strong())
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        ui.label(format!("{} layers", parallax_config.layers.len()));
+                        for (i, layer_def) in parallax_config.layers.iter().enumerate() {
+                            ui.separator();
+                            egui::Grid::new(format!("parallax_layer_{i}"))
+                                .num_columns(2)
+                                .spacing([20.0, 4.0])
+                                .show(ui, |ui| {
+                                    ui.label("Name:");
+                                    ui.monospace(&layer_def.name);
+                                    ui.end_row();
+
+                                    ui.label("Speed:");
+                                    ui.monospace(format!(
+                                        "{:.2}, {:.2}",
+                                        layer_def.speed_x, layer_def.speed_y
+                                    ));
+                                    ui.end_row();
+
+                                    ui.label("Repeat:");
+                                    ui.monospace(format!(
+                                        "x={}, y={}",
+                                        layer_def.repeat_x, layer_def.repeat_y
+                                    ));
+                                    ui.end_row();
+                                });
+                        }
+                    });
+            }
         });
 
     Ok(())
