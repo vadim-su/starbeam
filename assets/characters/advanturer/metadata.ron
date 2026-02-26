@@ -11,5 +11,14 @@
       "characters/advanturer/animations/running/frame_002.png",
       "characters/advanturer/animations/running/frame_003.png",
     ],
+    "jumping": [
+      "characters/advanturer/animations/jumping/frame_000.png",
+      "characters/advanturer/animations/jumping/frame_001.png",
+      "characters/advanturer/animations/jumping/frame_002.png",
+      "characters/advanturer/animations/jumping/frame_003.png",
+      "characters/advanturer/animations/jumping/frame_004.png",
+      "characters/advanturer/animations/jumping/frame_005.png",
+      "characters/advanturer/animations/jumping/frame_006.png",
+    ],
   },
 )
