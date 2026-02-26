@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::player::{Player, Velocity};
+use crate::player::{Grounded, Player, Velocity};
 
 const VELOCITY_DEADZONE: f32 = 0.1;
 
@@ -43,11 +43,11 @@ pub fn load_character_animations(mut commands: Commands, asset_server: Res<Asset
 pub fn animate_player(
     time: Res<Time>,
     animations: Res<CharacterAnimations>,
-    mut query: Query<(&mut AnimationState, &mut Sprite, &Velocity), With<Player>>,
+    mut query: Query<(&mut AnimationState, &mut Sprite, &Velocity, &Grounded), With<Player>>,
 ) {
-    for (mut anim, mut sprite, velocity) in &mut query {
-        // Determine animation kind from movement
-        let new_kind = if velocity.x.abs() > VELOCITY_DEADZONE {
+    for (mut anim, mut sprite, velocity, grounded) in &mut query {
+        // Determine animation kind: idle when airborne or stationary, running when grounded + moving
+        let new_kind = if grounded.0 && velocity.x.abs() > VELOCITY_DEADZONE {
             AnimationKind::Running
         } else {
             AnimationKind::Idle
