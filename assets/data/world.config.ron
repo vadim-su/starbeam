@@ -2,7 +2,7 @@
   width_tiles: 2048,
   height_tiles: 1024,
   chunk_size: 32,
-  tile_size: 32.0,
+  tile_size: 8.0,
   chunk_load_radius: 3,
   seed: 42,
 )

@@ -1,0 +1,15 @@
+(
+  name: "adventurer",
+  size: (width: 44, height: 44),
+  animations: {
+    "staying": [
+      "characters/advanturer/animations/staying/frame_000.png",
+    ],
+    "running": [
+      "characters/advanturer/animations/running/frame_000.png",
+      "characters/advanturer/animations/running/frame_001.png",
+      "characters/advanturer/animations/running/frame_002.png",
+      "characters/advanturer/animations/running/frame_003.png",
+    ],
+  },
+)
