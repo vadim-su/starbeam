@@ -1,17 +1,15 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use bevy_ecs_tilemap::prelude::*;
 
 use crate::player::Player;
 use crate::registry::player::PlayerConfig;
 use crate::registry::tile::{TerrainTiles, TileId, TileRegistry};
 use crate::registry::world::WorldConfig;
-use crate::world::chunk::{tile_to_local, world_to_tile, ChunkCoord, WorldMap};
+use crate::world::chunk::{world_to_tile, WorldMap};
 
 const BLOCK_REACH: f32 = 5.0;
 
 pub fn block_interaction_system(
-    mut commands: Commands,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
@@ -21,7 +19,6 @@ pub fn block_interaction_system(
     terrain_tiles: Res<TerrainTiles>,
     tile_registry: Res<TileRegistry>,
     mut world_map: ResMut<WorldMap>,
-    mut tilemap_query: Query<(&ChunkCoord, &mut TileStorage, Entity)>,
 ) {
     let left_click = mouse.just_pressed(MouseButton::Left);
     let right_click = mouse.just_pressed(MouseButton::Right);
@@ -56,12 +53,6 @@ pub fn block_interaction_system(
         return;
     }
 
-    let wrapped_tile_x = world_config.wrap_tile_x(tile_x);
-    let data_chunk_x = wrapped_tile_x.div_euclid(world_config.chunk_size as i32);
-    let data_chunk_y = tile_y.div_euclid(world_config.chunk_size as i32);
-    let (local_x, local_y) = tile_to_local(tile_x, tile_y, world_config.chunk_size);
-    let tile_pos = TilePos::new(local_x, local_y);
-
     if left_click {
         // Break block
         let current = world_map.get_tile(tile_x, tile_y, &world_config, &terrain_tiles);
@@ -70,14 +61,6 @@ pub fn block_interaction_system(
         }
 
         world_map.set_tile(tile_x, tile_y, TileId::AIR, &world_config, &terrain_tiles);
-
-        for (coord, mut storage, _entity) in &mut tilemap_query {
-            if world_config.wrap_chunk_x(coord.x) == data_chunk_x && coord.y == data_chunk_y {
-                if let Some(tile_entity) = storage.remove(&tile_pos) {
-                    commands.entity(tile_entity).despawn();
-                }
-            }
-        }
     } else if right_click {
         // Place block
         let current = world_map.get_tile(tile_x, tile_y, &world_config, &terrain_tiles);
@@ -106,22 +89,5 @@ pub fn block_interaction_system(
 
         let place_id = tile_registry.by_name("dirt");
         world_map.set_tile(tile_x, tile_y, place_id, &world_config, &terrain_tiles);
-
-        for (coord, mut storage, entity) in &mut tilemap_query {
-            if world_config.wrap_chunk_x(coord.x) == data_chunk_x && coord.y == data_chunk_y {
-                let tilemap_id = TilemapId(entity);
-                let tex_idx = tile_registry.texture_index(place_id).unwrap();
-                let tile_entity = commands
-                    .spawn(TileBundle {
-                        position: tile_pos,
-                        tilemap_id,
-                        texture_index: TileTextureIndex(tex_idx),
-                        ..Default::default()
-                    })
-                    .id();
-                commands.entity(entity).add_child(tile_entity);
-                storage.set(&tile_pos, tile_entity);
-            }
-        }
     }
 }

@@ -1,12 +1,10 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use bevy::prelude::*;
-use bevy_ecs_tilemap::prelude::*;
-
 use crate::registry::tile::{TerrainTiles, TileId, TileRegistry};
 use crate::registry::world::WorldConfig;
 use crate::world::terrain_gen;
+use bevy::prelude::*;
 
 /// Marker component on tilemap entities to identify which chunk they represent.
 #[derive(Component)]
@@ -133,10 +131,6 @@ pub struct LoadedChunks {
     pub map: HashMap<(i32, i32), Entity>,
 }
 
-/// Handle to the tile atlas texture.
-#[derive(Resource)]
-pub struct TilemapTextureHandle(pub Handle<Image>);
-
 // --- Coordinate conversion helpers ---
 
 pub fn tile_to_chunk(tile_x: i32, tile_y: i32, chunk_size: u32) -> (i32, i32) {
@@ -160,12 +154,12 @@ pub fn world_to_tile(world_x: f32, world_y: f32, tile_size: f32) -> (i32, i32) {
     )
 }
 
+/// Spawn a stub entity for a chunk. Generates terrain data but does not create
+/// any visual representation yet — the mesh-per-chunk renderer will handle that.
 pub fn spawn_chunk(
     commands: &mut Commands,
     world_map: &mut WorldMap,
     loaded_chunks: &mut LoadedChunks,
-    texture_handle: &Handle<Image>,
-    registry: &TileRegistry,
     wc: &WorldConfig,
     tt: &TerrainTiles,
     display_chunk_x: i32,
@@ -175,67 +169,18 @@ pub fn spawn_chunk(
         return;
     }
 
+    // Ensure chunk data is generated and cached in WorldMap
     let data_chunk_x = wc.wrap_chunk_x(display_chunk_x);
-    let chunk_data = world_map.get_or_generate_chunk(data_chunk_x, chunk_y, wc, tt);
-    let tilemap_size = TilemapSize::new(wc.chunk_size, wc.chunk_size);
-    let mut tile_storage = TileStorage::empty(tilemap_size);
-    let tile_size = TilemapTileSize::new(wc.tile_size, wc.tile_size);
+    world_map.get_or_generate_chunk(data_chunk_x, chunk_y, wc, tt);
 
-    let tilemap_entity = commands.spawn_empty().id();
-    let tilemap_id = TilemapId(tilemap_entity);
-
-    commands.entity(tilemap_entity).with_children(|parent| {
-        for local_y in 0..wc.chunk_size {
-            for local_x in 0..wc.chunk_size {
-                let tile_id = chunk_data.get(local_x, local_y, wc.chunk_size);
-                if let Some(tex_idx) = registry.texture_index(tile_id) {
-                    let tile_pos = TilePos::new(local_x, local_y);
-                    let tile_entity = parent
-                        .spawn(TileBundle {
-                            position: tile_pos,
-                            tilemap_id,
-                            texture_index: TileTextureIndex(tex_idx),
-                            ..Default::default()
-                        })
-                        .id();
-                    tile_storage.set(&tile_pos, tile_entity);
-                }
-            }
-        }
-    });
-
-    let display_position = Vec3::new(
-        display_chunk_x as f32 * wc.chunk_size as f32 * wc.tile_size,
-        chunk_y as f32 * wc.chunk_size as f32 * wc.tile_size,
-        0.0,
-    );
-
-    let grid_size: TilemapGridSize = tile_size.into();
-    commands.entity(tilemap_entity).insert((
-        TilemapBundle {
-            grid_size,
-            map_type: TilemapType::Square,
-            size: tilemap_size,
-            storage: tile_storage,
-            texture: TilemapTexture::Single(texture_handle.clone()),
-            tile_size,
-            transform: Transform::from_translation(display_position),
-            render_settings: TilemapRenderSettings {
-                render_chunk_size: UVec2::new(wc.chunk_size, wc.chunk_size),
-                y_sort: false,
-            },
-            anchor: TilemapAnchor::BottomLeft,
-            ..Default::default()
-        },
-        ChunkCoord {
+    let entity = commands
+        .spawn(ChunkCoord {
             x: display_chunk_x,
             y: chunk_y,
-        },
-    ));
+        })
+        .id();
 
-    loaded_chunks
-        .map
-        .insert((display_chunk_x, chunk_y), tilemap_entity);
+    loaded_chunks.map.insert((display_chunk_x, chunk_y), entity);
 }
 
 pub fn despawn_chunk(
@@ -254,8 +199,6 @@ pub fn chunk_loading_system(
     camera_query: Query<&Transform, With<Camera2d>>,
     mut world_map: ResMut<WorldMap>,
     mut loaded_chunks: ResMut<LoadedChunks>,
-    texture_handle: Res<TilemapTextureHandle>,
-    registry: Res<TileRegistry>,
     wc: Res<WorldConfig>,
     tt: Res<TerrainTiles>,
 ) {
@@ -295,8 +238,6 @@ pub fn chunk_loading_system(
                 &mut commands,
                 &mut world_map,
                 &mut loaded_chunks,
-                &texture_handle.0,
-                &registry,
                 &wc,
                 &tt,
                 display_cx,

@@ -8,7 +8,6 @@ mod world;
 
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
-use bevy_ecs_tilemap::prelude::*;
 use bevy_egui::EguiPlugin;
 
 fn main() {
@@ -25,7 +24,6 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_plugins(TilemapPlugin)
         .add_plugins(EguiPlugin::default())
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_plugins(registry::RegistryPlugin)
