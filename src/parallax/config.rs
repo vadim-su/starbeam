@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 
+/// Definition of a single parallax layer from RON.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ParallaxLayerDef {
     pub name: String,
@@ -12,7 +13,8 @@ pub struct ParallaxLayerDef {
     pub z_order: f32,
 }
 
-#[derive(Resource, Debug, Clone)]
+/// Runtime resource holding the parallax configuration.
+#[derive(Resource, Debug, Clone, Deserialize)]
 pub struct ParallaxConfig {
     pub layers: Vec<ParallaxLayerDef>,
 }
