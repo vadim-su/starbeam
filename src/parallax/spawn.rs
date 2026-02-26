@@ -13,6 +13,11 @@ pub struct ParallaxLayer {
     pub initialized: bool,  // for repeat tiling (Task 4)
 }
 
+/// Marker for individual tile sprites within a repeating parallax layer.
+/// These are spawned as children of the `ParallaxLayer` entity.
+#[derive(Component)]
+pub struct ParallaxTile;
+
 /// Spawn parallax layer entities from config.
 /// Runs on OnEnter(InGame) and also in Update to respawn after hot-reload despawn.
 pub fn spawn_parallax_layers(
