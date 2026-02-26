@@ -1,3 +1,5 @@
+pub mod atlas;
+pub mod autotile;
 pub mod chunk;
 pub mod terrain_gen;
 pub mod tile;

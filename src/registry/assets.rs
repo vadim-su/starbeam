@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use bevy::prelude::*;
 use bevy::reflect::TypePath;
 use serde::Deserialize;
@@ -36,4 +38,32 @@ pub struct WorldConfigAsset {
 #[derive(Asset, TypePath, Debug, Deserialize)]
 pub struct ParallaxConfigAsset {
     pub layers: Vec<ParallaxLayerDef>,
+}
+
+/// A single sprite variant within a bitmask mapping.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SpriteVariant {
+    pub row: u32,
+    pub weight: f32,
+    #[serde(default)]
+    pub col: u32,
+    #[serde(default)]
+    pub index: u32,
+}
+
+/// Mapping for a single bitmask value: description + weighted variants.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BitmaskMapping {
+    #[serde(default)]
+    pub description: String,
+    pub variants: Vec<SpriteVariant>,
+}
+
+/// Asset loaded from *.autotile.ron
+#[derive(Asset, TypePath, Debug, Deserialize)]
+pub struct AutotileAsset {
+    pub tile_size: u32,
+    pub atlas_columns: u32,
+    pub atlas_rows: u32,
+    pub tiles: HashMap<u8, BitmaskMapping>,
 }

@@ -8,7 +8,7 @@ use bevy::asset::AssetEvent;
 use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
 
-use assets::{ParallaxConfigAsset, PlayerDefAsset, TileRegistryAsset, WorldConfigAsset};
+use assets::{AutotileAsset, ParallaxConfigAsset, PlayerDefAsset, TileRegistryAsset, WorldConfigAsset};
 use loader::RonLoader;
 use player::PlayerConfig;
 use tile::TileRegistry;
@@ -51,10 +51,12 @@ impl Plugin for RegistryPlugin {
             .init_asset::<PlayerDefAsset>()
             .init_asset::<WorldConfigAsset>()
             .init_asset::<ParallaxConfigAsset>()
+            .init_asset::<AutotileAsset>()
             .register_asset_loader(RonLoader::<TileRegistryAsset>::new(&["registry.ron"]))
             .register_asset_loader(RonLoader::<PlayerDefAsset>::new(&["def.ron"]))
             .register_asset_loader(RonLoader::<WorldConfigAsset>::new(&["config.ron"]))
             .register_asset_loader(RonLoader::<ParallaxConfigAsset>::new(&["parallax.ron"]))
+            .register_asset_loader(RonLoader::<AutotileAsset>::new(&["autotile.ron"]))
             .add_systems(Startup, start_loading)
             .add_systems(Update, check_loading.run_if(in_state(AppState::Loading)))
             .add_systems(
