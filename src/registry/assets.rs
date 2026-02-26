@@ -3,6 +3,7 @@ use bevy::reflect::TypePath;
 use serde::Deserialize;
 
 use super::tile::TileDef;
+use crate::parallax::config::ParallaxLayerDef;
 
 /// Asset loaded from tiles.registry.ron
 #[derive(Asset, TypePath, Debug, Deserialize)]
@@ -29,4 +30,10 @@ pub struct WorldConfigAsset {
     pub tile_size: f32,
     pub chunk_load_radius: i32,
     pub seed: u32,
+}
+
+/// Asset loaded from bg.parallax.ron
+#[derive(Asset, TypePath, Debug, Deserialize)]
+pub struct ParallaxConfigAsset {
+    pub layers: Vec<ParallaxLayerDef>,
 }

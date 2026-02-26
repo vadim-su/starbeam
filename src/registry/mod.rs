@@ -8,11 +8,13 @@ use bevy::asset::AssetEvent;
 use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
 
-use assets::{PlayerDefAsset, TileRegistryAsset, WorldConfigAsset};
+use assets::{ParallaxConfigAsset, PlayerDefAsset, TileRegistryAsset, WorldConfigAsset};
 use loader::RonLoader;
 use player::PlayerConfig;
 use tile::TileRegistry;
 use world::WorldConfig;
+
+use crate::parallax::config::ParallaxConfig;
 
 /// Keeps asset handles alive for hot-reload detection.
 #[derive(Resource)]
@@ -20,6 +22,7 @@ pub struct RegistryHandles {
     pub tiles: Handle<TileRegistryAsset>,
     pub player: Handle<PlayerDefAsset>,
     pub world_config: Handle<WorldConfigAsset>,
+    pub parallax: Handle<ParallaxConfigAsset>,
 }
 
 /// Application state: Loading waits for assets, InGame runs gameplay.
@@ -36,6 +39,7 @@ struct LoadingAssets {
     tiles: Handle<TileRegistryAsset>,
     player: Handle<PlayerDefAsset>,
     world_config: Handle<WorldConfigAsset>,
+    parallax: Handle<ParallaxConfigAsset>,
 }
 
 pub struct RegistryPlugin;
@@ -46,9 +50,11 @@ impl Plugin for RegistryPlugin {
             .init_asset::<TileRegistryAsset>()
             .init_asset::<PlayerDefAsset>()
             .init_asset::<WorldConfigAsset>()
+            .init_asset::<ParallaxConfigAsset>()
             .register_asset_loader(RonLoader::<TileRegistryAsset>::new(&["registry.ron"]))
             .register_asset_loader(RonLoader::<PlayerDefAsset>::new(&["def.ron"]))
             .register_asset_loader(RonLoader::<WorldConfigAsset>::new(&["config.ron"]))
+            .register_asset_loader(RonLoader::<ParallaxConfigAsset>::new(&["parallax.ron"]))
             .add_systems(Startup, start_loading)
             .add_systems(Update, check_loading.run_if(in_state(AppState::Loading)))
             .add_systems(
@@ -57,6 +63,7 @@ impl Plugin for RegistryPlugin {
                     hot_reload_player,
                     hot_reload_world,
                     hot_reload_tiles,
+                    hot_reload_parallax,
                 )
                     .run_if(in_state(AppState::InGame)),
             );
@@ -67,10 +74,12 @@ fn start_loading(mut commands: Commands, asset_server: Res<AssetServer>) {
     let tiles = asset_server.load::<TileRegistryAsset>("data/tiles.registry.ron");
     let player = asset_server.load::<PlayerDefAsset>("data/player.def.ron");
     let world_config = asset_server.load::<WorldConfigAsset>("data/world.config.ron");
+    let parallax = asset_server.load::<ParallaxConfigAsset>("data/bg.parallax.ron");
     commands.insert_resource(LoadingAssets {
         tiles,
         player,
         world_config,
+        parallax,
     });
 }
 
@@ -80,12 +89,14 @@ fn check_loading(
     tile_assets: Res<Assets<TileRegistryAsset>>,
     player_assets: Res<Assets<PlayerDefAsset>>,
     world_assets: Res<Assets<WorldConfigAsset>>,
+    parallax_assets: Res<Assets<ParallaxConfigAsset>>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
-    let (Some(tiles), Some(player), Some(world_cfg)) = (
+    let (Some(tiles), Some(player), Some(world_cfg), Some(parallax)) = (
         tile_assets.get(&loading.tiles),
         player_assets.get(&loading.player),
         world_assets.get(&loading.world_config),
+        parallax_assets.get(&loading.parallax),
     ) else {
         return; // not loaded yet
     };
@@ -114,12 +125,16 @@ fn check_loading(
         chunk_load_radius: world_cfg.chunk_load_radius,
         seed: world_cfg.seed,
     });
+    commands.insert_resource(ParallaxConfig {
+        layers: parallax.layers.clone(),
+    });
 
     // Keep handles alive for hot-reload
     commands.insert_resource(RegistryHandles {
         tiles: loading.tiles.clone(),
         player: loading.player.clone(),
         world_config: loading.world_config.clone(),
+        parallax: loading.parallax.clone(),
     });
     commands.remove_resource::<LoadingAssets>();
     next_state.set(AppState::InGame);
@@ -191,6 +206,29 @@ fn hot_reload_tiles(
                     };
                     *registry = new_reg;
                     info!("Hot-reloaded TileRegistry ({} tiles)", asset.tiles.len());
+                }
+            }
+        }
+    }
+}
+
+fn hot_reload_parallax(
+    mut events: MessageReader<AssetEvent<ParallaxConfigAsset>>,
+    handles: Res<RegistryHandles>,
+    assets: Res<Assets<ParallaxConfigAsset>>,
+    mut config: ResMut<ParallaxConfig>,
+) {
+    for event in events.read() {
+        if let AssetEvent::Modified { id } = event {
+            if *id == handles.parallax.id() {
+                if let Some(asset) = assets.get(&handles.parallax) {
+                    config.layers = asset.layers.clone();
+                    // ParallaxLayer entities will be despawned/respawned by the parallax
+                    // spawn system once it detects the config change (added in a later task).
+                    info!(
+                        "Hot-reloaded ParallaxConfig ({} layers)",
+                        asset.layers.len()
+                    );
                 }
             }
         }
