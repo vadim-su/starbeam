@@ -3,7 +3,6 @@ pub mod autotile;
 pub mod chunk;
 pub mod mesh_builder;
 pub mod terrain_gen;
-pub mod tile;
 pub mod tile_renderer;
 
 use bevy::prelude::*;

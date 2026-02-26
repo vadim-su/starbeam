@@ -191,8 +191,21 @@ fn check_autotile_loading(
     autotile_assets: Res<Assets<AutotileAsset>>,
     mut image_assets: ResMut<Assets<Image>>,
     mut tile_materials: ResMut<Assets<TileMaterial>>,
+    asset_server: Res<AssetServer>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
+    // Check for load failures before waiting
+    for (name, handle) in &loading.rons {
+        if let bevy::asset::LoadState::Failed(_) = asset_server.load_state(handle) {
+            error!("Failed to load autotile RON: {name} — check file exists and is valid");
+        }
+    }
+    for (name, handle) in &loading.images {
+        if let bevy::asset::LoadState::Failed(_) = asset_server.load_state(handle) {
+            error!("Failed to load autotile image: {name} — check file exists");
+        }
+    }
+
     // Wait until all .autotile.ron and .png assets are loaded
     let all_rons = loading.rons.iter().all(|(_, h)| autotile_assets.contains(h));
     let all_imgs = loading.images.iter().all(|(_, h)| image_assets.contains(h));
@@ -200,27 +213,47 @@ fn check_autotile_loading(
         return;
     }
 
+    // Read tile_size and rows from first loaded AutotileAsset for consistency
+    let first_ron = autotile_assets
+        .get(&loading.rons[0].1)
+        .expect("first autotile RON must be loaded");
+    let tile_size = first_ron.tile_size;
+    let rows = first_ron.atlas_rows;
+
     // Build combined atlas from per-type spritesheet images
     let sources: Vec<(&str, &Image)> = loading
         .images
         .iter()
-        .map(|(name, handle)| (name.as_str(), image_assets.get(handle).unwrap()))
+        .filter_map(|(name, handle)| {
+            image_assets.get(handle).map(|img| (name.as_str(), img)).or_else(|| {
+                error!("Failed to load autotile image: {name}");
+                None
+            })
+        })
         .collect();
 
-    let (atlas_image, column_map) = build_combined_atlas(&sources, 16, 47);
+    if sources.len() != loading.images.len() {
+        error!("Some autotile images failed to load, aborting atlas build");
+        return;
+    }
+
+    let (atlas_image, column_map) = build_combined_atlas(&sources, tile_size, rows);
     let num_types = sources.len() as u32;
     let params = AtlasParams {
-        tile_size: 16,
-        rows: 47,
-        atlas_width: num_types * 16,
-        atlas_height: 47 * 16,
+        tile_size,
+        rows,
+        atlas_width: num_types * tile_size,
+        atlas_height: rows * tile_size,
     };
     let atlas_handle = image_assets.add(atlas_image);
 
     // Build AutotileRegistry from loaded .autotile.ron assets
     let mut autotile_reg = AutotileRegistry::default();
     for (name, handle) in &loading.rons {
-        let asset = autotile_assets.get(handle).unwrap();
+        let Some(asset) = autotile_assets.get(handle) else {
+            error!("Failed to get autotile RON asset: {name}");
+            continue;
+        };
         let col_idx = column_map[name.as_str()];
         autotile_reg
             .entries

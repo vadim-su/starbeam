@@ -42,7 +42,7 @@ pub struct ParallaxConfigAsset {
 
 /// A single sprite variant within a bitmask mapping.
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
+#[allow(dead_code)] // col, index: present for RON compatibility with autotile47.py output
 pub struct SpriteVariant {
     pub row: u32,
     pub weight: f32,
@@ -54,7 +54,7 @@ pub struct SpriteVariant {
 
 /// Mapping for a single bitmask value: description + weighted variants.
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
+#[allow(dead_code)] // description: present for RON readability, not used at runtime
 pub struct BitmaskMapping {
     #[serde(default)]
     pub description: String,
@@ -63,7 +63,7 @@ pub struct BitmaskMapping {
 
 /// Asset loaded from *.autotile.ron
 #[derive(Asset, TypePath, Debug, Deserialize)]
-#[allow(dead_code)]
+#[allow(dead_code)] // atlas_columns: reserved, not yet used at runtime
 pub struct AutotileAsset {
     pub tile_size: u32,
     pub atlas_columns: u32,

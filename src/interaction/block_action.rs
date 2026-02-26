@@ -92,6 +92,7 @@ pub fn block_interaction_system(
             return;
         }
 
+        // TODO: replace with player's selected block type from hotbar/inventory
         let place_id = tile_registry.by_name("dirt");
         world_map.set_tile(tile_x, tile_y, place_id, &world_config, &terrain_tiles);
     } else {

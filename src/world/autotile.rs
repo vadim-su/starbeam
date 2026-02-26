@@ -4,9 +4,11 @@ use bevy::prelude::*;
 
 use crate::registry::assets::{AutotileAsset, SpriteVariant};
 
-/// Chunk dimensions in tiles.
+/// Chunk dimensions in tiles. Must match `chunk_size` in `world.config.ron`.
+/// Used only for buffer pre-allocation capacity; actual chunk iteration uses
+/// `WorldConfig.chunk_size` at runtime.
 pub const CHUNK_SIZE: u32 = 32;
-/// Total tiles per chunk (CHUNK_SIZE * CHUNK_SIZE).
+/// Total tiles per chunk (CHUNK_SIZE²). Used for buffer pre-allocation.
 pub const CHUNK_TILE_COUNT: usize = (CHUNK_SIZE * CHUNK_SIZE) as usize;
 
 // Neighbor bit layout for 8-bit bitmask (Blob47 scheme).
@@ -119,6 +121,9 @@ pub fn position_hash(x: i32, y: i32, seed: u32) -> f32 {
 /// Select a variant from a weighted list using a deterministic position hash.
 /// Returns the `row` of the chosen variant in the atlas.
 pub fn select_variant(variants: &[SpriteVariant], x: i32, y: i32, seed: u32) -> u32 {
+    if variants.is_empty() {
+        return 0; // fallback to first row for malformed autotile data
+    }
     if variants.len() == 1 {
         return variants[0].row;
     }
@@ -225,6 +230,13 @@ mod tests {
                 assert!(h <= 1.0, "hash {h} above 1.0 at ({x}, {y})");
             }
         }
+    }
+
+    #[test]
+    fn select_variant_empty_returns_zero() {
+        let variants: Vec<SpriteVariant> = vec![];
+        let row = select_variant(&variants, 10, 20, 42);
+        assert_eq!(row, 0);
     }
 
     #[test]
