@@ -15,11 +15,14 @@ impl TileId {
 #[derive(Debug, Clone, Deserialize)]
 pub struct TileDef {
     pub id: String,
-    pub texture_index: Option<u32>,
+    pub autotile: Option<String>,
     pub solid: bool,
     pub hardness: f32,
     pub friction: f32,
     pub viscosity: f32,
+    pub damage_on_contact: f32,
+    #[serde(default)]
+    pub effects: Vec<String>,
 }
 
 /// Registry of all tile definitions. Inserted as a Resource after asset loading.
@@ -48,8 +51,8 @@ impl TileRegistry {
         self.defs[id.0 as usize].solid
     }
 
-    pub fn texture_index(&self, id: TileId) -> Option<u32> {
-        self.defs[id.0 as usize].texture_index
+    pub fn autotile_name(&self, id: TileId) -> Option<&str> {
+        self.defs[id.0 as usize].autotile.as_deref()
     }
 
     pub fn by_name(&self, name: &str) -> TileId {
@@ -68,35 +71,43 @@ mod tests {
         TileRegistry::from_defs(vec![
             TileDef {
                 id: "air".into(),
-                texture_index: None,
+                autotile: None,
                 solid: false,
                 hardness: 0.0,
                 friction: 0.0,
                 viscosity: 0.0,
+                damage_on_contact: 0.0,
+                effects: vec![],
             },
             TileDef {
                 id: "grass".into(),
-                texture_index: Some(0),
+                autotile: Some("grass".into()),
                 solid: true,
                 hardness: 1.0,
                 friction: 0.8,
                 viscosity: 0.0,
+                damage_on_contact: 0.0,
+                effects: vec![],
             },
             TileDef {
                 id: "dirt".into(),
-                texture_index: Some(1),
+                autotile: Some("dirt".into()),
                 solid: true,
                 hardness: 2.0,
                 friction: 0.7,
                 viscosity: 0.0,
+                damage_on_contact: 0.0,
+                effects: vec![],
             },
             TileDef {
                 id: "stone".into(),
-                texture_index: Some(2),
+                autotile: Some("stone".into()),
                 solid: true,
                 hardness: 5.0,
                 friction: 0.6,
                 viscosity: 0.0,
+                damage_on_contact: 0.0,
+                effects: vec![],
             },
         ])
     }
@@ -125,11 +136,11 @@ mod tests {
     }
 
     #[test]
-    fn texture_index() {
+    fn autotile_name() {
         let reg = test_registry();
-        assert_eq!(reg.texture_index(TileId::AIR), None);
-        assert_eq!(reg.texture_index(TileId(1)), Some(0));
-        assert_eq!(reg.texture_index(TileId(3)), Some(2));
+        assert_eq!(reg.autotile_name(TileId::AIR), None);
+        assert_eq!(reg.autotile_name(TileId(1)), Some("grass"));
+        assert_eq!(reg.autotile_name(TileId(3)), Some("stone"));
     }
 
     #[test]
