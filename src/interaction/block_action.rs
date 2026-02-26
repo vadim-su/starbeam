@@ -5,11 +5,14 @@ use crate::player::Player;
 use crate::registry::player::PlayerConfig;
 use crate::registry::tile::{TerrainTiles, TileId, TileRegistry};
 use crate::registry::world::WorldConfig;
-use crate::world::chunk::{world_to_tile, WorldMap};
+use crate::world::chunk::{
+    update_bitmasks_around, world_to_tile, ChunkDirty, LoadedChunks, WorldMap,
+};
 
 const BLOCK_REACH: f32 = 5.0;
 
 pub fn block_interaction_system(
+    mut commands: Commands,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
@@ -19,6 +22,7 @@ pub fn block_interaction_system(
     terrain_tiles: Res<TerrainTiles>,
     tile_registry: Res<TileRegistry>,
     mut world_map: ResMut<WorldMap>,
+    loaded_chunks: Res<LoadedChunks>,
 ) {
     let left_click = mouse.just_pressed(MouseButton::Left);
     let right_click = mouse.just_pressed(MouseButton::Right);
@@ -89,5 +93,26 @@ pub fn block_interaction_system(
 
         let place_id = tile_registry.by_name("dirt");
         world_map.set_tile(tile_x, tile_y, place_id, &world_config, &terrain_tiles);
+    } else {
+        return;
+    }
+
+    // Update bitmasks and mark dirty chunks
+    let dirty = update_bitmasks_around(
+        &mut world_map,
+        tile_x,
+        tile_y,
+        &world_config,
+        &terrain_tiles,
+        &tile_registry,
+    );
+
+    for (cx, cy) in dirty {
+        // Find ALL loaded chunk entities that map to this data chunk
+        for (&(display_cx, display_cy), &entity) in &loaded_chunks.map {
+            if world_config.wrap_chunk_x(display_cx) == cx && display_cy == cy {
+                commands.entity(entity).insert(ChunkDirty);
+            }
+        }
     }
 }

@@ -21,7 +21,9 @@ impl Plugin for WorldPlugin {
             .init_resource::<MeshBuildBuffers>()
             .add_systems(
                 Update,
-                chunk::chunk_loading_system.run_if(in_state(AppState::InGame)),
+                (chunk::chunk_loading_system, chunk::rebuild_dirty_chunks)
+                    .chain()
+                    .run_if(in_state(AppState::InGame)),
             );
     }
 }

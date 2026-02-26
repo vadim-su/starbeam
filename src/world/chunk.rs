@@ -169,6 +169,51 @@ pub fn world_to_tile(world_x: f32, world_y: f32, tile_size: f32) -> (i32, i32) {
     )
 }
 
+/// Recompute bitmasks for 3×3 area around (center_x, center_y).
+/// Returns set of affected data chunk coords that need mesh rebuild.
+pub fn update_bitmasks_around(
+    world_map: &mut WorldMap,
+    center_x: i32,
+    center_y: i32,
+    wc: &WorldConfig,
+    tt: &TerrainTiles,
+    registry: &TileRegistry,
+) -> HashSet<(i32, i32)> {
+    let mut dirty_chunks = HashSet::new();
+
+    for dy in -1..=1 {
+        for dx in -1..=1 {
+            let x = center_x + dx;
+            let y = center_y + dy;
+
+            if y < 0 || y >= wc.height_tiles {
+                continue;
+            }
+
+            let wrapped_x = wc.wrap_tile_x(x);
+            let (cx, cy) = tile_to_chunk(wrapped_x, y, wc.chunk_size);
+            let (lx, ly) = tile_to_local(wrapped_x, y, wc.chunk_size);
+            let idx = (ly * wc.chunk_size + lx) as usize;
+
+            let new_mask = compute_bitmask(
+                |bx, by| {
+                    let tile = world_map.get_tile(bx, by, wc, tt);
+                    registry.is_solid(tile)
+                },
+                wrapped_x,
+                y,
+            );
+
+            if let Some(chunk) = world_map.chunks.get_mut(&(cx, cy)) {
+                chunk.bitmasks[idx] = new_mask;
+                dirty_chunks.insert((cx, cy));
+            }
+        }
+    }
+
+    dirty_chunks
+}
+
 /// Compute bitmasks for all tiles in a chunk using neighbor solidity checks.
 pub fn init_chunk_bitmasks(
     world_map: &mut WorldMap,
