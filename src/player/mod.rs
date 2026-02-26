@@ -1,3 +1,4 @@
+pub mod animation;
 pub mod collision;
 pub mod movement;
 pub mod wrap;
@@ -9,6 +10,8 @@ use crate::registry::tile::TerrainTiles;
 use crate::registry::world::WorldConfig;
 use crate::registry::AppState;
 use crate::world::terrain_gen;
+
+use animation::{AnimationKind, AnimationState, CharacterAnimations};
 
 pub const MAX_DELTA_SECS: f32 = 1.0 / 20.0;
 
@@ -28,18 +31,22 @@ pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(AppState::InGame), spawn_player)
-            .add_systems(
-                Update,
-                (
-                    movement::player_input,
-                    movement::apply_gravity,
-                    collision::collision_system,
-                    wrap::player_wrap_system,
-                )
-                    .chain()
-                    .run_if(in_state(AppState::InGame)),
-            );
+        app.add_systems(
+            OnEnter(AppState::InGame),
+            (animation::load_character_animations, spawn_player).chain(),
+        )
+        .add_systems(
+            Update,
+            (
+                movement::player_input,
+                movement::apply_gravity,
+                collision::collision_system,
+                wrap::player_wrap_system,
+                animation::animate_player,
+            )
+                .chain()
+                .run_if(in_state(AppState::InGame)),
+        );
     }
 }
 
@@ -48,6 +55,7 @@ fn spawn_player(
     player_config: Res<PlayerConfig>,
     world_config: Res<WorldConfig>,
     _terrain_tiles: Res<TerrainTiles>,
+    animations: Res<CharacterAnimations>,
 ) {
     let spawn_tile_x = 0;
     let surface_y = terrain_gen::surface_height(world_config.seed, spawn_tile_x, &world_config);
@@ -59,10 +67,13 @@ fn spawn_player(
         Player,
         Velocity::default(),
         Grounded(false),
-        Sprite::from_color(
-            Color::srgb(0.2, 0.4, 0.9),
-            Vec2::new(player_config.width, player_config.height),
-        ),
+        AnimationState {
+            kind: AnimationKind::Idle,
+            frame: 0,
+            timer: Timer::from_seconds(0.15, TimerMode::Repeating),
+            facing_right: true,
+        },
+        Sprite::from_image(animations.idle[0].clone()),
         Transform::from_xyz(spawn_pixel_x, spawn_pixel_y, 1.0),
     ));
 }
