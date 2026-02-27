@@ -3,6 +3,8 @@
 //! Distributes biomes as contiguous horizontal regions across the world width,
 //! ensuring no two adjacent regions share the same biome (including cylindrical wrap).
 
+use bevy::prelude::Resource;
+
 // ---------------------------------------------------------------------------
 // Minimal splitmix64 RNG — no external crate needed
 // ---------------------------------------------------------------------------
@@ -44,7 +46,7 @@ pub struct BiomeRegion {
     pub width: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Resource)]
 pub struct BiomeMap {
     pub regions: Vec<BiomeRegion>,
     pub world_width: u32,

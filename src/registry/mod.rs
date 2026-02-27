@@ -5,11 +5,17 @@ pub mod player;
 pub mod tile;
 pub mod world;
 
+use std::collections::{HashMap, HashSet};
+
 use bevy::asset::AssetEvent;
 use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
 
-use assets::{AutotileAsset, BiomeAsset, ParallaxConfigAsset, PlanetTypeAsset, PlayerDefAsset, TileRegistryAsset, WorldConfigAsset};
+use assets::{
+    AutotileAsset, BiomeAsset, ParallaxConfigAsset, PlanetTypeAsset, PlayerDefAsset,
+    TileRegistryAsset, WorldConfigAsset,
+};
+use biome::{BiomeDef, BiomeRegistry, LayerConfig, LayerConfigs, PlanetConfig};
 use loader::RonLoader;
 use player::PlayerConfig;
 use tile::TileRegistry;
@@ -18,6 +24,7 @@ use world::WorldConfig;
 use crate::parallax::config::ParallaxConfig;
 use crate::world::atlas::{build_combined_atlas, AtlasParams, TileAtlas};
 use crate::world::autotile::{AutotileEntry, AutotileRegistry};
+use crate::world::biome_map::BiomeMap;
 use crate::world::tile_renderer::{SharedTileMaterial, TileMaterial};
 
 /// Keeps asset handles alive for hot-reload detection.
@@ -34,6 +41,7 @@ pub struct RegistryHandles {
 pub enum AppState {
     #[default]
     Loading,
+    LoadingBiomes,
     LoadingAutotile,
     InGame,
 }
@@ -52,6 +60,20 @@ struct LoadingAssets {
 struct LoadingAutotileAssets {
     rons: Vec<(String, Handle<AutotileAsset>)>,
     images: Vec<(String, Handle<Image>)>,
+}
+
+/// Intermediate resource holding handles during biome loading phase.
+#[derive(Resource)]
+struct LoadingBiomeAssets {
+    planet_type: Handle<PlanetTypeAsset>,
+    biomes: Vec<(String, Handle<BiomeAsset>)>,
+    parallax_configs: Vec<(String, Handle<ParallaxConfigAsset>)>,
+}
+
+/// Per-biome parallax configs, keyed by biome ID.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct BiomeParallaxConfigs {
+    pub configs: HashMap<String, ParallaxConfig>,
 }
 
 pub struct RegistryPlugin;
@@ -75,6 +97,10 @@ impl Plugin for RegistryPlugin {
             .register_asset_loader(RonLoader::<BiomeAsset>::new(&["biome.ron"]))
             .add_systems(Startup, start_loading)
             .add_systems(Update, check_loading.run_if(in_state(AppState::Loading)))
+            .add_systems(
+                Update,
+                check_biomes_loaded.run_if(in_state(AppState::LoadingBiomes)),
+            )
             .add_systems(OnEnter(AppState::LoadingAutotile), start_autotile_loading)
             .add_systems(
                 Update,
@@ -109,6 +135,7 @@ fn start_loading(mut commands: Commands, asset_server: Res<AssetServer>) {
 fn check_loading(
     mut commands: Commands,
     loading: Res<LoadingAssets>,
+    asset_server: Res<AssetServer>,
     tile_assets: Res<Assets<TileRegistryAsset>>,
     player_assets: Res<Assets<PlayerDefAsset>>,
     world_assets: Res<Assets<WorldConfigAsset>>,
@@ -160,9 +187,237 @@ fn check_loading(
         world_config: loading.world_config.clone(),
         parallax: loading.parallax.clone(),
     });
+
+    // Start loading the planet type asset for the biome pipeline
+    let planet_handle = asset_server.load::<PlanetTypeAsset>(format!(
+        "world/planet_types/{}.planet.ron",
+        world_cfg.planet_type
+    ));
+    commands.insert_resource(LoadingBiomeAssets {
+        planet_type: planet_handle,
+        biomes: Vec::new(),
+        parallax_configs: Vec::new(),
+    });
+
     commands.remove_resource::<LoadingAssets>();
+    next_state.set(AppState::LoadingBiomes);
+    info!("Base registry assets loaded, loading biome assets...");
+}
+
+/// Multi-phase system that loads planet type → biome assets → parallax configs,
+/// then builds BiomeRegistry, BiomeMap, PlanetConfig, and BiomeParallaxConfigs.
+#[allow(clippy::too_many_arguments)]
+fn check_biomes_loaded(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut loading: ResMut<LoadingBiomeAssets>,
+    planet_assets: Res<Assets<PlanetTypeAsset>>,
+    biome_assets: Res<Assets<BiomeAsset>>,
+    parallax_assets: Res<Assets<ParallaxConfigAsset>>,
+    tile_registry: Res<TileRegistry>,
+    world_config: Res<WorldConfig>,
+    mut next_state: ResMut<NextState<AppState>>,
+) {
+    // Check for planet type load failure
+    if let bevy::asset::LoadState::Failed(_) = asset_server.load_state(&loading.planet_type) {
+        error!(
+            "Failed to load planet type asset — check file exists and is valid"
+        );
+        return;
+    }
+
+    // Phase 1: Wait for planet type to load, then kick off biome loading
+    let Some(planet_asset) = planet_assets.get(&loading.planet_type) else {
+        return; // planet type not loaded yet
+    };
+
+    if loading.biomes.is_empty() {
+        // Collect all unique biome IDs from the planet type
+        let mut biome_ids = HashSet::new();
+        biome_ids.insert(planet_asset.primary_biome.clone());
+        for id in &planet_asset.secondary_biomes {
+            biome_ids.insert(id.clone());
+        }
+        // Also collect biomes referenced in layer configs
+        if let Some(ref b) = planet_asset.layers.surface.primary_biome {
+            biome_ids.insert(b.clone());
+        }
+        if let Some(ref b) = planet_asset.layers.underground.primary_biome {
+            biome_ids.insert(b.clone());
+        }
+        if let Some(ref b) = planet_asset.layers.deep_underground.primary_biome {
+            biome_ids.insert(b.clone());
+        }
+        if let Some(ref b) = planet_asset.layers.core.primary_biome {
+            biome_ids.insert(b.clone());
+        }
+
+        // Load each biome asset
+        for id in &biome_ids {
+            let handle =
+                asset_server.load::<BiomeAsset>(format!("world/biomes/{id}/{id}.biome.ron"));
+            loading.biomes.push((id.clone(), handle));
+        }
+
+        info!("Loading {} biome assets...", loading.biomes.len());
+        return; // wait for next frame
+    }
+
+    // Check for biome load failures
+    for (name, handle) in &loading.biomes {
+        if let bevy::asset::LoadState::Failed(_) = asset_server.load_state(handle) {
+            error!("Failed to load biome asset: {name} — check file exists and is valid");
+        }
+    }
+
+    // Phase 2: Wait for all biomes to load, then load parallax configs
+    let all_biomes_loaded = loading
+        .biomes
+        .iter()
+        .all(|(_, h)| biome_assets.contains(h));
+    if !all_biomes_loaded {
+        return;
+    }
+
+    if loading.parallax_configs.is_empty() {
+        // Collect parallax paths from loaded biome assets (separate pass to avoid borrow conflict)
+        let parallax_to_load: Vec<(String, String)> = loading
+            .biomes
+            .iter()
+            .filter_map(|(biome_id, handle)| {
+                biome_assets
+                    .get(handle)
+                    .and_then(|asset| asset.parallax.as_ref().map(|p| (biome_id.clone(), p.clone())))
+            })
+            .collect();
+
+        if !parallax_to_load.is_empty() {
+            for (biome_id, parallax_path) in &parallax_to_load {
+                let parallax_handle =
+                    asset_server.load::<ParallaxConfigAsset>(parallax_path.clone());
+                loading
+                    .parallax_configs
+                    .push((biome_id.clone(), parallax_handle));
+            }
+
+            info!(
+                "Loading {} biome parallax configs...",
+                loading.parallax_configs.len()
+            );
+            return; // wait for next frame
+        }
+        // If no biome has parallax, fall through to Phase 3
+    }
+
+    // Check for parallax load failures
+    for (name, handle) in &loading.parallax_configs {
+        if let bevy::asset::LoadState::Failed(_) = asset_server.load_state(handle) {
+            error!("Failed to load biome parallax config: {name} — check file exists");
+        }
+    }
+
+    // Phase 3: Wait for all parallax configs, then build resources
+    if !loading.parallax_configs.is_empty() {
+        let all_parallax_loaded = loading
+            .parallax_configs
+            .iter()
+            .all(|(_, h)| parallax_assets.contains(h));
+        if !all_parallax_loaded {
+            return;
+        }
+    }
+
+    // --- Build PlanetConfig ---
+    let planet_config = PlanetConfig {
+        id: planet_asset.id.clone(),
+        primary_biome: planet_asset.primary_biome.clone(),
+        secondary_biomes: planet_asset.secondary_biomes.clone(),
+        layers: LayerConfigs {
+            surface: LayerConfig {
+                primary_biome: planet_asset.layers.surface.primary_biome.clone(),
+                terrain_frequency: planet_asset.layers.surface.terrain_frequency,
+                terrain_amplitude: planet_asset.layers.surface.terrain_amplitude,
+            },
+            underground: LayerConfig {
+                primary_biome: planet_asset.layers.underground.primary_biome.clone(),
+                terrain_frequency: planet_asset.layers.underground.terrain_frequency,
+                terrain_amplitude: planet_asset.layers.underground.terrain_amplitude,
+            },
+            deep_underground: LayerConfig {
+                primary_biome: planet_asset.layers.deep_underground.primary_biome.clone(),
+                terrain_frequency: planet_asset.layers.deep_underground.terrain_frequency,
+                terrain_amplitude: planet_asset.layers.deep_underground.terrain_amplitude,
+            },
+            core: LayerConfig {
+                primary_biome: planet_asset.layers.core.primary_biome.clone(),
+                terrain_frequency: planet_asset.layers.core.terrain_frequency,
+                terrain_amplitude: planet_asset.layers.core.terrain_amplitude,
+            },
+        },
+        region_width_min: planet_asset.region_width_min,
+        region_width_max: planet_asset.region_width_max,
+        primary_region_ratio: planet_asset.primary_region_ratio,
+    };
+
+    // --- Build BiomeRegistry ---
+    let mut biome_registry = BiomeRegistry::default();
+    for (id, handle) in &loading.biomes {
+        let asset = biome_assets.get(handle).unwrap();
+        biome_registry.biomes.insert(
+            id.clone(),
+            BiomeDef {
+                id: asset.id.clone(),
+                surface_block: tile_registry.by_name(&asset.surface_block),
+                subsurface_block: tile_registry.by_name(&asset.subsurface_block),
+                subsurface_depth: asset.subsurface_depth,
+                fill_block: tile_registry.by_name(&asset.fill_block),
+                cave_threshold: asset.cave_threshold,
+                parallax_path: asset.parallax.clone(),
+            },
+        );
+    }
+
+    // --- Build BiomeMap ---
+    let secondaries: Vec<&str> = planet_config
+        .secondary_biomes
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+    let biome_map = BiomeMap::generate(
+        &planet_config.primary_biome,
+        &secondaries,
+        world_config.seed as u64,
+        world_config.width_tiles as u32,
+        planet_config.region_width_min,
+        planet_config.region_width_max,
+        planet_config.primary_region_ratio,
+    );
+    let region_count = biome_map.regions.len();
+
+    // --- Build BiomeParallaxConfigs ---
+    let mut biome_parallax = BiomeParallaxConfigs::default();
+    for (biome_id, handle) in &loading.parallax_configs {
+        let asset = parallax_assets.get(handle).unwrap();
+        biome_parallax.configs.insert(
+            biome_id.clone(),
+            ParallaxConfig {
+                layers: asset.layers.clone(),
+            },
+        );
+    }
+
+    // Insert all resources
+    commands.insert_resource(planet_config);
+    commands.insert_resource(biome_registry);
+    commands.insert_resource(biome_map);
+    commands.insert_resource(biome_parallax);
+
+    commands.remove_resource::<LoadingBiomeAssets>();
     next_state.set(AppState::LoadingAutotile);
-    info!("Base registry assets loaded, loading autotile assets...");
+    info!(
+        "Biomes loaded, BiomeMap generated with {} regions",
+        region_count
+    );
 }
 
 fn start_autotile_loading(
