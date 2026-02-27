@@ -27,6 +27,8 @@ pub struct ChunkDirty;
 pub struct ChunkData {
     pub tiles: Vec<TileId>,
     pub bitmasks: Vec<u8>,
+    /// Per-tile light level: 0 = full dark, 255 = full light.
+    pub light_levels: Vec<u8>,
     #[allow(dead_code)] // Reserved for future block-damage system
     pub damage: Vec<u8>,
 }
@@ -73,6 +75,7 @@ impl WorldMap {
             ChunkData {
                 tiles,
                 bitmasks: vec![0; len],
+                light_levels: vec![255; len],
                 damage: vec![0; len],
             }
         })
@@ -265,6 +268,7 @@ pub fn spawn_chunk(
     let mesh = build_chunk_mesh(
         &chunk_data.tiles,
         &chunk_data.bitmasks,
+        &chunk_data.light_levels,
         display_chunk_x,
         chunk_y,
         ctx.config.chunk_size,
@@ -402,6 +406,7 @@ pub fn rebuild_dirty_chunks(
         let mesh = build_chunk_mesh(
             &chunk_data.tiles,
             &chunk_data.bitmasks,
+            &chunk_data.light_levels,
             coord.x,
             coord.y,
             wc.chunk_size,
