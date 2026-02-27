@@ -40,6 +40,7 @@ fn main() {
         .add_plugins(parallax::ParallaxPlugin)
         .add_plugins(interaction::InteractionPlugin)
         .add_plugins(ui::UiPlugin)
+        .add_plugins(item::ItemPlugin)
         .configure_sets(
             Update,
             (
