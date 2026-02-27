@@ -235,9 +235,11 @@ fn prepare_rc_textures(
         return;
     };
 
-    if !input.dirty {
-        return;
-    }
+    // NOTE: We upload every frame unconditionally. The `dirty` flag on
+    // `RcInputData` cannot be reset from the render world (it's a clone via
+    // `ExtractResource`), and the main-world system always sets it to `true`.
+    // Skipping uploads when the camera is stationary would require proper
+    // change detection — left as a future optimisation.
 
     let w = config.input_size.x;
     let h = config.input_size.y;
@@ -260,6 +262,8 @@ fn prepare_rc_textures(
 
     // Upload density (R8Unorm — 1 byte per texel)
     if let Some(gpu_img) = gpu_images.get(&handles.density) {
+        let row_bytes = w; // 1 byte per texel
+        let (padded, aligned_bpr) = pad_rows(&input.density, row_bytes, h);
         render_queue.write_texture(
             TexelCopyTextureInfo {
                 texture: &gpu_img.texture,
@@ -267,10 +271,10 @@ fn prepare_rc_textures(
                 origin: Origin3d::ZERO,
                 aspect: TextureAspect::All,
             },
-            &input.density,
+            &padded,
             TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(w),
+                bytes_per_row: Some(aligned_bpr),
                 rows_per_image: Some(h),
             },
             extent,
@@ -280,6 +284,8 @@ fn prepare_rc_textures(
     // Upload emissive (Rgba16Float — 8 bytes per texel)
     if let Some(gpu_img) = gpu_images.get(&handles.emissive) {
         let emissive_bytes = emissive_to_f16_bytes(&input.emissive);
+        let row_bytes = w * 8;
+        let (padded, aligned_bpr) = pad_rows(&emissive_bytes, row_bytes, h);
         render_queue.write_texture(
             TexelCopyTextureInfo {
                 texture: &gpu_img.texture,
@@ -287,10 +293,10 @@ fn prepare_rc_textures(
                 origin: Origin3d::ZERO,
                 aspect: TextureAspect::All,
             },
-            &emissive_bytes,
+            &padded,
             TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(w * 8),
+                bytes_per_row: Some(aligned_bpr),
                 rows_per_image: Some(h),
             },
             extent,
@@ -300,6 +306,8 @@ fn prepare_rc_textures(
     // Upload albedo (Rgba8Unorm — 4 bytes per texel)
     if let Some(gpu_img) = gpu_images.get(&handles.albedo) {
         let albedo_bytes: &[u8] = input.albedo.as_flattened();
+        let row_bytes = w * 4;
+        let (padded, aligned_bpr) = pad_rows(albedo_bytes, row_bytes, h);
         render_queue.write_texture(
             TexelCopyTextureInfo {
                 texture: &gpu_img.texture,
@@ -307,15 +315,41 @@ fn prepare_rc_textures(
                 origin: Origin3d::ZERO,
                 aspect: TextureAspect::All,
             },
-            albedo_bytes,
+            &padded,
             TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(w * 4),
+                bytes_per_row: Some(aligned_bpr),
                 rows_per_image: Some(h),
             },
             extent,
         );
     }
+}
+
+/// wgpu requires `bytes_per_row` to be a multiple of `COPY_BYTES_PER_ROW_ALIGNMENT` (256).
+const COPY_ROW_ALIGN: u32 = 256;
+
+/// Round up to the next multiple of [`COPY_ROW_ALIGN`].
+fn align_bytes_per_row(unaligned: u32) -> u32 {
+    unaligned.div_ceil(COPY_ROW_ALIGN) * COPY_ROW_ALIGN
+}
+
+/// Build a row-aligned copy of `src` for `write_texture`.
+/// `row_bytes` is the unpadded byte width of one row.
+/// Returns the padded buffer and the aligned bytes-per-row value.
+fn pad_rows(src: &[u8], row_bytes: u32, h: u32) -> (Vec<u8>, u32) {
+    let aligned = align_bytes_per_row(row_bytes);
+    if aligned == row_bytes {
+        return (src.to_vec(), aligned);
+    }
+    let mut buf = vec![0u8; (aligned * h) as usize];
+    for y in 0..h as usize {
+        let src_start = y * row_bytes as usize;
+        let dst_start = y * aligned as usize;
+        buf[dst_start..dst_start + row_bytes as usize]
+            .copy_from_slice(&src[src_start..src_start + row_bytes as usize]);
+    }
+    (buf, aligned)
 }
 
 /// Convert `[f32; 4]` emissive data to half-float bytes for `Rgba16Float`.
@@ -441,13 +475,16 @@ fn prepare_rc_bind_groups(
             cascade_count,
             viewport_offset: config.viewport_offset,
             viewport_size: config.viewport_size,
-            bounce_damping: 0.5,
+            bounce_damping: config.bounce_damping,
             _pad0: 0.0,
             _pad1: UVec2::ZERO,
         };
 
         let mut uniform_buf = encase::UniformBuffer::new(Vec::<u8>::new());
-        uniform_buf.write(&uniforms).unwrap();
+        if let Err(e) = uniform_buf.write(&uniforms) {
+            warn!("RC cascade uniform write failed: {e}");
+            return;
+        }
         let uniform_bytes = uniform_buf.into_inner();
 
         let gpu_uniform = render_device.create_buffer_with_data(&BufferInitDescriptor {
@@ -485,7 +522,10 @@ fn prepare_rc_bind_groups(
     };
 
     let mut uniform_buf = encase::UniformBuffer::new(Vec::<u8>::new());
-    uniform_buf.write(&finalize_uniforms).unwrap();
+    if let Err(e) = uniform_buf.write(&finalize_uniforms) {
+        warn!("RC finalize uniform write failed: {e}");
+        return;
+    }
     let uniform_bytes = uniform_buf.into_inner();
 
     let gpu_uniform = render_device.create_buffer_with_data(&BufferInitDescriptor {
@@ -569,8 +609,8 @@ impl Node for RcComputeNode {
                 continue;
             }
 
-            let workgroups_x = (probes_w + 7) / 8;
-            let workgroups_y = (probes_h + 7) / 8;
+            let workgroups_x = probes_w.div_ceil(8);
+            let workgroups_y = probes_h.div_ceil(8);
 
             let mut pass =
                 render_context
@@ -598,8 +638,8 @@ impl Node for RcComputeNode {
             pass.set_pipeline(finalize_pipeline);
             pass.set_bind_group(0, bind_groups.finalize_bind_group.as_ref().unwrap(), &[]);
 
-            let workgroups_x = (meta.viewport_w + 7) / 8;
-            let workgroups_y = (meta.viewport_h + 7) / 8;
+            let workgroups_x = meta.viewport_w.div_ceil(8);
+            let workgroups_y = meta.viewport_h.div_ceil(8);
             pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
         }
 
@@ -733,6 +773,43 @@ pub(crate) fn resize_gpu_textures(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn align_bytes_per_row_already_aligned() {
+        assert_eq!(align_bytes_per_row(256), 256);
+        assert_eq!(align_bytes_per_row(512), 512);
+    }
+
+    #[test]
+    fn align_bytes_per_row_rounds_up() {
+        assert_eq!(align_bytes_per_row(1), 256);
+        assert_eq!(align_bytes_per_row(97), 256);
+        assert_eq!(align_bytes_per_row(257), 512);
+    }
+
+    #[test]
+    fn pad_rows_no_padding_needed() {
+        // 256 bytes per row — already aligned
+        let src = vec![42u8; 256 * 2];
+        let (padded, bpr) = pad_rows(&src, 256, 2);
+        assert_eq!(bpr, 256);
+        assert_eq!(padded, src);
+    }
+
+    #[test]
+    fn pad_rows_adds_padding() {
+        // 97 bytes per row, 2 rows → aligned to 256
+        let src: Vec<u8> = (0..97 * 2).map(|i| (i % 256) as u8).collect();
+        let (padded, bpr) = pad_rows(&src, 97, 2);
+        assert_eq!(bpr, 256);
+        assert_eq!(padded.len(), 256 * 2);
+        // First row data preserved
+        assert_eq!(&padded[..97], &src[..97]);
+        // Padding is zeroes
+        assert!(padded[97..256].iter().all(|&b| b == 0));
+        // Second row data preserved
+        assert_eq!(&padded[256..256 + 97], &src[97..194]);
+    }
 
     #[test]
     fn f16_conversion_zero() {

@@ -27,6 +27,8 @@ pub struct RcLightingConfig {
     pub tile_size: f32,
     /// Number of radiance cascade levels.
     pub cascade_count: u32,
+    /// Damping factor for bounce light (0.0 = no bounce, 1.0 = full energy).
+    pub bounce_damping: f32,
 }
 
 impl Default for RcLightingConfig {
@@ -37,13 +39,14 @@ impl Default for RcLightingConfig {
             viewport_offset: UVec2::ZERO,
             tile_size: 32.0,
             cascade_count: 1,
+            bounce_damping: 0.5,
         }
     }
 }
 
 /// CPU-side buffers holding per-tile density, emissive, and albedo data
 /// extracted each frame for GPU upload.
-#[derive(Resource, Clone, ExtractResource)]
+#[derive(Resource, Clone, Default, ExtractResource)]
 pub struct RcInputData {
     /// 0 = air, 255 = solid. One byte per tile.
     pub density: Vec<u8>,
@@ -59,18 +62,7 @@ pub struct RcInputData {
     pub dirty: bool,
 }
 
-impl Default for RcInputData {
-    fn default() -> Self {
-        Self {
-            density: Vec::new(),
-            emissive: Vec::new(),
-            albedo: Vec::new(),
-            width: 0,
-            height: 0,
-            dirty: false,
-        }
-    }
-}
+// `Default` derived: all Vecs empty, numerics 0, dirty false.
 
 /// Plugin that registers RC lighting resources and the per-frame extract system.
 pub struct RcLightingPlugin;
@@ -252,17 +244,17 @@ fn extract_lighting_data(
     }
 
     // --- Sun emitters along top row ---
-    // Place sun light on the topmost row of the input range where sky is visible
-    // (tile_y < 0 or tile is air and above the world surface)
-    let sun_ty = min_ty;
-    let sun_buf_y = 0u32;
+    // Place sun light on the topmost row of the input range where sky is visible.
+    // Buffer Y=input_h-1 corresponds to tile max_ty (top of visible range).
+    let sun_ty = max_ty;
+    let sun_buf_y = input_h - 1;
     for tx in min_tx..=max_tx {
         let buf_x = (tx - min_tx) as u32;
         let idx = (sun_buf_y * input_w + buf_x) as usize;
 
         // Only emit sun where there's no solid tile (sky)
         let is_sky = get_fg_tile(&world_map, tx, sun_ty, &world_config, &tile_registry)
-            .map_or(true, |id| !tile_registry.is_solid(id));
+            .is_none_or(|id| !tile_registry.is_solid(id));
 
         if is_sky {
             input.emissive[idx] = [SUN_COLOR[0], SUN_COLOR[1], SUN_COLOR[2], 1.0];
