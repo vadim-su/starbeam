@@ -9,6 +9,20 @@ pub const OPACITY_SCALE: u16 = 17;
 pub const MAX_LIGHT_RADIUS: i32 = 16;
 pub const AMBIENT_MIN: [u8; 3] = [10, 10, 15];
 
+/// Effective light opacity at a position, considering both fg and bg layers.
+/// Uses max(fg_opacity, bg_opacity) so either layer can block light.
+fn effective_opacity(world_map: &WorldMap, tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> u8 {
+    let fg_opacity = world_map
+        .get_tile(tile_x, tile_y, Layer::Fg, ctx)
+        .map(|t| ctx.tile_registry.light_opacity(t))
+        .unwrap_or(0);
+    let bg_opacity = world_map
+        .get_tile(tile_x, tile_y, Layer::Bg, ctx)
+        .map(|t| ctx.tile_registry.light_opacity(t))
+        .unwrap_or(0);
+    fg_opacity.max(bg_opacity)
+}
+
 /// Subtract `amount` from each channel, clamping to 0.
 fn attenuate(light: [u8; 3], amount: u16) -> [u8; 3] {
     let a = amount.min(255) as u8;
@@ -70,13 +84,10 @@ pub fn compute_chunk_sunlight(
             if is_dark(light) {
                 break;
             }
-            if let Some(tile) = world_map.get_tile(tile_x, y, Layer::Fg, ctx) {
-                let opacity = ctx.tile_registry.light_opacity(tile);
-                if opacity > 0 {
-                    light = attenuate(light, opacity as u16 * OPACITY_SCALE);
-                }
+            let opacity = effective_opacity(world_map, tile_x, y, ctx);
+            if opacity > 0 {
+                light = attenuate(light, opacity as u16 * OPACITY_SCALE);
             }
-            // None = unloaded chunk → light passes through
         }
 
         // Propagate through this chunk top-to-bottom
@@ -87,8 +98,12 @@ pub fn compute_chunk_sunlight(
             let idx = (local_y * cs + local_x) as usize;
             result[idx] = light;
 
-            let tile = chunk.fg.get(local_x, local_y, cs);
-            let opacity = ctx.tile_registry.light_opacity(tile);
+            let fg_tile = chunk.fg.get(local_x, local_y, cs);
+            let bg_tile = chunk.bg.get(local_x, local_y, cs);
+            let opacity = ctx
+                .tile_registry
+                .light_opacity(fg_tile)
+                .max(ctx.tile_registry.light_opacity(bg_tile));
             if opacity > 0 {
                 light = attenuate(light, opacity as u16 * OPACITY_SCALE);
             }
@@ -198,10 +213,7 @@ fn bfs_from_emitter(
         }
 
         // Compute transmitted light through this tile
-        let opacity = world_map
-            .get_tile(wrapped_x, y, Layer::Fg, ctx)
-            .map(|t| ctx.tile_registry.light_opacity(t))
-            .unwrap_or(0);
+        let opacity = effective_opacity(world_map, wrapped_x, y, ctx);
         let transmitted = attenuate(light, opacity as u16 * OPACITY_SCALE);
 
         // Spread to 4 neighbors
@@ -317,10 +329,13 @@ mod tests {
         let top_chunk_y = wc.height_chunks() - 1;
         let mut map = WorldMap::default();
 
-        // Generate chunk and fill with air
+        // Generate chunk and fill both layers with air
         map.get_or_generate_chunk(0, top_chunk_y, &ctx);
         let chunk = map.chunks.get_mut(&(0, top_chunk_y)).unwrap();
         for tile in chunk.fg.tiles.iter_mut() {
+            *tile = TileId::AIR;
+        }
+        for tile in chunk.bg.tiles.iter_mut() {
             *tile = TileId::AIR;
         }
 
@@ -342,7 +357,7 @@ mod tests {
         let top_chunk_y = wc.height_chunks() - 1;
         let mut map = WorldMap::default();
 
-        // Generate chunk and set up: top half air, bottom half stone
+        // Generate chunk and set up: top half air, bottom half stone (both layers)
         map.get_or_generate_chunk(0, top_chunk_y, &ctx);
         let chunk = map.chunks.get_mut(&(0, top_chunk_y)).unwrap();
         let half = cs / 2;
@@ -351,8 +366,10 @@ mod tests {
                 let idx = (local_y * cs + local_x) as usize;
                 if local_y >= half {
                     chunk.fg.tiles[idx] = TileId::AIR;
+                    chunk.bg.tiles[idx] = TileId::AIR;
                 } else {
                     chunk.fg.tiles[idx] = stone;
+                    chunk.bg.tiles[idx] = TileId::AIR;
                 }
             }
         }
@@ -380,5 +397,56 @@ mod tests {
         let b = vec![[50, 100, 100], [100, 0, 200]];
         let merged = merge_chunk_lights(&a, &b);
         assert_eq!(merged, vec![[100, 100, 100], [100, 200, 200]]);
+    }
+
+    #[test]
+    fn bg_tile_blocks_sunlight() {
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
+        let cs = wc.chunk_size;
+        let stone = tr.by_name("stone");
+        let top_chunk_y = wc.height_chunks() - 1;
+        let mut map = WorldMap::default();
+
+        // Generate chunk, set fg=AIR everywhere, bg=stone everywhere
+        map.get_or_generate_chunk(0, top_chunk_y, &ctx);
+        let chunk = map.chunks.get_mut(&(0, top_chunk_y)).unwrap();
+        for i in 0..(cs * cs) as usize {
+            chunk.fg.tiles[i] = TileId::AIR;
+            chunk.bg.tiles[i] = stone;
+        }
+
+        let result = compute_chunk_sunlight(&map, 0, top_chunk_y, &ctx);
+        // Bottom should be dark — bg stone blocks light even with fg=AIR
+        assert!(
+            is_dark(result[0]),
+            "bg stone should block sunlight, got {:?}",
+            result[0]
+        );
+    }
+
+    #[test]
+    fn both_layers_air_lets_light_through() {
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
+        let cs = wc.chunk_size;
+        let top_chunk_y = wc.height_chunks() - 1;
+        let mut map = WorldMap::default();
+
+        // Both layers air
+        map.get_or_generate_chunk(0, top_chunk_y, &ctx);
+        let chunk = map.chunks.get_mut(&(0, top_chunk_y)).unwrap();
+        for i in 0..(cs * cs) as usize {
+            chunk.fg.tiles[i] = TileId::AIR;
+            chunk.bg.tiles[i] = TileId::AIR;
+        }
+
+        let result = compute_chunk_sunlight(&map, 0, top_chunk_y, &ctx);
+        // All tiles should receive sunlight
+        let bottom_idx = 0;
+        assert_eq!(
+            result[bottom_idx], SUN_COLOR,
+            "both layers air should let sun through"
+        );
     }
 }

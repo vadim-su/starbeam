@@ -460,9 +460,14 @@ pub(crate) fn check_autotile_loading(
         autotile_reg.insert(name.clone(), AutotileEntry::from_asset(asset, col_idx));
     }
 
-    // Create shared tile material with the combined atlas
-    let material_handle = tile_materials.add(TileMaterial {
+    // Create shared tile materials: full brightness for foreground, dimmed for background
+    let fg_material = tile_materials.add(TileMaterial {
         atlas: atlas_handle.clone(),
+        dim: 1.0,
+    });
+    let bg_material = tile_materials.add(TileMaterial {
+        atlas: atlas_handle.clone(),
+        dim: 0.6,
     });
 
     // Insert all autotile resources
@@ -472,7 +477,8 @@ pub(crate) fn check_autotile_loading(
     });
     commands.insert_resource(autotile_reg);
     commands.insert_resource(SharedTileMaterial {
-        handle: material_handle,
+        fg: fg_material,
+        bg: bg_material,
     });
 
     commands.remove_resource::<LoadingAutotileAssets>();

@@ -115,7 +115,9 @@ pub fn compute_bitmask(mut is_solid_at: impl FnMut(i32, i32) -> bool, x: i32, y:
 
 /// Deterministic spatial hash for a tile position, returning a value in [0.0, 1.0].
 /// Used for reproducible variant selection so the same tile always picks the same variant.
-pub fn position_hash(x: i32, y: i32, seed: u32) -> f32 {
+/// The `layer` parameter ensures foreground and background tiles at the same position
+/// select different sprite variants.
+pub fn position_hash(x: i32, y: i32, seed: u32, layer: u32) -> f32 {
     // FNV-1a inspired hash for good distribution
     let mut h: u32 = 2166136261;
     h ^= x as u32;
@@ -124,13 +126,16 @@ pub fn position_hash(x: i32, y: i32, seed: u32) -> f32 {
     h = h.wrapping_mul(16777619);
     h ^= seed;
     h = h.wrapping_mul(16777619);
+    h ^= layer;
+    h = h.wrapping_mul(16777619);
     // Normalize to [0.0, 1.0]
     (h as f32) / (u32::MAX as f32)
 }
 
 /// Select a variant from a weighted list using a deterministic position hash.
 /// Returns the `row` of the chosen variant in the atlas.
-pub fn select_variant(variants: &[SpriteVariant], x: i32, y: i32, seed: u32) -> u32 {
+/// The `layer` parameter differentiates foreground (0) from background (1) selections.
+pub fn select_variant(variants: &[SpriteVariant], x: i32, y: i32, seed: u32, layer: u32) -> u32 {
     if variants.is_empty() {
         return 0; // fallback to first row for malformed autotile data
     }
@@ -139,7 +144,7 @@ pub fn select_variant(variants: &[SpriteVariant], x: i32, y: i32, seed: u32) -> 
     }
 
     let total_weight: f32 = variants.iter().map(|v| v.weight).sum();
-    let threshold = position_hash(x, y, seed) * total_weight;
+    let threshold = position_hash(x, y, seed, layer) * total_weight;
 
     let mut cumulative = 0.0;
     for variant in variants {
@@ -216,16 +221,16 @@ mod tests {
 
     #[test]
     fn position_hash_deterministic() {
-        let h1 = position_hash(10, 20, 42);
-        let h2 = position_hash(10, 20, 42);
+        let h1 = position_hash(10, 20, 42, 0);
+        let h2 = position_hash(10, 20, 42, 0);
         assert_eq!(h1, h2);
     }
 
     #[test]
     fn position_hash_varies() {
-        let h1 = position_hash(10, 20, 42);
-        let h2 = position_hash(11, 20, 42);
-        let h3 = position_hash(10, 21, 42);
+        let h1 = position_hash(10, 20, 42, 0);
+        let h2 = position_hash(11, 20, 42, 0);
+        let h3 = position_hash(10, 21, 42, 0);
         assert_ne!(h1, h2);
         assert_ne!(h1, h3);
     }
@@ -235,7 +240,7 @@ mod tests {
         // Test a spread of positions to verify range
         for x in -50..50 {
             for y in -50..50 {
-                let h = position_hash(x, y, 42);
+                let h = position_hash(x, y, 42, 0);
                 assert!(h >= 0.0, "hash {h} below 0.0 at ({x}, {y})");
                 assert!(h <= 1.0, "hash {h} above 1.0 at ({x}, {y})");
             }
@@ -243,9 +248,16 @@ mod tests {
     }
 
     #[test]
+    fn position_hash_varies_by_layer() {
+        let h_fg = position_hash(10, 20, 42, 0);
+        let h_bg = position_hash(10, 20, 42, 1);
+        assert_ne!(h_fg, h_bg);
+    }
+
+    #[test]
     fn select_variant_empty_returns_zero() {
         let variants: Vec<SpriteVariant> = vec![];
-        let row = select_variant(&variants, 10, 20, 42);
+        let row = select_variant(&variants, 10, 20, 42, 0);
         assert_eq!(row, 0);
     }
 
@@ -257,7 +269,7 @@ mod tests {
             col: 0,
             index: 0,
         }];
-        let row = select_variant(&variants, 10, 20, 42);
+        let row = select_variant(&variants, 10, 20, 42, 0);
         assert_eq!(row, 5);
     }
 
@@ -283,8 +295,8 @@ mod tests {
                 index: 0,
             },
         ];
-        let r1 = select_variant(&variants, 10, 20, 42);
-        let r2 = select_variant(&variants, 10, 20, 42);
+        let r1 = select_variant(&variants, 10, 20, 42, 0);
+        let r2 = select_variant(&variants, 10, 20, 42, 0);
         assert_eq!(r1, r2);
     }
 }

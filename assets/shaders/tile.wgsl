@@ -26,8 +26,13 @@ fn vertex(in: VertexInput) -> VertexOutput {
     return out;
 }
 
+struct TileUniforms {
+    dim: f32,
+}
+
 @group(2) @binding(0) var atlas_texture: texture_2d<f32>;
 @group(2) @binding(1) var atlas_sampler: sampler;
+@group(2) @binding(2) var<uniform> uniforms: TileUniforms;
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
@@ -35,5 +40,5 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     if color.a < 0.01 {
         discard;
     }
-    return vec4<f32>(color.rgb * in.light, color.a);
+    return vec4<f32>(color.rgb * in.light * uniforms.dim, color.a);
 }

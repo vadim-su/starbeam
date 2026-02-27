@@ -3,9 +3,7 @@ use std::collections::HashSet;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
-use crate::math::{tile_aabb, Aabb};
 use crate::player::Player;
-use crate::registry::player::PlayerConfig;
 use crate::registry::tile::TileId;
 use crate::world::chunk::{
     update_bitmasks_around, world_to_tile, ChunkDirty, Layer, LoadedChunks, WorldMap,
@@ -22,7 +20,6 @@ pub fn block_interaction_system(
     windows: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
     player_query: Query<&Transform, With<Player>>,
-    player_config: Res<PlayerConfig>,
     ctx: WorldCtx,
     mut world_map: ResMut<WorldMap>,
     loaded_chunks: Res<LoadedChunks>,
@@ -72,35 +69,42 @@ pub fn block_interaction_system(
 
         world_map.set_tile(tile_x, tile_y, Layer::Fg, TileId::AIR, &ctx_ref);
     } else if right_click {
-        // Place block (read-only check, skip if chunk not loaded)
-        let Some(current) = world_map.get_tile(tile_x, tile_y, Layer::Fg, &ctx_ref) else {
+        // Background layer interaction
+        let Some(current_bg) = world_map.get_tile(tile_x, tile_y, Layer::Bg, &ctx_ref) else {
             return;
         };
-        if ctx_ref.tile_registry.is_solid(current) {
-            return;
-        }
 
-        // Check player overlap
-        let player_aabb = Aabb::from_center(
-            player_tf.translation.x,
-            player_tf.translation.y,
-            player_config.width,
-            player_config.height,
-        );
-        let target_tile = tile_aabb(tile_x, tile_y, ctx_ref.config.tile_size);
-        if player_aabb.overlaps(&target_tile) {
-            return;
-        }
+        if current_bg != TileId::AIR {
+            // Break bg tile
+            world_map.set_tile(tile_x, tile_y, Layer::Bg, TileId::AIR, &ctx_ref);
+        } else {
+            // Place bg tile — must be adjacent to an existing tile (fg or bg)
+            let has_neighbor = [(-1, 0), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
+                let nx = tile_x + dx;
+                let ny = tile_y + dy;
+                world_map
+                    .get_tile(nx, ny, Layer::Fg, &ctx_ref)
+                    .is_some_and(|t| t != TileId::AIR)
+                    || world_map
+                        .get_tile(nx, ny, Layer::Bg, &ctx_ref)
+                        .is_some_and(|t| t != TileId::AIR)
+            });
+            if !has_neighbor {
+                return;
+            }
 
-        // TODO: replace with player's selected block type from hotbar/inventory
-        let place_id = ctx_ref.tile_registry.by_name("torch");
-        world_map.set_tile(tile_x, tile_y, Layer::Fg, place_id, &ctx_ref);
+            // TODO: replace with player's selected block type from inventory
+            let place_id = ctx_ref.tile_registry.by_name("dirt");
+            world_map.set_tile(tile_x, tile_y, Layer::Bg, place_id, &ctx_ref);
+        }
     } else {
         return;
     }
 
-    // Update bitmasks
-    let bitmask_dirty = update_bitmasks_around(&mut world_map, tile_x, tile_y, Layer::Fg, &ctx_ref);
+    // Update bitmasks for the modified layer
+    let modified_layer = if left_click { Layer::Fg } else { Layer::Bg };
+    let bitmask_dirty =
+        update_bitmasks_around(&mut world_map, tile_x, tile_y, modified_layer, &ctx_ref);
 
     // Recompute lighting for affected area
     let light_dirty = lighting::relight_around(&mut world_map, tile_x, tile_y, &ctx_ref);
