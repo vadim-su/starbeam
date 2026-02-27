@@ -164,8 +164,7 @@ pub fn draw_debug_panel(
                         } else {
                             let (lx, ly) = tile_to_local(wrapped_tx, ty, world_config.chunk_size);
                             world_map
-                                .chunks
-                                .get(&(cx, cy))
+                                .chunk(cx, cy)
                                 .map(|chunk| chunk.get(lx, ly, world_config.chunk_size))
                         };
 

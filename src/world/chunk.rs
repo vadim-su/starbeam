@@ -44,7 +44,20 @@ impl ChunkData {
 /// Authoritative world tile data. Chunks are lazily generated and cached.
 #[derive(Resource, Default)]
 pub struct WorldMap {
-    pub chunks: HashMap<(i32, i32), ChunkData>,
+    pub(crate) chunks: HashMap<(i32, i32), ChunkData>,
+}
+
+impl WorldMap {
+    /// Read-only access to a chunk by coordinates.
+    pub fn chunk(&self, cx: i32, cy: i32) -> Option<&ChunkData> {
+        self.chunks.get(&(cx, cy))
+    }
+
+    /// Mutable access to a chunk by coordinates.
+    #[allow(dead_code)] // public API for future use
+    pub fn chunk_mut(&mut self, cx: i32, cy: i32) -> Option<&mut ChunkData> {
+        self.chunks.get_mut(&(cx, cy))
+    }
 }
 
 impl WorldMap {
@@ -122,7 +135,7 @@ impl WorldMap {
 /// Tracks which chunks currently have spawned tilemap entities.
 #[derive(Resource, Default)]
 pub struct LoadedChunks {
-    pub map: HashMap<(i32, i32), Entity>,
+    pub(crate) map: HashMap<(i32, i32), Entity>,
 }
 
 // --- Coordinate conversion helpers ---

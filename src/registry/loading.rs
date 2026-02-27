@@ -446,9 +446,7 @@ pub(crate) fn check_autotile_loading(
             continue;
         };
         let col_idx = column_map[name.as_str()];
-        autotile_reg
-            .entries
-            .insert(name.clone(), AutotileEntry::from_asset(asset, col_idx));
+        autotile_reg.insert(name.clone(), AutotileEntry::from_asset(asset, col_idx));
     }
 
     // Create shared tile material with the combined atlas

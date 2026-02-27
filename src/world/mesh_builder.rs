@@ -63,7 +63,7 @@ pub fn build_chunk_mesh(
                 None => continue,
             };
 
-            let entry = match autotile_registry.entries.get(autotile_name) {
+            let entry = match autotile_registry.get(autotile_name) {
                 Some(e) => e,
                 None => continue,
             };
@@ -170,8 +170,7 @@ mod tests {
             tiles,
         };
         let mut reg = AutotileRegistry::default();
-        reg.entries
-            .insert("dirt".into(), AutotileEntry::from_asset(&asset, 0));
+        reg.insert("dirt".into(), AutotileEntry::from_asset(&asset, 0));
         reg
     }
 

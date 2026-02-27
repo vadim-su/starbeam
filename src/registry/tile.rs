@@ -29,7 +29,7 @@ pub struct TileDef {
 /// Registry of all tile definitions. Inserted as a Resource after asset loading.
 #[derive(Resource)]
 pub struct TileRegistry {
-    pub defs: Vec<TileDef>,
+    pub(crate) defs: Vec<TileDef>,
     name_to_id: HashMap<String, TileId>,
 }
 

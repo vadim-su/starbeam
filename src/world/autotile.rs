@@ -59,7 +59,17 @@ impl AutotileEntry {
 /// Registry of all autotile entries, keyed by tile type name (e.g. "dirt", "stone").
 #[derive(Resource, Default)]
 pub struct AutotileRegistry {
-    pub entries: HashMap<String, AutotileEntry>,
+    pub(crate) entries: HashMap<String, AutotileEntry>,
+}
+
+impl AutotileRegistry {
+    pub fn get(&self, name: &str) -> Option<&AutotileEntry> {
+        self.entries.get(name)
+    }
+
+    pub fn insert(&mut self, name: String, entry: AutotileEntry) {
+        self.entries.insert(name, entry);
+    }
 }
 
 /// Compute the 8-bit bitmask for a tile at (x, y) based on its neighbors.
