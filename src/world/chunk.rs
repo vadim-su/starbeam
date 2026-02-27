@@ -449,6 +449,7 @@ mod tests {
             tile_size: 32.0,
             chunk_load_radius: 3,
             seed: 42,
+            planet_type: "garden".into(),
         }
     }
 

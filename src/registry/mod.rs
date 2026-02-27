@@ -1,4 +1,5 @@
 pub mod assets;
+pub mod biome;
 pub mod loader;
 pub mod player;
 pub mod tile;
@@ -8,7 +9,7 @@ use bevy::asset::AssetEvent;
 use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
 
-use assets::{AutotileAsset, ParallaxConfigAsset, PlayerDefAsset, TileRegistryAsset, WorldConfigAsset};
+use assets::{AutotileAsset, BiomeAsset, ParallaxConfigAsset, PlanetTypeAsset, PlayerDefAsset, TileRegistryAsset, WorldConfigAsset};
 use loader::RonLoader;
 use player::PlayerConfig;
 use tile::TileRegistry;
@@ -68,6 +69,10 @@ impl Plugin for RegistryPlugin {
             .register_asset_loader(RonLoader::<WorldConfigAsset>::new(&["config.ron"]))
             .register_asset_loader(RonLoader::<ParallaxConfigAsset>::new(&["parallax.ron"]))
             .register_asset_loader(RonLoader::<AutotileAsset>::new(&["autotile.ron"]))
+            .init_asset::<PlanetTypeAsset>()
+            .init_asset::<BiomeAsset>()
+            .register_asset_loader(RonLoader::<PlanetTypeAsset>::new(&["planet.ron"]))
+            .register_asset_loader(RonLoader::<BiomeAsset>::new(&["biome.ron"]))
             .add_systems(Startup, start_loading)
             .add_systems(Update, check_loading.run_if(in_state(AppState::Loading)))
             .add_systems(OnEnter(AppState::LoadingAutotile), start_autotile_loading)
@@ -142,6 +147,7 @@ fn check_loading(
         tile_size: world_cfg.tile_size,
         chunk_load_radius: world_cfg.chunk_load_radius,
         seed: world_cfg.seed,
+        planet_type: world_cfg.planet_type.clone(),
     });
     commands.insert_resource(ParallaxConfig {
         layers: parallax.layers.clone(),
@@ -321,6 +327,7 @@ fn hot_reload_world(
                     config.tile_size = asset.tile_size;
                     config.chunk_load_radius = asset.chunk_load_radius;
                     config.seed = asset.seed;
+                    config.planet_type = asset.planet_type.clone();
                     info!("Hot-reloaded WorldConfig");
                 }
             }

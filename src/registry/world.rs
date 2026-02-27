@@ -10,6 +10,7 @@ pub struct WorldConfig {
     pub tile_size: f32,
     pub chunk_load_radius: i32,
     pub seed: u32,
+    pub planet_type: String,
 }
 
 impl WorldConfig {
@@ -50,6 +51,7 @@ mod tests {
             tile_size: 32.0,
             chunk_load_radius: 3,
             seed: 42,
+            planet_type: "garden".into(),
         }
     }
 
