@@ -165,7 +165,7 @@ pub fn draw_debug_panel(
                             let (lx, ly) = tile_to_local(wrapped_tx, ty, world_config.chunk_size);
                             world_map
                                 .chunk(cx, cy)
-                                .map(|chunk| chunk.get(lx, ly, world_config.chunk_size))
+                                .map(|chunk| chunk.fg.get(lx, ly, world_config.chunk_size))
                         };
 
                         if let Some(tile_id) = tile_info {

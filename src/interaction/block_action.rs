@@ -8,7 +8,7 @@ use crate::player::Player;
 use crate::registry::player::PlayerConfig;
 use crate::registry::tile::TileId;
 use crate::world::chunk::{
-    update_bitmasks_around, world_to_tile, ChunkDirty, LoadedChunks, WorldMap,
+    update_bitmasks_around, world_to_tile, ChunkDirty, Layer, LoadedChunks, WorldMap,
 };
 use crate::world::ctx::WorldCtx;
 use crate::world::lighting;
@@ -63,17 +63,17 @@ pub fn block_interaction_system(
 
     if left_click {
         // Break block (read-only check, skip if chunk not loaded)
-        let Some(current) = world_map.get_tile(tile_x, tile_y, &ctx_ref) else {
+        let Some(current) = world_map.get_tile(tile_x, tile_y, Layer::Fg, &ctx_ref) else {
             return;
         };
         if !ctx_ref.tile_registry.is_solid(current) {
             return;
         }
 
-        world_map.set_tile(tile_x, tile_y, TileId::AIR, &ctx_ref);
+        world_map.set_tile(tile_x, tile_y, Layer::Fg, TileId::AIR, &ctx_ref);
     } else if right_click {
         // Place block (read-only check, skip if chunk not loaded)
-        let Some(current) = world_map.get_tile(tile_x, tile_y, &ctx_ref) else {
+        let Some(current) = world_map.get_tile(tile_x, tile_y, Layer::Fg, &ctx_ref) else {
             return;
         };
         if ctx_ref.tile_registry.is_solid(current) {
@@ -94,13 +94,13 @@ pub fn block_interaction_system(
 
         // TODO: replace with player's selected block type from hotbar/inventory
         let place_id = ctx_ref.tile_registry.by_name("torch");
-        world_map.set_tile(tile_x, tile_y, place_id, &ctx_ref);
+        world_map.set_tile(tile_x, tile_y, Layer::Fg, place_id, &ctx_ref);
     } else {
         return;
     }
 
     // Update bitmasks
-    let bitmask_dirty = update_bitmasks_around(&mut world_map, tile_x, tile_y, &ctx_ref);
+    let bitmask_dirty = update_bitmasks_around(&mut world_map, tile_x, tile_y, Layer::Fg, &ctx_ref);
 
     // Recompute lighting for affected area
     let light_dirty = lighting::relight_around(&mut world_map, tile_x, tile_y, &ctx_ref);

@@ -24,23 +24,59 @@ pub struct ChunkCoord {
 #[derive(Component)]
 pub struct ChunkDirty;
 
-/// Tile data for a single chunk. Row-major: index = local_y * chunk_size + local_x.
-pub struct ChunkData {
-    pub tiles: Vec<TileId>,
-    pub bitmasks: Vec<u8>,
-    /// Per-tile RGB light level: [0,0,0] = full dark, [255,255,255] = full light.
-    pub light_levels: Vec<[u8; 3]>,
-    #[allow(dead_code)] // Reserved for future block-damage system
-    pub damage: Vec<u8>,
+/// Identifies which tile layer to operate on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Layer {
+    Fg,
+    Bg,
 }
 
-impl ChunkData {
+/// Tile and bitmask data for a single layer within a chunk.
+pub struct TileLayer {
+    pub tiles: Vec<TileId>,
+    pub bitmasks: Vec<u8>,
+}
+
+impl TileLayer {
+    pub fn new_air(len: usize) -> Self {
+        Self {
+            tiles: vec![TileId::AIR; len],
+            bitmasks: vec![0; len],
+        }
+    }
+
     pub fn get(&self, local_x: u32, local_y: u32, chunk_size: u32) -> TileId {
         self.tiles[(local_y * chunk_size + local_x) as usize]
     }
 
     pub fn set(&mut self, local_x: u32, local_y: u32, tile: TileId, chunk_size: u32) {
         self.tiles[(local_y * chunk_size + local_x) as usize] = tile;
+    }
+}
+
+/// Tile data for a single chunk. Row-major: index = local_y * chunk_size + local_x.
+pub struct ChunkData {
+    pub fg: TileLayer,
+    pub bg: TileLayer,
+    /// Per-tile RGB light level (shared across both layers).
+    pub light_levels: Vec<[u8; 3]>,
+    #[allow(dead_code)] // Reserved for future block-damage system
+    pub damage: Vec<u8>,
+}
+
+impl ChunkData {
+    pub fn layer(&self, layer: Layer) -> &TileLayer {
+        match layer {
+            Layer::Fg => &self.fg,
+            Layer::Bg => &self.bg,
+        }
+    }
+
+    pub fn layer_mut(&mut self, layer: Layer) -> &mut TileLayer {
+        match layer {
+            Layer::Fg => &mut self.fg,
+            Layer::Bg => &mut self.bg,
+        }
     }
 }
 
@@ -74,8 +110,11 @@ impl WorldMap {
             let tiles = terrain_gen::generate_chunk_tiles(chunk_x, chunk_y, ctx);
             let len = tiles.len();
             ChunkData {
-                tiles,
-                bitmasks: vec![0; len],
+                fg: TileLayer {
+                    tiles,
+                    bitmasks: vec![0; len],
+                },
+                bg: TileLayer::new_air(len),
                 light_levels: vec![[0, 0, 0]; len],
                 damage: vec![0; len],
             }
@@ -84,7 +123,13 @@ impl WorldMap {
 
     /// Read-only: returns tile if chunk is loaded, None otherwise.
     /// Takes &self — safe for parallel access.
-    pub fn get_tile(&self, tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> Option<TileId> {
+    pub fn get_tile(
+        &self,
+        tile_x: i32,
+        tile_y: i32,
+        layer: Layer,
+        ctx: &WorldCtxRef,
+    ) -> Option<TileId> {
         if tile_y < 0 {
             return Some(ctx.tile_registry.by_name("stone"));
         }
@@ -96,12 +141,18 @@ impl WorldMap {
         let (lx, ly) = tile_to_local(wrapped_x, tile_y, ctx.config.chunk_size);
         self.chunks
             .get(&(cx, cy))
-            .map(|chunk| chunk.get(lx, ly, ctx.config.chunk_size))
+            .map(|chunk| chunk.layer(layer).get(lx, ly, ctx.config.chunk_size))
     }
 
     /// Mutating: gets tile with lazy chunk generation.
     /// Only for systems that need to generate world (chunk_loading, block_action).
-    pub fn get_tile_mut(&mut self, tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> TileId {
+    pub fn get_tile_mut(
+        &mut self,
+        tile_x: i32,
+        tile_y: i32,
+        layer: Layer,
+        ctx: &WorldCtxRef,
+    ) -> TileId {
         if tile_y < 0 {
             return ctx.tile_registry.by_name("stone"); // bedrock
         }
@@ -112,10 +163,18 @@ impl WorldMap {
         let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, ctx.config.chunk_size);
         let (lx, ly) = tile_to_local(wrapped_x, tile_y, ctx.config.chunk_size);
         self.get_or_generate_chunk(cx, cy, ctx)
+            .layer(layer)
             .get(lx, ly, ctx.config.chunk_size)
     }
 
-    pub fn set_tile(&mut self, tile_x: i32, tile_y: i32, tile: TileId, ctx: &WorldCtxRef) {
+    pub fn set_tile(
+        &mut self,
+        tile_x: i32,
+        tile_y: i32,
+        layer: Layer,
+        tile: TileId,
+        ctx: &WorldCtxRef,
+    ) {
         if tile_y < 0 || tile_y >= ctx.config.height_tiles {
             return;
         }
@@ -126,12 +185,14 @@ impl WorldMap {
         self.chunks
             .get_mut(&(cx, cy))
             .unwrap()
+            .layer_mut(layer)
             .set(lx, ly, tile, ctx.config.chunk_size);
     }
 
     /// Read-only: returns whether tile is solid (false for unloaded chunks).
+    /// Always checks the foreground layer.
     pub fn is_solid(&self, tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> bool {
-        self.get_tile(tile_x, tile_y, ctx)
+        self.get_tile(tile_x, tile_y, Layer::Fg, ctx)
             .is_some_and(|tile| ctx.tile_registry.is_solid(tile))
     }
 }
@@ -171,6 +232,7 @@ pub fn update_bitmasks_around(
     world_map: &mut WorldMap,
     center_x: i32,
     center_y: i32,
+    layer: Layer,
     ctx: &WorldCtxRef,
 ) -> HashSet<(i32, i32)> {
     let mut dirty_chunks = HashSet::new();
@@ -191,7 +253,7 @@ pub fn update_bitmasks_around(
 
             let new_mask = compute_bitmask(
                 |bx, by| {
-                    let tile = world_map.get_tile_mut(bx, by, ctx);
+                    let tile = world_map.get_tile_mut(bx, by, layer, ctx);
                     ctx.tile_registry.is_solid(tile)
                 },
                 wrapped_x,
@@ -199,7 +261,7 @@ pub fn update_bitmasks_around(
             );
 
             if let Some(chunk) = world_map.chunks.get_mut(&(cx, cy)) {
-                chunk.bitmasks[idx] = new_mask;
+                chunk.layer_mut(layer).bitmasks[idx] = new_mask;
                 dirty_chunks.insert((cx, cy));
             }
         }
@@ -213,6 +275,7 @@ pub fn init_chunk_bitmasks(
     world_map: &mut WorldMap,
     chunk_x: i32,
     chunk_y: i32,
+    layer: Layer,
     ctx: &WorldCtxRef,
 ) -> Vec<u8> {
     let chunk_size = ctx.config.chunk_size;
@@ -227,7 +290,7 @@ pub fn init_chunk_bitmasks(
             let idx = (local_y * chunk_size + local_x) as usize;
             bitmasks[idx] = compute_bitmask(
                 |x, y| {
-                    let tile = world_map.get_tile_mut(x, y, ctx);
+                    let tile = world_map.get_tile_mut(x, y, layer, ctx);
                     ctx.tile_registry.is_solid(tile)
                 },
                 world_x,
@@ -260,9 +323,11 @@ pub fn spawn_chunk(
     let data_chunk_x = ctx.config.wrap_chunk_x(display_chunk_x);
     world_map.get_or_generate_chunk(data_chunk_x, chunk_y, ctx);
 
-    let bitmasks = init_chunk_bitmasks(world_map, data_chunk_x, chunk_y, ctx);
+    let fg_bitmasks = init_chunk_bitmasks(world_map, data_chunk_x, chunk_y, Layer::Fg, ctx);
+    let bg_bitmasks = init_chunk_bitmasks(world_map, data_chunk_x, chunk_y, Layer::Bg, ctx);
     if let Some(chunk) = world_map.chunks.get_mut(&(data_chunk_x, chunk_y)) {
-        chunk.bitmasks = bitmasks;
+        chunk.fg.bitmasks = fg_bitmasks;
+        chunk.bg.bitmasks = bg_bitmasks;
     }
 
     // Compute lighting (immutable borrow for compute, then mutable to write back)
@@ -273,8 +338,8 @@ pub fn spawn_chunk(
 
     let chunk_data = &world_map.chunks[&(data_chunk_x, chunk_y)];
     let mesh = build_chunk_mesh(
-        &chunk_data.tiles,
-        &chunk_data.bitmasks,
+        &chunk_data.fg.tiles,
+        &chunk_data.fg.bitmasks,
         &chunk_data.light_levels,
         display_chunk_x,
         chunk_y,
@@ -411,8 +476,8 @@ pub fn rebuild_dirty_chunks(
         };
 
         let mesh = build_chunk_mesh(
-            &chunk_data.tiles,
-            &chunk_data.bitmasks,
+            &chunk_data.fg.tiles,
+            &chunk_data.fg.bitmasks,
             &chunk_data.light_levels,
             coord.x,
             coord.y,
@@ -477,8 +542,8 @@ mod tests {
         let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
         let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
         let mut map = WorldMap::default();
-        let t1 = map.get_tile_mut(100, 500, &ctx);
-        let t2 = map.get_tile_mut(100, 500, &ctx);
+        let t1 = map.get_tile_mut(100, 500, Layer::Fg, &ctx);
+        let t2 = map.get_tile_mut(100, 500, Layer::Fg, &ctx);
         assert_eq!(t1, t2);
     }
 
@@ -487,7 +552,7 @@ mod tests {
         let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
         let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
         let map = WorldMap::default();
-        assert_eq!(map.get_tile(100, 500, &ctx), None);
+        assert_eq!(map.get_tile(100, 500, Layer::Fg, &ctx), None);
     }
 
     #[test]
@@ -496,9 +561,9 @@ mod tests {
         let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
         let mut map = WorldMap::default();
         // Pre-generate the chunk via get_tile_mut
-        let expected = map.get_tile_mut(100, 500, &ctx);
+        let expected = map.get_tile_mut(100, 500, Layer::Fg, &ctx);
         // Read-only get_tile should return the same value
-        assert_eq!(map.get_tile(100, 500, &ctx), Some(expected));
+        assert_eq!(map.get_tile(100, 500, Layer::Fg, &ctx), Some(expected));
     }
 
     #[test]
@@ -514,8 +579,8 @@ mod tests {
         let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
         let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
         let mut map = WorldMap::default();
-        map.set_tile(100, 500, TileId::AIR, &ctx);
-        assert_eq!(map.get_tile(100, 500, &ctx), Some(TileId::AIR));
+        map.set_tile(100, 500, Layer::Fg, TileId::AIR, &ctx);
+        assert_eq!(map.get_tile(100, 500, Layer::Fg, &ctx), Some(TileId::AIR));
     }
 
     #[test]
@@ -523,8 +588,14 @@ mod tests {
         let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
         let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
         let map = WorldMap::default();
-        assert_eq!(map.get_tile(0, wc.height_tiles, &ctx), Some(TileId::AIR));
-        assert_eq!(map.get_tile(0, -1, &ctx), Some(tr.by_name("stone")));
+        assert_eq!(
+            map.get_tile(0, wc.height_tiles, Layer::Fg, &ctx),
+            Some(TileId::AIR)
+        );
+        assert_eq!(
+            map.get_tile(0, -1, Layer::Fg, &ctx),
+            Some(tr.by_name("stone"))
+        );
     }
 
     #[test]
@@ -533,12 +604,12 @@ mod tests {
         let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
         let mut map = WorldMap::default();
         // Use get_tile_mut to lazily generate chunks for wrap test
-        let t1 = map.get_tile_mut(-1, 500, &ctx);
-        let t2 = map.get_tile_mut(wc.width_tiles - 1, 500, &ctx);
+        let t1 = map.get_tile_mut(-1, 500, Layer::Fg, &ctx);
+        let t2 = map.get_tile_mut(wc.width_tiles - 1, 500, Layer::Fg, &ctx);
         assert_eq!(t1, t2);
 
-        let t3 = map.get_tile_mut(wc.width_tiles, 500, &ctx);
-        let t4 = map.get_tile_mut(0, 500, &ctx);
+        let t3 = map.get_tile_mut(wc.width_tiles, 500, Layer::Fg, &ctx);
+        let t4 = map.get_tile_mut(0, 500, Layer::Fg, &ctx);
         assert_eq!(t3, t4);
     }
 
@@ -547,9 +618,9 @@ mod tests {
         let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
         let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
         let mut map = WorldMap::default();
-        map.set_tile(-1, 500, TileId::AIR, &ctx);
+        map.set_tile(-1, 500, Layer::Fg, TileId::AIR, &ctx);
         assert_eq!(
-            map.get_tile(wc.width_tiles - 1, 500, &ctx),
+            map.get_tile(wc.width_tiles - 1, 500, Layer::Fg, &ctx),
             Some(TileId::AIR)
         );
     }

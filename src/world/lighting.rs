@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::world::chunk::{tile_to_chunk, WorldMap};
+use crate::world::chunk::{tile_to_chunk, Layer, WorldMap};
 use crate::world::ctx::WorldCtxRef;
 
 pub const SUN_COLOR: [u8; 3] = [255, 250, 230];
@@ -70,7 +70,7 @@ pub fn compute_chunk_sunlight(
             if is_dark(light) {
                 break;
             }
-            if let Some(tile) = world_map.get_tile(tile_x, y, ctx) {
+            if let Some(tile) = world_map.get_tile(tile_x, y, Layer::Fg, ctx) {
                 let opacity = ctx.tile_registry.light_opacity(tile);
                 if opacity > 0 {
                     light = attenuate(light, opacity as u16 * OPACITY_SCALE);
@@ -87,7 +87,7 @@ pub fn compute_chunk_sunlight(
             let idx = (local_y * cs + local_x) as usize;
             result[idx] = light;
 
-            let tile = chunk.get(local_x, local_y, cs);
+            let tile = chunk.fg.get(local_x, local_y, cs);
             let opacity = ctx.tile_registry.light_opacity(tile);
             if opacity > 0 {
                 light = attenuate(light, opacity as u16 * OPACITY_SCALE);
@@ -120,7 +120,7 @@ pub fn compute_point_lights(
         for scan_dx in -MAX_LIGHT_RADIUS..(cs_i32 + MAX_LIGHT_RADIUS) {
             let scan_x = base_x + scan_dx;
             let wrapped_x = ctx.config.wrap_tile_x(scan_x);
-            let tile = world_map.get_tile(wrapped_x, scan_y, ctx);
+            let tile = world_map.get_tile(wrapped_x, scan_y, Layer::Fg, ctx);
             if let Some(tile_id) = tile {
                 let emission = ctx.tile_registry.light_emission(tile_id);
                 if !is_dark(emission) {
@@ -199,7 +199,7 @@ fn bfs_from_emitter(
 
         // Compute transmitted light through this tile
         let opacity = world_map
-            .get_tile(wrapped_x, y, ctx)
+            .get_tile(wrapped_x, y, Layer::Fg, ctx)
             .map(|t| ctx.tile_registry.light_opacity(t))
             .unwrap_or(0);
         let transmitted = attenuate(light, opacity as u16 * OPACITY_SCALE);
@@ -320,7 +320,7 @@ mod tests {
         // Generate chunk and fill with air
         map.get_or_generate_chunk(0, top_chunk_y, &ctx);
         let chunk = map.chunks.get_mut(&(0, top_chunk_y)).unwrap();
-        for tile in chunk.tiles.iter_mut() {
+        for tile in chunk.fg.tiles.iter_mut() {
             *tile = TileId::AIR;
         }
 
@@ -350,9 +350,9 @@ mod tests {
             for local_x in 0..cs {
                 let idx = (local_y * cs + local_x) as usize;
                 if local_y >= half {
-                    chunk.tiles[idx] = TileId::AIR;
+                    chunk.fg.tiles[idx] = TileId::AIR;
                 } else {
-                    chunk.tiles[idx] = stone;
+                    chunk.fg.tiles[idx] = stone;
                 }
             }
         }
