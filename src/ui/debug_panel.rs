@@ -5,7 +5,7 @@ use bevy_egui::{egui, EguiContexts};
 
 use crate::parallax::config::ParallaxConfig;
 use crate::player::{Grounded, Player, Velocity};
-use crate::registry::tile::{TerrainTiles, TileRegistry};
+use crate::registry::tile::TileRegistry;
 use crate::registry::world::WorldConfig;
 use crate::world::chunk::{tile_to_chunk, world_to_tile, LoadedChunks, WorldMap};
 
@@ -34,7 +34,6 @@ pub fn draw_debug_panel(
     // World
     world_map: Res<WorldMap>,
     world_config: Res<WorldConfig>,
-    terrain_tiles: Res<TerrainTiles>,
     tile_registry: Res<TileRegistry>,
     loaded_chunks: Res<LoadedChunks>,
     // Performance
@@ -153,7 +152,7 @@ pub fn draw_debug_panel(
 
                         // Get tile info (read-only, no chunk generation)
                         let tile_info =
-                            world_map.get_tile_if_loaded(tx, ty, &world_config, &terrain_tiles);
+                            world_map.get_tile_if_loaded(tx, ty, &world_config, &tile_registry);
 
                         if let Some(tile_id) = tile_info {
                             let tile_def = tile_registry.get(tile_id);

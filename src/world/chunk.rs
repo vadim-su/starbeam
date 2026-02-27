@@ -3,10 +3,12 @@ use std::collections::HashSet;
 
 use bevy::prelude::*;
 
-use crate::registry::tile::{TerrainTiles, TileId, TileRegistry};
+use crate::registry::biome::{BiomeRegistry, PlanetConfig};
+use crate::registry::tile::{TileId, TileRegistry};
 use crate::registry::world::WorldConfig;
 use crate::world::atlas::TileAtlas;
 use crate::world::autotile::{compute_bitmask, AutotileRegistry};
+use crate::world::biome_map::BiomeMap;
 use crate::world::mesh_builder::{build_chunk_mesh, MeshBuildBuffers};
 use crate::world::terrain_gen;
 use crate::world::tile_renderer::SharedTileMaterial;
@@ -47,15 +49,28 @@ pub struct WorldMap {
 }
 
 impl WorldMap {
+    #[allow(clippy::too_many_arguments)]
     pub fn get_or_generate_chunk(
         &mut self,
         chunk_x: i32,
         chunk_y: i32,
         wc: &WorldConfig,
-        tt: &TerrainTiles,
+        biome_map: &BiomeMap,
+        biome_registry: &BiomeRegistry,
+        tile_registry: &TileRegistry,
+        planet_config: &PlanetConfig,
     ) -> &ChunkData {
         self.chunks.entry((chunk_x, chunk_y)).or_insert_with(|| {
-            let tiles = terrain_gen::generate_chunk_tiles(wc.seed, chunk_x, chunk_y, wc, tt);
+            let tiles = terrain_gen::generate_chunk_tiles(
+                wc.seed,
+                chunk_x,
+                chunk_y,
+                wc,
+                biome_map,
+                biome_registry,
+                tile_registry,
+                planet_config,
+            );
             let len = tiles.len();
             ChunkData {
                 tiles,
@@ -72,13 +87,13 @@ impl WorldMap {
         tile_x: i32,
         tile_y: i32,
         wc: &WorldConfig,
-        tt: &TerrainTiles,
+        tile_registry: &TileRegistry,
     ) -> Option<TileId> {
         if tile_y < 0 {
-            return Some(tt.stone);
+            return Some(tile_registry.by_name("stone"));
         }
         if tile_y >= wc.height_tiles {
-            return Some(tt.air);
+            return Some(TileId::AIR);
         }
         let wrapped_x = wc.wrap_tile_x(tile_x);
         let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, wc.chunk_size);
@@ -88,33 +103,49 @@ impl WorldMap {
             .map(|chunk| chunk.get(lx, ly, wc.chunk_size))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn get_tile(
         &mut self,
         tile_x: i32,
         tile_y: i32,
         wc: &WorldConfig,
-        tt: &TerrainTiles,
+        biome_map: &BiomeMap,
+        biome_registry: &BiomeRegistry,
+        tile_registry: &TileRegistry,
+        planet_config: &PlanetConfig,
     ) -> TileId {
         if tile_y < 0 {
-            return tt.stone; // bedrock
+            return tile_registry.by_name("stone"); // bedrock
         }
         if tile_y >= wc.height_tiles {
-            return tt.air; // sky
+            return TileId::AIR; // sky
         }
         let wrapped_x = wc.wrap_tile_x(tile_x);
         let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, wc.chunk_size);
         let (lx, ly) = tile_to_local(wrapped_x, tile_y, wc.chunk_size);
-        self.get_or_generate_chunk(cx, cy, wc, tt)
-            .get(lx, ly, wc.chunk_size)
+        self.get_or_generate_chunk(
+            cx,
+            cy,
+            wc,
+            biome_map,
+            biome_registry,
+            tile_registry,
+            planet_config,
+        )
+        .get(lx, ly, wc.chunk_size)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn set_tile(
         &mut self,
         tile_x: i32,
         tile_y: i32,
         tile: TileId,
         wc: &WorldConfig,
-        tt: &TerrainTiles,
+        biome_map: &BiomeMap,
+        biome_registry: &BiomeRegistry,
+        tile_registry: &TileRegistry,
+        planet_config: &PlanetConfig,
     ) {
         if tile_y < 0 || tile_y >= wc.height_tiles {
             return;
@@ -122,22 +153,41 @@ impl WorldMap {
         let wrapped_x = wc.wrap_tile_x(tile_x);
         let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, wc.chunk_size);
         let (lx, ly) = tile_to_local(wrapped_x, tile_y, wc.chunk_size);
-        self.get_or_generate_chunk(cx, cy, wc, tt);
+        self.get_or_generate_chunk(
+            cx,
+            cy,
+            wc,
+            biome_map,
+            biome_registry,
+            tile_registry,
+            planet_config,
+        );
         self.chunks
             .get_mut(&(cx, cy))
             .unwrap()
             .set(lx, ly, tile, wc.chunk_size);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn is_solid(
         &mut self,
         tile_x: i32,
         tile_y: i32,
         wc: &WorldConfig,
-        tt: &TerrainTiles,
-        registry: &TileRegistry,
+        biome_map: &BiomeMap,
+        biome_registry: &BiomeRegistry,
+        tile_registry: &TileRegistry,
+        planet_config: &PlanetConfig,
     ) -> bool {
-        registry.is_solid(self.get_tile(tile_x, tile_y, wc, tt))
+        tile_registry.is_solid(self.get_tile(
+            tile_x,
+            tile_y,
+            wc,
+            biome_map,
+            biome_registry,
+            tile_registry,
+            planet_config,
+        ))
     }
 }
 
@@ -172,13 +222,16 @@ pub fn world_to_tile(world_x: f32, world_y: f32, tile_size: f32) -> (i32, i32) {
 
 /// Recompute bitmasks for 3×3 area around (center_x, center_y).
 /// Returns set of affected data chunk coords that need mesh rebuild.
+#[allow(clippy::too_many_arguments)]
 pub fn update_bitmasks_around(
     world_map: &mut WorldMap,
     center_x: i32,
     center_y: i32,
     wc: &WorldConfig,
-    tt: &TerrainTiles,
-    registry: &TileRegistry,
+    biome_map: &BiomeMap,
+    biome_registry: &BiomeRegistry,
+    tile_registry: &TileRegistry,
+    planet_config: &PlanetConfig,
 ) -> HashSet<(i32, i32)> {
     let mut dirty_chunks = HashSet::new();
 
@@ -198,8 +251,16 @@ pub fn update_bitmasks_around(
 
             let new_mask = compute_bitmask(
                 |bx, by| {
-                    let tile = world_map.get_tile(bx, by, wc, tt);
-                    registry.is_solid(tile)
+                    let tile = world_map.get_tile(
+                        bx,
+                        by,
+                        wc,
+                        biome_map,
+                        biome_registry,
+                        tile_registry,
+                        planet_config,
+                    );
+                    tile_registry.is_solid(tile)
                 },
                 wrapped_x,
                 y,
@@ -216,13 +277,16 @@ pub fn update_bitmasks_around(
 }
 
 /// Compute bitmasks for all tiles in a chunk using neighbor solidity checks.
+#[allow(clippy::too_many_arguments)]
 pub fn init_chunk_bitmasks(
     world_map: &mut WorldMap,
     chunk_x: i32,
     chunk_y: i32,
     wc: &WorldConfig,
-    tt: &TerrainTiles,
-    registry: &TileRegistry,
+    biome_map: &BiomeMap,
+    biome_registry: &BiomeRegistry,
+    tile_registry: &TileRegistry,
+    planet_config: &PlanetConfig,
 ) -> Vec<u8> {
     let chunk_size = wc.chunk_size;
     let mut bitmasks = vec![0u8; (chunk_size * chunk_size) as usize];
@@ -236,8 +300,16 @@ pub fn init_chunk_bitmasks(
             let idx = (local_y * chunk_size + local_x) as usize;
             bitmasks[idx] = compute_bitmask(
                 |x, y| {
-                    let tile = world_map.get_tile(x, y, wc, tt);
-                    registry.is_solid(tile)
+                    let tile = world_map.get_tile(
+                        x,
+                        y,
+                        wc,
+                        biome_map,
+                        biome_registry,
+                        tile_registry,
+                        planet_config,
+                    );
+                    tile_registry.is_solid(tile)
                 },
                 world_x,
                 world_y,
@@ -255,8 +327,10 @@ pub fn spawn_chunk(
     world_map: &mut WorldMap,
     loaded_chunks: &mut LoadedChunks,
     wc: &WorldConfig,
-    tt: &TerrainTiles,
-    registry: &TileRegistry,
+    biome_map: &BiomeMap,
+    biome_registry: &BiomeRegistry,
+    tile_registry: &TileRegistry,
+    planet_config: &PlanetConfig,
     autotile_registry: &AutotileRegistry,
     atlas: &TileAtlas,
     material: &SharedTileMaterial,
@@ -269,9 +343,26 @@ pub fn spawn_chunk(
     }
 
     let data_chunk_x = wc.wrap_chunk_x(display_chunk_x);
-    world_map.get_or_generate_chunk(data_chunk_x, chunk_y, wc, tt);
+    world_map.get_or_generate_chunk(
+        data_chunk_x,
+        chunk_y,
+        wc,
+        biome_map,
+        biome_registry,
+        tile_registry,
+        planet_config,
+    );
 
-    let bitmasks = init_chunk_bitmasks(world_map, data_chunk_x, chunk_y, wc, tt, registry);
+    let bitmasks = init_chunk_bitmasks(
+        world_map,
+        data_chunk_x,
+        chunk_y,
+        wc,
+        biome_map,
+        biome_registry,
+        tile_registry,
+        planet_config,
+    );
     if let Some(chunk) = world_map.chunks.get_mut(&(data_chunk_x, chunk_y)) {
         chunk.bitmasks = bitmasks;
     }
@@ -285,7 +376,7 @@ pub fn spawn_chunk(
         wc.chunk_size,
         wc.tile_size,
         wc.seed,
-        registry,
+        tile_registry,
         autotile_registry,
         &atlas.params,
         buffers,
@@ -333,7 +424,9 @@ pub fn chunk_loading_system(
     material: Res<SharedTileMaterial>,
     mut buffers: ResMut<MeshBuildBuffers>,
     wc: Res<WorldConfig>,
-    tt: Res<TerrainTiles>,
+    biome_map: Res<BiomeMap>,
+    biome_registry: Res<BiomeRegistry>,
+    planet_config: Res<PlanetConfig>,
 ) {
     let Ok(camera_transform) = camera_query.single() else {
         return;
@@ -373,8 +466,10 @@ pub fn chunk_loading_system(
                 &mut world_map,
                 &mut loaded_chunks,
                 &wc,
-                &tt,
+                &biome_map,
+                &biome_registry,
                 &registry,
+                &planet_config,
                 &autotile_registry,
                 &atlas,
                 &material,
@@ -440,6 +535,8 @@ pub fn rebuild_dirty_chunks(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registry::biome::{BiomeDef, LayerConfig, LayerConfigs};
+    use crate::registry::tile::TileDef;
 
     fn test_wc() -> WorldConfig {
         WorldConfig {
@@ -453,12 +550,144 @@ mod tests {
         }
     }
 
-    fn test_tt() -> TerrainTiles {
-        TerrainTiles {
-            air: TileId(0),
-            grass: TileId(1),
-            dirt: TileId(2),
-            stone: TileId(3),
+    fn test_biome_map() -> BiomeMap {
+        BiomeMap::generate("meadow", &["forest", "rocky"], 42, 2048, 300, 600, 0.6)
+    }
+
+    fn test_biome_registry() -> BiomeRegistry {
+        let mut reg = BiomeRegistry::default();
+        reg.biomes.insert(
+            "meadow".into(),
+            BiomeDef {
+                id: "meadow".into(),
+                surface_block: TileId(1),
+                subsurface_block: TileId(2),
+                subsurface_depth: 4,
+                fill_block: TileId(3),
+                cave_threshold: 0.3,
+                parallax_path: None,
+            },
+        );
+        reg.biomes.insert(
+            "forest".into(),
+            BiomeDef {
+                id: "forest".into(),
+                surface_block: TileId(1),
+                subsurface_block: TileId(2),
+                subsurface_depth: 4,
+                fill_block: TileId(3),
+                cave_threshold: 0.3,
+                parallax_path: None,
+            },
+        );
+        reg.biomes.insert(
+            "rocky".into(),
+            BiomeDef {
+                id: "rocky".into(),
+                surface_block: TileId(3),
+                subsurface_block: TileId(3),
+                subsurface_depth: 2,
+                fill_block: TileId(3),
+                cave_threshold: 0.3,
+                parallax_path: None,
+            },
+        );
+        for (id, threshold) in [
+            ("underground_dirt", 0.3),
+            ("underground_rock", 0.25),
+            ("core_magma", 0.15),
+        ] {
+            reg.biomes.insert(
+                id.into(),
+                BiomeDef {
+                    id: id.into(),
+                    surface_block: TileId(3),
+                    subsurface_block: TileId(3),
+                    subsurface_depth: 0,
+                    fill_block: TileId(3),
+                    cave_threshold: threshold,
+                    parallax_path: None,
+                },
+            );
+        }
+        reg
+    }
+
+    fn test_tile_registry() -> TileRegistry {
+        TileRegistry::from_defs(vec![
+            TileDef {
+                id: "air".into(),
+                autotile: None,
+                solid: false,
+                hardness: 0.0,
+                friction: 0.0,
+                viscosity: 0.0,
+                damage_on_contact: 0.0,
+                effects: vec![],
+            },
+            TileDef {
+                id: "grass".into(),
+                autotile: Some("grass".into()),
+                solid: true,
+                hardness: 1.0,
+                friction: 0.8,
+                viscosity: 0.0,
+                damage_on_contact: 0.0,
+                effects: vec![],
+            },
+            TileDef {
+                id: "dirt".into(),
+                autotile: Some("dirt".into()),
+                solid: true,
+                hardness: 2.0,
+                friction: 0.7,
+                viscosity: 0.0,
+                damage_on_contact: 0.0,
+                effects: vec![],
+            },
+            TileDef {
+                id: "stone".into(),
+                autotile: Some("stone".into()),
+                solid: true,
+                hardness: 5.0,
+                friction: 0.6,
+                viscosity: 0.0,
+                damage_on_contact: 0.0,
+                effects: vec![],
+            },
+        ])
+    }
+
+    fn test_planet_config() -> PlanetConfig {
+        PlanetConfig {
+            id: "garden".into(),
+            primary_biome: "meadow".into(),
+            secondary_biomes: vec!["forest".into(), "rocky".into()],
+            layers: LayerConfigs {
+                surface: LayerConfig {
+                    primary_biome: None,
+                    terrain_frequency: 0.02,
+                    terrain_amplitude: 40.0,
+                },
+                underground: LayerConfig {
+                    primary_biome: Some("underground_dirt".into()),
+                    terrain_frequency: 0.07,
+                    terrain_amplitude: 1.0,
+                },
+                deep_underground: LayerConfig {
+                    primary_biome: Some("underground_rock".into()),
+                    terrain_frequency: 0.05,
+                    terrain_amplitude: 1.0,
+                },
+                core: LayerConfig {
+                    primary_biome: Some("core_magma".into()),
+                    terrain_frequency: 0.04,
+                    terrain_amplitude: 1.0,
+                },
+            },
+            region_width_min: 300,
+            region_width_max: 600,
+            primary_region_ratio: 0.6,
         }
     }
 
@@ -499,51 +728,75 @@ mod tests {
     #[test]
     fn worldmap_get_tile_deterministic() {
         let wc = test_wc();
-        let tt = test_tt();
+        let bm = test_biome_map();
+        let br = test_biome_registry();
+        let tr = test_tile_registry();
+        let pc = test_planet_config();
         let mut map = WorldMap::default();
-        let t1 = map.get_tile(100, 500, &wc, &tt);
-        let t2 = map.get_tile(100, 500, &wc, &tt);
+        let t1 = map.get_tile(100, 500, &wc, &bm, &br, &tr, &pc);
+        let t2 = map.get_tile(100, 500, &wc, &bm, &br, &tr, &pc);
         assert_eq!(t1, t2);
     }
 
     #[test]
     fn worldmap_set_tile() {
         let wc = test_wc();
-        let tt = test_tt();
+        let bm = test_biome_map();
+        let br = test_biome_registry();
+        let tr = test_tile_registry();
+        let pc = test_planet_config();
         let mut map = WorldMap::default();
-        map.set_tile(100, 500, TileId::AIR, &wc, &tt);
-        assert_eq!(map.get_tile(100, 500, &wc, &tt), TileId::AIR);
+        map.set_tile(100, 500, TileId::AIR, &wc, &bm, &br, &tr, &pc);
+        assert_eq!(map.get_tile(100, 500, &wc, &bm, &br, &tr, &pc), TileId::AIR);
     }
 
     #[test]
     fn worldmap_y_out_of_bounds() {
         let wc = test_wc();
-        let tt = test_tt();
+        let bm = test_biome_map();
+        let br = test_biome_registry();
+        let tr = test_tile_registry();
+        let pc = test_planet_config();
         let mut map = WorldMap::default();
-        assert_eq!(map.get_tile(0, wc.height_tiles, &wc, &tt), tt.air);
-        assert_eq!(map.get_tile(0, -1, &wc, &tt), tt.stone);
+        assert_eq!(
+            map.get_tile(0, wc.height_tiles, &wc, &bm, &br, &tr, &pc),
+            TileId::AIR
+        );
+        assert_eq!(
+            map.get_tile(0, -1, &wc, &bm, &br, &tr, &pc),
+            tr.by_name("stone")
+        );
     }
 
     #[test]
     fn worldmap_x_wraps() {
         let wc = test_wc();
-        let tt = test_tt();
+        let bm = test_biome_map();
+        let br = test_biome_registry();
+        let tr = test_tile_registry();
+        let pc = test_planet_config();
         let mut map = WorldMap::default();
-        let t1 = map.get_tile(-1, 500, &wc, &tt);
-        let t2 = map.get_tile(wc.width_tiles - 1, 500, &wc, &tt);
+        let t1 = map.get_tile(-1, 500, &wc, &bm, &br, &tr, &pc);
+        let t2 = map.get_tile(wc.width_tiles - 1, 500, &wc, &bm, &br, &tr, &pc);
         assert_eq!(t1, t2);
 
-        let t3 = map.get_tile(wc.width_tiles, 500, &wc, &tt);
-        let t4 = map.get_tile(0, 500, &wc, &tt);
+        let t3 = map.get_tile(wc.width_tiles, 500, &wc, &bm, &br, &tr, &pc);
+        let t4 = map.get_tile(0, 500, &wc, &bm, &br, &tr, &pc);
         assert_eq!(t3, t4);
     }
 
     #[test]
     fn worldmap_set_tile_wraps() {
         let wc = test_wc();
-        let tt = test_tt();
+        let bm = test_biome_map();
+        let br = test_biome_registry();
+        let tr = test_tile_registry();
+        let pc = test_planet_config();
         let mut map = WorldMap::default();
-        map.set_tile(-1, 500, TileId::AIR, &wc, &tt);
-        assert_eq!(map.get_tile(wc.width_tiles - 1, 500, &wc, &tt), TileId::AIR);
+        map.set_tile(-1, 500, TileId::AIR, &wc, &bm, &br, &tr, &pc);
+        assert_eq!(
+            map.get_tile(wc.width_tiles - 1, 500, &wc, &bm, &br, &tr, &pc),
+            TileId::AIR
+        );
     }
 }

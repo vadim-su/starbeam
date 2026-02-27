@@ -160,12 +160,3 @@ mod tests {
         reg.by_name("lava");
     }
 }
-
-/// Tile IDs used by terrain generation, looked up from TileRegistry.
-#[derive(Resource, Debug, Clone)]
-pub struct TerrainTiles {
-    pub air: TileId,
-    pub grass: TileId,
-    pub dirt: TileId,
-    pub stone: TileId,
-}

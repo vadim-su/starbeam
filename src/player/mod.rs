@@ -5,8 +5,8 @@ pub mod wrap;
 
 use bevy::prelude::*;
 
+use crate::registry::biome::PlanetConfig;
 use crate::registry::player::PlayerConfig;
-use crate::registry::tile::TerrainTiles;
 use crate::registry::world::WorldConfig;
 use crate::registry::AppState;
 use crate::world::terrain_gen;
@@ -54,11 +54,17 @@ fn spawn_player(
     mut commands: Commands,
     player_config: Res<PlayerConfig>,
     world_config: Res<WorldConfig>,
-    _terrain_tiles: Res<TerrainTiles>,
+    planet_config: Res<PlanetConfig>,
     animations: Res<CharacterAnimations>,
 ) {
     let spawn_tile_x = 0;
-    let surface_y = terrain_gen::surface_height(world_config.seed, spawn_tile_x, &world_config);
+    let surface_y = terrain_gen::surface_height(
+        world_config.seed,
+        spawn_tile_x,
+        &world_config,
+        planet_config.layers.surface.terrain_frequency,
+        planet_config.layers.surface.terrain_amplitude,
+    );
     let spawn_pixel_x = spawn_tile_x as f32 * world_config.tile_size + world_config.tile_size / 2.0;
     let spawn_pixel_y =
         (surface_y + 5) as f32 * world_config.tile_size + player_config.height / 2.0;

@@ -1,6 +1,5 @@
 pub mod atlas;
 pub mod autotile;
-#[allow(dead_code)] // Will be used by terrain generation in a future task
 pub mod biome_map;
 pub mod chunk;
 pub mod mesh_builder;

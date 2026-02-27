@@ -1,9 +1,11 @@
 use bevy::prelude::*;
 
 use crate::player::{Grounded, Player, Velocity, MAX_DELTA_SECS};
+use crate::registry::biome::{BiomeRegistry, PlanetConfig};
 use crate::registry::player::PlayerConfig;
-use crate::registry::tile::{TerrainTiles, TileRegistry};
+use crate::registry::tile::TileRegistry;
 use crate::registry::world::WorldConfig;
+use crate::world::biome_map::BiomeMap;
 use crate::world::chunk::WorldMap;
 
 /// Player AABB from center position.
@@ -49,12 +51,15 @@ pub fn tile_aabb(tx: i32, ty: i32, tile_size: f32) -> Aabb {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn collision_system(
     time: Res<Time>,
     player_config: Res<PlayerConfig>,
     world_config: Res<WorldConfig>,
-    terrain_tiles: Res<TerrainTiles>,
     tile_registry: Res<TileRegistry>,
+    biome_map: Res<BiomeMap>,
+    biome_registry: Res<BiomeRegistry>,
+    planet_config: Res<PlanetConfig>,
     mut world_map: ResMut<WorldMap>,
     mut query: Query<(&mut Transform, &mut Velocity, &mut Grounded), With<Player>>,
 ) {
@@ -70,7 +75,15 @@ pub fn collision_system(
         pos.x += vel.x * dt;
         let aabb = Aabb::from_center(pos.x, pos.y, pw, ph);
         for (tx, ty) in aabb.overlapping_tiles(ts) {
-            if world_map.is_solid(tx, ty, &world_config, &terrain_tiles, &tile_registry) {
+            if world_map.is_solid(
+                tx,
+                ty,
+                &world_config,
+                &biome_map,
+                &biome_registry,
+                &tile_registry,
+                &planet_config,
+            ) {
                 let tile = tile_aabb(tx, ty, ts);
                 let player = Aabb::from_center(pos.x, pos.y, pw, ph);
                 if player.max_x > tile.min_x
@@ -93,7 +106,15 @@ pub fn collision_system(
         grounded.0 = false;
         let aabb = Aabb::from_center(pos.x, pos.y, pw, ph);
         for (tx, ty) in aabb.overlapping_tiles(ts) {
-            if world_map.is_solid(tx, ty, &world_config, &terrain_tiles, &tile_registry) {
+            if world_map.is_solid(
+                tx,
+                ty,
+                &world_config,
+                &biome_map,
+                &biome_registry,
+                &tile_registry,
+                &planet_config,
+            ) {
                 let tile = tile_aabb(tx, ty, ts);
                 let player = Aabb::from_center(pos.x, pos.y, pw, ph);
                 if player.max_x > tile.min_x

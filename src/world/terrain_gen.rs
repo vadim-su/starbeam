@@ -1,73 +1,133 @@
 use noise::{NoiseFn, Perlin};
 
-use crate::registry::tile::{TerrainTiles, TileId};
+use crate::registry::biome::{BiomeRegistry, PlanetConfig, WorldLayer};
+use crate::registry::tile::{TileId, TileRegistry};
 use crate::registry::world::WorldConfig;
+use crate::world::biome_map::BiomeMap;
 
 const SURFACE_BASE: f64 = 0.7;
-const SURFACE_AMPLITUDE: f64 = 40.0;
-const SURFACE_FREQUENCY: f64 = 0.02;
-const CAVE_FREQUENCY: f64 = 0.07;
-const CAVE_THRESHOLD: f64 = 0.3;
-const DIRT_DEPTH: i32 = 4;
 
-pub fn surface_height(seed: u32, tile_x: i32, wc: &WorldConfig) -> i32 {
+pub fn surface_height(
+    seed: u32,
+    tile_x: i32,
+    wc: &WorldConfig,
+    frequency: f64,
+    amplitude: f64,
+) -> i32 {
     let perlin = Perlin::new(seed);
     let base = SURFACE_BASE * wc.height_tiles as f64;
 
     let angle = tile_x as f64 / wc.width_tiles as f64 * 2.0 * std::f64::consts::PI;
-    let radius = wc.width_tiles as f64 * SURFACE_FREQUENCY / (2.0 * std::f64::consts::PI);
+    let radius = wc.width_tiles as f64 * frequency / (2.0 * std::f64::consts::PI);
     let nx = radius * angle.cos();
     let ny = radius * angle.sin();
     let noise_val = perlin.get([nx, ny]);
 
-    (base + noise_val * SURFACE_AMPLITUDE) as i32
+    (base + noise_val * amplitude) as i32
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn generate_tile(
     seed: u32,
     tile_x: i32,
     tile_y: i32,
     wc: &WorldConfig,
-    tt: &TerrainTiles,
+    biome_map: &BiomeMap,
+    biome_registry: &BiomeRegistry,
+    _tile_registry: &TileRegistry,
+    planet_config: &PlanetConfig,
 ) -> TileId {
     if tile_y < 0 || tile_y >= wc.height_tiles {
-        return tt.air;
+        return TileId::AIR;
     }
 
     let tile_x = wc.wrap_tile_x(tile_x);
-    let surface_y = surface_height(seed, tile_x, wc);
 
+    // Determine vertical layer
+    let layer = WorldLayer::from_tile_y(tile_y, wc.height_tiles);
+
+    // Get biome for this position
+    let biome_id = match layer {
+        WorldLayer::Surface => biome_map.biome_at(tile_x as u32).to_string(),
+        WorldLayer::Underground => planet_config
+            .layers
+            .underground
+            .primary_biome
+            .clone()
+            .unwrap_or_else(|| "underground_dirt".to_string()),
+        WorldLayer::DeepUnderground => planet_config
+            .layers
+            .deep_underground
+            .primary_biome
+            .clone()
+            .unwrap_or_else(|| "underground_rock".to_string()),
+        WorldLayer::Core => planet_config
+            .layers
+            .core
+            .primary_biome
+            .clone()
+            .unwrap_or_else(|| "core_magma".to_string()),
+    };
+
+    let biome = biome_registry.get(&biome_id);
+
+    // Surface height (using surface layer params)
+    let surface_y = surface_height(
+        seed,
+        tile_x,
+        wc,
+        planet_config.layers.surface.terrain_frequency,
+        planet_config.layers.surface.terrain_amplitude,
+    );
+
+    // Above surface = air
     if tile_y > surface_y {
-        return tt.air;
-    }
-    if tile_y == surface_y {
-        return tt.grass;
-    }
-    if tile_y > surface_y - DIRT_DEPTH {
-        return tt.dirt;
+        return TileId::AIR;
     }
 
+    // Surface/subsurface blocks: always use the surface biome regardless of
+    // vertical layer, since the surface height can straddle layer boundaries.
+    let surface_biome_id = biome_map.biome_at(tile_x as u32);
+    let surface_biome = biome_registry.get(surface_biome_id);
+    if tile_y == surface_y {
+        return surface_biome.surface_block;
+    }
+    if tile_y > surface_y - surface_biome.subsurface_depth {
+        return surface_biome.subsurface_block;
+    }
+
+    // Cave generation using layer-specific frequency
     let cave_perlin = Perlin::new(seed.wrapping_add(1));
+    let layer_freq = match layer {
+        WorldLayer::Surface => planet_config.layers.surface.terrain_frequency,
+        WorldLayer::Underground => planet_config.layers.underground.terrain_frequency,
+        WorldLayer::DeepUnderground => planet_config.layers.deep_underground.terrain_frequency,
+        WorldLayer::Core => planet_config.layers.core.terrain_frequency,
+    };
     let angle = tile_x as f64 / wc.width_tiles as f64 * 2.0 * std::f64::consts::PI;
-    let radius = wc.width_tiles as f64 * CAVE_FREQUENCY / (2.0 * std::f64::consts::PI);
+    let radius = wc.width_tiles as f64 * layer_freq / (2.0 * std::f64::consts::PI);
     let cave_val = cave_perlin.get([
         radius * angle.cos(),
         radius * angle.sin(),
-        tile_y as f64 * CAVE_FREQUENCY,
+        tile_y as f64 * layer_freq,
     ]);
-    if cave_val.abs() < CAVE_THRESHOLD {
-        tt.air
+    if cave_val.abs() < biome.cave_threshold {
+        TileId::AIR
     } else {
-        tt.stone
+        biome.fill_block
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn generate_chunk_tiles(
     seed: u32,
     chunk_x: i32,
     chunk_y: i32,
     wc: &WorldConfig,
-    tt: &TerrainTiles,
+    biome_map: &BiomeMap,
+    biome_registry: &BiomeRegistry,
+    tile_registry: &TileRegistry,
+    planet_config: &PlanetConfig,
 ) -> Vec<TileId> {
     let base_x = chunk_x * wc.chunk_size as i32;
     let base_y = chunk_y * wc.chunk_size as i32;
@@ -80,7 +140,10 @@ pub fn generate_chunk_tiles(
                 base_x + local_x,
                 base_y + local_y,
                 wc,
-                tt,
+                biome_map,
+                biome_registry,
+                tile_registry,
+                planet_config,
             ));
         }
     }
@@ -91,6 +154,8 @@ pub fn generate_chunk_tiles(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registry::biome::{BiomeDef, LayerConfig, LayerConfigs};
+    use crate::registry::tile::TileDef;
 
     const TEST_SEED: u32 = 42;
 
@@ -106,28 +171,180 @@ mod tests {
         }
     }
 
-    fn test_tt() -> TerrainTiles {
-        TerrainTiles {
-            air: TileId(0),
-            grass: TileId(1),
-            dirt: TileId(2),
-            stone: TileId(3),
+    fn test_biome_map() -> BiomeMap {
+        BiomeMap::generate("meadow", &["forest", "rocky"], 42, 2048, 300, 600, 0.6)
+    }
+
+    fn test_biome_registry() -> BiomeRegistry {
+        let mut reg = BiomeRegistry::default();
+        reg.biomes.insert(
+            "meadow".into(),
+            BiomeDef {
+                id: "meadow".into(),
+                surface_block: TileId(1),
+                subsurface_block: TileId(2),
+                subsurface_depth: 4,
+                fill_block: TileId(3),
+                cave_threshold: 0.3,
+                parallax_path: None,
+            },
+        );
+        reg.biomes.insert(
+            "forest".into(),
+            BiomeDef {
+                id: "forest".into(),
+                surface_block: TileId(1),
+                subsurface_block: TileId(2),
+                subsurface_depth: 4,
+                fill_block: TileId(3),
+                cave_threshold: 0.3,
+                parallax_path: None,
+            },
+        );
+        reg.biomes.insert(
+            "rocky".into(),
+            BiomeDef {
+                id: "rocky".into(),
+                surface_block: TileId(3),
+                subsurface_block: TileId(3),
+                subsurface_depth: 2,
+                fill_block: TileId(3),
+                cave_threshold: 0.3,
+                parallax_path: None,
+            },
+        );
+        for (id, threshold) in [
+            ("underground_dirt", 0.3),
+            ("underground_rock", 0.25),
+            ("core_magma", 0.15),
+        ] {
+            reg.biomes.insert(
+                id.into(),
+                BiomeDef {
+                    id: id.into(),
+                    surface_block: TileId(3),
+                    subsurface_block: TileId(3),
+                    subsurface_depth: 0,
+                    fill_block: TileId(3),
+                    cave_threshold: threshold,
+                    parallax_path: None,
+                },
+            );
+        }
+        reg
+    }
+
+    fn test_tile_registry() -> TileRegistry {
+        TileRegistry::from_defs(vec![
+            TileDef {
+                id: "air".into(),
+                autotile: None,
+                solid: false,
+                hardness: 0.0,
+                friction: 0.0,
+                viscosity: 0.0,
+                damage_on_contact: 0.0,
+                effects: vec![],
+            },
+            TileDef {
+                id: "grass".into(),
+                autotile: Some("grass".into()),
+                solid: true,
+                hardness: 1.0,
+                friction: 0.8,
+                viscosity: 0.0,
+                damage_on_contact: 0.0,
+                effects: vec![],
+            },
+            TileDef {
+                id: "dirt".into(),
+                autotile: Some("dirt".into()),
+                solid: true,
+                hardness: 2.0,
+                friction: 0.7,
+                viscosity: 0.0,
+                damage_on_contact: 0.0,
+                effects: vec![],
+            },
+            TileDef {
+                id: "stone".into(),
+                autotile: Some("stone".into()),
+                solid: true,
+                hardness: 5.0,
+                friction: 0.6,
+                viscosity: 0.0,
+                damage_on_contact: 0.0,
+                effects: vec![],
+            },
+        ])
+    }
+
+    fn test_planet_config() -> PlanetConfig {
+        PlanetConfig {
+            id: "garden".into(),
+            primary_biome: "meadow".into(),
+            secondary_biomes: vec!["forest".into(), "rocky".into()],
+            layers: LayerConfigs {
+                surface: LayerConfig {
+                    primary_biome: None,
+                    terrain_frequency: 0.02,
+                    terrain_amplitude: 40.0,
+                },
+                underground: LayerConfig {
+                    primary_biome: Some("underground_dirt".into()),
+                    terrain_frequency: 0.07,
+                    terrain_amplitude: 1.0,
+                },
+                deep_underground: LayerConfig {
+                    primary_biome: Some("underground_rock".into()),
+                    terrain_frequency: 0.05,
+                    terrain_amplitude: 1.0,
+                },
+                core: LayerConfig {
+                    primary_biome: Some("core_magma".into()),
+                    terrain_frequency: 0.04,
+                    terrain_amplitude: 1.0,
+                },
+            },
+            region_width_min: 300,
+            region_width_max: 600,
+            primary_region_ratio: 0.6,
         }
     }
 
     #[test]
     fn surface_height_is_deterministic() {
         let wc = test_wc();
-        let h1 = surface_height(TEST_SEED, 100, &wc);
-        let h2 = surface_height(TEST_SEED, 100, &wc);
+        let pc = test_planet_config();
+        let h1 = surface_height(
+            TEST_SEED,
+            100,
+            &wc,
+            pc.layers.surface.terrain_frequency,
+            pc.layers.surface.terrain_amplitude,
+        );
+        let h2 = surface_height(
+            TEST_SEED,
+            100,
+            &wc,
+            pc.layers.surface.terrain_frequency,
+            pc.layers.surface.terrain_amplitude,
+        );
         assert_eq!(h1, h2);
     }
 
     #[test]
     fn surface_height_is_within_bounds() {
         let wc = test_wc();
+        let pc = test_planet_config();
         for x in 0..wc.width_tiles {
-            let h = surface_height(TEST_SEED, x, &wc);
+            let h = surface_height(
+                TEST_SEED,
+                x,
+                &wc,
+                pc.layers.surface.terrain_frequency,
+                pc.layers.surface.terrain_amplitude,
+            );
             assert!(h >= 0 && h < wc.height_tiles, "surface at x={x} is {h}");
         }
     }
@@ -135,80 +352,142 @@ mod tests {
     #[test]
     fn above_surface_is_air() {
         let wc = test_wc();
-        let tt = test_tt();
-        let h = surface_height(TEST_SEED, 500, &wc);
-        assert_eq!(generate_tile(TEST_SEED, 500, h + 1, &wc, &tt), tt.air);
-        assert_eq!(generate_tile(TEST_SEED, 500, h + 10, &wc, &tt), tt.air);
+        let bm = test_biome_map();
+        let br = test_biome_registry();
+        let tr = test_tile_registry();
+        let pc = test_planet_config();
+        let h = surface_height(
+            TEST_SEED,
+            500,
+            &wc,
+            pc.layers.surface.terrain_frequency,
+            pc.layers.surface.terrain_amplitude,
+        );
+        assert_eq!(
+            generate_tile(TEST_SEED, 500, h + 1, &wc, &bm, &br, &tr, &pc),
+            TileId::AIR
+        );
+        assert_eq!(
+            generate_tile(TEST_SEED, 500, h + 10, &wc, &bm, &br, &tr, &pc),
+            TileId::AIR
+        );
     }
 
     #[test]
-    fn surface_is_grass() {
+    fn surface_is_biome_surface_block() {
         let wc = test_wc();
-        let tt = test_tt();
-        let h = surface_height(TEST_SEED, 500, &wc);
-        assert_eq!(generate_tile(TEST_SEED, 500, h, &wc, &tt), tt.grass);
+        let bm = test_biome_map();
+        let br = test_biome_registry();
+        let tr = test_tile_registry();
+        let pc = test_planet_config();
+        let h = surface_height(
+            TEST_SEED,
+            500,
+            &wc,
+            pc.layers.surface.terrain_frequency,
+            pc.layers.surface.terrain_amplitude,
+        );
+        let tile = generate_tile(TEST_SEED, 500, h, &wc, &bm, &br, &tr, &pc);
+        // The surface block should match the biome's surface_block at x=500
+        let biome_id = bm.biome_at(500);
+        let biome = br.get(biome_id);
+        assert_eq!(tile, biome.surface_block);
     }
 
     #[test]
-    fn below_surface_is_dirt_then_stone() {
+    fn below_surface_is_subsurface_then_fill_or_air() {
         let wc = test_wc();
-        let tt = test_tt();
-        let h = surface_height(TEST_SEED, 500, &wc);
-        assert_eq!(generate_tile(TEST_SEED, 500, h - 1, &wc, &tt), tt.dirt);
-        let deep_tile = generate_tile(TEST_SEED, 500, 10, &wc, &tt);
-        assert!(deep_tile == tt.stone || deep_tile == tt.air);
+        let bm = test_biome_map();
+        let br = test_biome_registry();
+        let tr = test_tile_registry();
+        let pc = test_planet_config();
+        let h = surface_height(
+            TEST_SEED,
+            500,
+            &wc,
+            pc.layers.surface.terrain_frequency,
+            pc.layers.surface.terrain_amplitude,
+        );
+        let biome_id = bm.biome_at(500);
+        let biome = br.get(biome_id);
+        // Just below surface should be subsurface block
+        assert_eq!(
+            generate_tile(TEST_SEED, 500, h - 1, &wc, &bm, &br, &tr, &pc),
+            biome.subsurface_block
+        );
+        // Deep tile should be fill_block or air (cave)
+        let deep_tile = generate_tile(TEST_SEED, 500, 10, &wc, &bm, &br, &tr, &pc);
+        assert!(deep_tile == TileId(3) || deep_tile == TileId::AIR);
     }
 
     #[test]
     fn chunk_generation_has_correct_size() {
         let wc = test_wc();
-        let tt = test_tt();
-        let tiles = generate_chunk_tiles(TEST_SEED, 0, 0, &wc, &tt);
+        let bm = test_biome_map();
+        let br = test_biome_registry();
+        let tr = test_tile_registry();
+        let pc = test_planet_config();
+        let tiles = generate_chunk_tiles(TEST_SEED, 0, 0, &wc, &bm, &br, &tr, &pc);
         assert_eq!(tiles.len(), (wc.chunk_size * wc.chunk_size) as usize);
     }
 
     #[test]
     fn chunk_generation_is_deterministic() {
         let wc = test_wc();
-        let tt = test_tt();
-        let tiles1 = generate_chunk_tiles(TEST_SEED, 5, 10, &wc, &tt);
-        let tiles2 = generate_chunk_tiles(TEST_SEED, 5, 10, &wc, &tt);
+        let bm = test_biome_map();
+        let br = test_biome_registry();
+        let tr = test_tile_registry();
+        let pc = test_planet_config();
+        let tiles1 = generate_chunk_tiles(TEST_SEED, 5, 10, &wc, &bm, &br, &tr, &pc);
+        let tiles2 = generate_chunk_tiles(TEST_SEED, 5, 10, &wc, &bm, &br, &tr, &pc);
         assert_eq!(tiles1, tiles2);
     }
 
     #[test]
     fn out_of_bounds_y_is_air() {
         let wc = test_wc();
-        let tt = test_tt();
-        assert_eq!(generate_tile(TEST_SEED, 500, -1, &wc, &tt), tt.air);
+        let bm = test_biome_map();
+        let br = test_biome_registry();
+        let tr = test_tile_registry();
+        let pc = test_planet_config();
         assert_eq!(
-            generate_tile(TEST_SEED, 500, wc.height_tiles, &wc, &tt),
-            tt.air
+            generate_tile(TEST_SEED, 500, -1, &wc, &bm, &br, &tr, &pc),
+            TileId::AIR
+        );
+        assert_eq!(
+            generate_tile(TEST_SEED, 500, wc.height_tiles, &wc, &bm, &br, &tr, &pc),
+            TileId::AIR
         );
     }
 
     #[test]
     fn x_wraps_around() {
         let wc = test_wc();
-        let tt = test_tt();
-        let t1 = generate_tile(TEST_SEED, -1, 500, &wc, &tt);
-        let t2 = generate_tile(TEST_SEED, wc.width_tiles - 1, 500, &wc, &tt);
+        let bm = test_biome_map();
+        let br = test_biome_registry();
+        let tr = test_tile_registry();
+        let pc = test_planet_config();
+        let t1 = generate_tile(TEST_SEED, -1, 500, &wc, &bm, &br, &tr, &pc);
+        let t2 = generate_tile(TEST_SEED, wc.width_tiles - 1, 500, &wc, &bm, &br, &tr, &pc);
         assert_eq!(t1, t2);
 
-        let t3 = generate_tile(TEST_SEED, wc.width_tiles, 500, &wc, &tt);
-        let t4 = generate_tile(TEST_SEED, 0, 500, &wc, &tt);
+        let t3 = generate_tile(TEST_SEED, wc.width_tiles, 500, &wc, &bm, &br, &tr, &pc);
+        let t4 = generate_tile(TEST_SEED, 0, 500, &wc, &bm, &br, &tr, &pc);
         assert_eq!(t3, t4);
     }
 
     #[test]
     fn surface_height_wraps_seamlessly() {
         let wc = test_wc();
-        let h0 = surface_height(TEST_SEED, 0, &wc);
-        let h_wrap = surface_height(TEST_SEED, wc.width_tiles, &wc);
+        let pc = test_planet_config();
+        let freq = pc.layers.surface.terrain_frequency;
+        let amp = pc.layers.surface.terrain_amplitude;
+        let h0 = surface_height(TEST_SEED, 0, &wc, freq, amp);
+        let h_wrap = surface_height(TEST_SEED, wc.width_tiles, &wc, freq, amp);
         assert_eq!(h0, h_wrap);
 
-        let h_neg = surface_height(TEST_SEED, -1, &wc);
-        let h_pos = surface_height(TEST_SEED, wc.width_tiles - 1, &wc);
+        let h_neg = surface_height(TEST_SEED, -1, &wc, freq, amp);
+        let h_pos = surface_height(TEST_SEED, wc.width_tiles - 1, &wc, freq, amp);
         assert_eq!(h_neg, h_pos);
     }
 }

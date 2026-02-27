@@ -153,12 +153,6 @@ fn check_loading(
 
     // Build resources from loaded assets
     let registry_ref = TileRegistry::from_defs(tiles.tiles.clone());
-    commands.insert_resource(tile::TerrainTiles {
-        air: registry_ref.by_name("air"),
-        grass: registry_ref.by_name("grass"),
-        dirt: registry_ref.by_name("dirt"),
-        stone: registry_ref.by_name("stone"),
-    });
     commands.insert_resource(registry_ref);
     commands.insert_resource(PlayerConfig {
         speed: player.speed,
@@ -595,20 +589,12 @@ fn hot_reload_tiles(
     handles: Res<RegistryHandles>,
     assets: Res<Assets<TileRegistryAsset>>,
     mut registry: ResMut<TileRegistry>,
-    mut terrain_tiles: ResMut<tile::TerrainTiles>,
 ) {
     for event in events.read() {
         if let AssetEvent::Modified { id } = event {
             if *id == handles.tiles.id() {
                 if let Some(asset) = assets.get(&handles.tiles) {
-                    let new_reg = TileRegistry::from_defs(asset.tiles.clone());
-                    *terrain_tiles = tile::TerrainTiles {
-                        air: new_reg.by_name("air"),
-                        grass: new_reg.by_name("grass"),
-                        dirt: new_reg.by_name("dirt"),
-                        stone: new_reg.by_name("stone"),
-                    };
-                    *registry = new_reg;
+                    *registry = TileRegistry::from_defs(asset.tiles.clone());
                     info!("Hot-reloaded TileRegistry ({} tiles)", asset.tiles.len());
                 }
             }

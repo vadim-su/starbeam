@@ -2,9 +2,11 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
 use crate::player::Player;
+use crate::registry::biome::{BiomeRegistry, PlanetConfig};
 use crate::registry::player::PlayerConfig;
-use crate::registry::tile::{TerrainTiles, TileId, TileRegistry};
+use crate::registry::tile::{TileId, TileRegistry};
 use crate::registry::world::WorldConfig;
+use crate::world::biome_map::BiomeMap;
 use crate::world::chunk::{
     update_bitmasks_around, world_to_tile, ChunkDirty, LoadedChunks, WorldMap,
 };
@@ -20,8 +22,10 @@ pub fn block_interaction_system(
     player_query: Query<&Transform, With<Player>>,
     player_config: Res<PlayerConfig>,
     world_config: Res<WorldConfig>,
-    terrain_tiles: Res<TerrainTiles>,
     tile_registry: Res<TileRegistry>,
+    biome_map: Res<BiomeMap>,
+    biome_registry: Res<BiomeRegistry>,
+    planet_config: Res<PlanetConfig>,
     mut world_map: ResMut<WorldMap>,
     loaded_chunks: Res<LoadedChunks>,
 ) {
@@ -60,15 +64,40 @@ pub fn block_interaction_system(
 
     if left_click {
         // Break block
-        let current = world_map.get_tile(tile_x, tile_y, &world_config, &terrain_tiles);
+        let current = world_map.get_tile(
+            tile_x,
+            tile_y,
+            &world_config,
+            &biome_map,
+            &biome_registry,
+            &tile_registry,
+            &planet_config,
+        );
         if !tile_registry.is_solid(current) {
             return;
         }
 
-        world_map.set_tile(tile_x, tile_y, TileId::AIR, &world_config, &terrain_tiles);
+        world_map.set_tile(
+            tile_x,
+            tile_y,
+            TileId::AIR,
+            &world_config,
+            &biome_map,
+            &biome_registry,
+            &tile_registry,
+            &planet_config,
+        );
     } else if right_click {
         // Place block
-        let current = world_map.get_tile(tile_x, tile_y, &world_config, &terrain_tiles);
+        let current = world_map.get_tile(
+            tile_x,
+            tile_y,
+            &world_config,
+            &biome_map,
+            &biome_registry,
+            &tile_registry,
+            &planet_config,
+        );
         if tile_registry.is_solid(current) {
             return;
         }
@@ -94,7 +123,16 @@ pub fn block_interaction_system(
 
         // TODO: replace with player's selected block type from hotbar/inventory
         let place_id = tile_registry.by_name("dirt");
-        world_map.set_tile(tile_x, tile_y, place_id, &world_config, &terrain_tiles);
+        world_map.set_tile(
+            tile_x,
+            tile_y,
+            place_id,
+            &world_config,
+            &biome_map,
+            &biome_registry,
+            &tile_registry,
+            &planet_config,
+        );
     } else {
         return;
     }
@@ -105,8 +143,10 @@ pub fn block_interaction_system(
         tile_x,
         tile_y,
         &world_config,
-        &terrain_tiles,
+        &biome_map,
+        &biome_registry,
         &tile_registry,
+        &planet_config,
     );
 
     for (cx, cy) in dirty {
