@@ -27,8 +27,8 @@ pub struct ChunkDirty;
 pub struct ChunkData {
     pub tiles: Vec<TileId>,
     pub bitmasks: Vec<u8>,
-    /// Per-tile light level: 0 = full dark, 255 = full light.
-    pub light_levels: Vec<u8>,
+    /// Per-tile RGB light level: [0,0,0] = full dark, [255,255,255] = full light.
+    pub light_levels: Vec<[u8; 3]>,
     #[allow(dead_code)] // Reserved for future block-damage system
     pub damage: Vec<u8>,
 }
@@ -75,7 +75,7 @@ impl WorldMap {
             ChunkData {
                 tiles,
                 bitmasks: vec![0; len],
-                light_levels: vec![255; len],
+                light_levels: vec![[255, 255, 255]; len],
                 damage: vec![0; len],
             }
         })
