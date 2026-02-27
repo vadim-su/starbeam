@@ -46,6 +46,51 @@ impl Default for PickupConfig {
     }
 }
 
+/// Parameters for spawning a dropped item.
+pub struct SpawnParams {
+    pub position: Vec2,
+    pub angle: f32,
+    pub speed: f32,
+}
+
+impl SpawnParams {
+    /// Create spawn params with random angle (60°-150°) and speed (80-150).
+    pub fn random(position: Vec2) -> Self {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        let angle = rng.gen_range(0.6..2.5); // ~60°-150° in radians
+        let speed = rng.gen_range(80.0..150.0);
+        Self {
+            position,
+            angle,
+            speed,
+        }
+    }
+
+    /// Calculate initial velocity from angle and speed.
+    pub fn velocity(&self) -> Vec2 {
+        Vec2::new(self.angle.cos(), self.angle.sin()) * self.speed
+    }
+}
+
+/// Calculate drops from a tile definition.
+pub fn calculate_drops(tile_drops: &[crate::item::DropDef]) -> Vec<(String, u16)> {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+
+    tile_drops
+        .iter()
+        .filter_map(|drop| {
+            if rng.gen_range(0.0..1.0) < drop.chance {
+                let count = rng.gen_range(drop.min..=drop.max);
+                Some((drop.item_id.clone(), count))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,5 +116,18 @@ mod tests {
         assert_eq!(physics.gravity, 400.0);
         assert_eq!(physics.friction, 0.9);
         assert_eq!(physics.bounce, 0.3);
+    }
+
+    #[test]
+    fn spawn_params_calculates_velocity() {
+        let params = SpawnParams {
+            position: Vec2::new(100.0, 200.0),
+            angle: std::f32::consts::FRAC_PI_2, // 90 degrees (straight up)
+            speed: 100.0,
+        };
+
+        // At 90 degrees: cos = 0, sin = 1
+        assert!(params.velocity().x.abs() < 0.1);
+        assert!((params.velocity().y - 100.0).abs() < 0.1);
     }
 }
