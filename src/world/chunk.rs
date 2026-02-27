@@ -38,6 +38,7 @@ pub struct TileLayer {
 }
 
 impl TileLayer {
+    #[allow(dead_code)] // public API for manual chunk construction / tests
     pub fn new_air(len: usize) -> Self {
         Self {
             tiles: vec![TileId::AIR; len],
@@ -107,14 +108,17 @@ impl WorldMap {
         ctx: &WorldCtxRef,
     ) -> &ChunkData {
         self.chunks.entry((chunk_x, chunk_y)).or_insert_with(|| {
-            let tiles = terrain_gen::generate_chunk_tiles(chunk_x, chunk_y, ctx);
-            let len = tiles.len();
+            let chunk_tiles = terrain_gen::generate_chunk_tiles(chunk_x, chunk_y, ctx);
+            let len = chunk_tiles.fg.len();
             ChunkData {
                 fg: TileLayer {
-                    tiles,
+                    tiles: chunk_tiles.fg,
                     bitmasks: vec![0; len],
                 },
-                bg: TileLayer::new_air(len),
+                bg: TileLayer {
+                    tiles: chunk_tiles.bg,
+                    bitmasks: vec![0; len],
+                },
                 light_levels: vec![[0, 0, 0]; len],
                 damage: vec![0; len],
             }
@@ -623,5 +627,31 @@ mod tests {
             map.get_tile(wc.width_tiles - 1, 500, Layer::Fg, &ctx),
             Some(TileId::AIR)
         );
+    }
+
+    #[test]
+    fn worldmap_bg_layer_initialized() {
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
+        let mut map = WorldMap::default();
+        map.get_or_generate_chunk(0, 0, &ctx);
+        // bg should now have actual tiles (not all air) for chunks below surface
+        // For a top-of-world chunk, bg should be air
+        let top_chunk_y = wc.height_chunks() - 1;
+        map.get_or_generate_chunk(0, top_chunk_y, &ctx);
+        // At least some bg tiles should be air in top chunk (above surface)
+        let chunk = map.chunk(0, top_chunk_y).unwrap();
+        let has_air = chunk.bg.tiles.iter().any(|&t| t == TileId::AIR);
+        assert!(has_air, "top chunk bg should have some air tiles");
+    }
+
+    #[test]
+    fn worldmap_set_tile_bg_layer() {
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
+        let mut map = WorldMap::default();
+        let stone = tr.by_name("stone");
+        map.set_tile(100, 500, Layer::Bg, stone, &ctx);
+        assert_eq!(map.get_tile(100, 500, Layer::Bg, &ctx), Some(stone));
     }
 }

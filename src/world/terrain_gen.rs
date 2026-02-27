@@ -135,19 +135,85 @@ pub fn generate_tile(tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> TileId {
     }
 }
 
-pub fn generate_chunk_tiles(chunk_x: i32, chunk_y: i32, ctx: &WorldCtxRef) -> Vec<TileId> {
+/// Generate a background tile at the given position.
+/// Below or at surface: always fill_block (including caves). Above surface: AIR.
+pub fn generate_bg_tile(tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> TileId {
+    let wc = ctx.config;
+    if tile_y < 0 || tile_y >= wc.height_tiles {
+        return TileId::AIR;
+    }
+
+    let tile_x = wc.wrap_tile_x(tile_x);
+
+    let surface_y = surface_height(
+        ctx.noise_cache,
+        tile_x,
+        wc,
+        ctx.planet_config.layers.surface.terrain_frequency,
+        ctx.planet_config.layers.surface.terrain_amplitude,
+    );
+
+    if tile_y > surface_y {
+        return TileId::AIR;
+    }
+
+    // Below (or at) surface: always fill_block from the appropriate biome
+    let layer = WorldLayer::from_tile_y(tile_y, ctx.planet_config);
+    let biome_id = match layer {
+        WorldLayer::Surface => ctx.biome_map.biome_at(tile_x as u32),
+        WorldLayer::Underground => ctx.biome_registry.id_by_name(
+            ctx.planet_config
+                .layers
+                .underground
+                .primary_biome
+                .as_deref()
+                .unwrap_or("underground_dirt"),
+        ),
+        WorldLayer::DeepUnderground => ctx.biome_registry.id_by_name(
+            ctx.planet_config
+                .layers
+                .deep_underground
+                .primary_biome
+                .as_deref()
+                .unwrap_or("underground_rock"),
+        ),
+        WorldLayer::Core => ctx.biome_registry.id_by_name(
+            ctx.planet_config
+                .layers
+                .core
+                .primary_biome
+                .as_deref()
+                .unwrap_or("core_magma"),
+        ),
+    };
+    let biome = ctx.biome_registry.get(biome_id);
+    biome.fill_block
+}
+
+/// Generated tile data for both foreground and background layers.
+pub struct ChunkTiles {
+    pub fg: Vec<TileId>,
+    pub bg: Vec<TileId>,
+}
+
+pub fn generate_chunk_tiles(chunk_x: i32, chunk_y: i32, ctx: &WorldCtxRef) -> ChunkTiles {
     let chunk_size = ctx.config.chunk_size;
     let base_x = chunk_x * chunk_size as i32;
     let base_y = chunk_y * chunk_size as i32;
-    let mut tiles = Vec::with_capacity((chunk_size * chunk_size) as usize);
+    let cap = (chunk_size * chunk_size) as usize;
+    let mut fg = Vec::with_capacity(cap);
+    let mut bg = Vec::with_capacity(cap);
 
     for local_y in 0..chunk_size as i32 {
         for local_x in 0..chunk_size as i32 {
-            tiles.push(generate_tile(base_x + local_x, base_y + local_y, ctx));
+            let x = base_x + local_x;
+            let y = base_y + local_y;
+            fg.push(generate_tile(x, y, ctx));
+            bg.push(generate_bg_tile(x, y, ctx));
         }
     }
 
-    tiles
+    ChunkTiles { fg, bg }
 }
 
 #[cfg(test)]
@@ -249,7 +315,9 @@ mod tests {
         let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
         let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
         let tiles = generate_chunk_tiles(0, 0, &ctx);
-        assert_eq!(tiles.len(), (wc.chunk_size * wc.chunk_size) as usize);
+        let expected = (wc.chunk_size * wc.chunk_size) as usize;
+        assert_eq!(tiles.fg.len(), expected);
+        assert_eq!(tiles.bg.len(), expected);
     }
 
     #[test]
@@ -258,7 +326,68 @@ mod tests {
         let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
         let tiles1 = generate_chunk_tiles(5, 10, &ctx);
         let tiles2 = generate_chunk_tiles(5, 10, &ctx);
-        assert_eq!(tiles1, tiles2);
+        assert_eq!(tiles1.fg, tiles2.fg);
+        assert_eq!(tiles1.bg, tiles2.bg);
+    }
+
+    #[test]
+    fn above_surface_bg_is_air() {
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
+        let h = surface_height(
+            &nc,
+            500,
+            &wc,
+            pc.layers.surface.terrain_frequency,
+            pc.layers.surface.terrain_amplitude,
+        );
+        assert_eq!(generate_bg_tile(500, h + 1, &ctx), TileId::AIR);
+        assert_eq!(generate_bg_tile(500, h + 10, &ctx), TileId::AIR);
+    }
+
+    #[test]
+    fn below_surface_bg_is_fill_block() {
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
+        let h = surface_height(
+            &nc,
+            500,
+            &wc,
+            pc.layers.surface.terrain_frequency,
+            pc.layers.surface.terrain_amplitude,
+        );
+        let bg = generate_bg_tile(500, h - 5, &ctx);
+        assert_ne!(bg, TileId::AIR, "bg below surface should be fill_block");
+    }
+
+    #[test]
+    fn cave_has_bg_but_no_fg() {
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
+        let h = surface_height(
+            &nc,
+            500,
+            &wc,
+            pc.layers.surface.terrain_frequency,
+            pc.layers.surface.terrain_amplitude,
+        );
+        // Scan below surface for a cave (fg=AIR)
+        for y in 0..h {
+            if generate_tile(500, y, &ctx) == TileId::AIR {
+                let bg = generate_bg_tile(500, y, &ctx);
+                assert_ne!(bg, TileId::AIR, "cave at y={y} should have bg wall");
+                return;
+            }
+        }
+        // No cave found — test is inconclusive but not a failure
+    }
+
+    #[test]
+    fn bg_out_of_bounds_is_air() {
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
+        assert_eq!(generate_bg_tile(500, -1, &ctx), TileId::AIR);
+        assert_eq!(generate_bg_tile(500, wc.height_tiles, &ctx), TileId::AIR);
     }
 
     #[test]
