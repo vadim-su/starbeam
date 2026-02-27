@@ -15,12 +15,23 @@ pub struct CurrentBiome {
 }
 
 /// Active parallax crossfade transition.
+///
+/// Alpha formulas (progress goes 0→1):
+///   from_alpha = from_start_alpha × (1 − progress)   → fades to 0
+///   to_alpha   = to_start_alpha + (1 − to_start_alpha) × progress  → fades to 1
+///
+/// On interruption the start alphas are set to the current visual state,
+/// so the crossfade continues seamlessly from wherever it was.
 #[derive(Resource, Debug)]
 pub struct ParallaxTransition {
     pub from_biome: String,
     pub to_biome: String,
     pub progress: f32,
     pub duration: f32,
+    /// Alpha the "from" layers start fading from (1.0 for a fresh transition).
+    pub from_start_alpha: f32,
+    /// Alpha the "to" layers start fading from (0.0 for a fresh transition).
+    pub to_start_alpha: f32,
 }
 
 const TRANSITION_DURATION: f32 = 1.5;
@@ -36,6 +47,7 @@ pub fn track_player_biome(
     transition: Option<Res<ParallaxTransition>>,
     asset_server: Res<AssetServer>,
     biome_parallax: Res<BiomeParallaxConfigs>,
+    layer_entity_query: Query<(Entity, &ParallaxLayer)>,
 ) {
     let Ok(player_tf) = player_query.single() else {
         return;
@@ -68,30 +80,76 @@ pub fn track_player_biome(
         return; // no change
     }
 
-    // If already transitioning and player enters yet another biome:
-    // abort current transition
-    if transition.is_some() {
-        info!("Aborting in-progress transition, new target: {}", new_biome);
-        commands.remove_resource::<ParallaxTransition>();
+    if let Some(trans) = &transition {
+        // --- Interrupting an in-progress transition ---
+        let p = trans.progress.clamp(0.0, 1.0);
+        let cur_from_alpha = trans.from_start_alpha * (1.0 - p);
+        let cur_to_alpha = trans.to_start_alpha + (1.0 - trans.to_start_alpha) * p;
+
+        if new_biome == trans.from_biome {
+            // Reversal: going back to the biome we were leaving.
+            // No spawn/despawn — just flip from↔to and continue from current alphas.
+            let max_change = cur_to_alpha.max(1.0 - cur_from_alpha).max(0.1);
+            info!(
+                "Reversing transition: {} → {} (α {:.2} → {:.2})",
+                trans.to_biome, trans.from_biome, cur_to_alpha, cur_from_alpha
+            );
+            commands.insert_resource(ParallaxTransition {
+                from_biome: trans.to_biome.clone(),
+                to_biome: trans.from_biome.clone(),
+                progress: 0.0,
+                duration: TRANSITION_DURATION * max_change,
+                from_start_alpha: cur_to_alpha,
+                to_start_alpha: cur_from_alpha,
+            });
+        } else {
+            // Redirect: going to a third biome.
+            // Despawn the old "from" layers, keep current "to" at its alpha,
+            // spawn the new target at alpha 0.
+            info!(
+                "Redirecting transition: {} → {} (was → {})",
+                trans.to_biome, new_biome, trans.from_biome
+            );
+            for (entity, layer) in &layer_entity_query {
+                if layer.biome_id == trans.from_biome {
+                    commands.entity(entity).despawn();
+                }
+            }
+            spawn_biome_parallax(
+                &mut commands,
+                &asset_server,
+                &biome_parallax,
+                &new_biome,
+                0.0,
+            );
+            commands.insert_resource(ParallaxTransition {
+                from_biome: trans.to_biome.clone(),
+                to_biome: new_biome.clone(),
+                progress: 0.0,
+                duration: TRANSITION_DURATION,
+                from_start_alpha: cur_to_alpha,
+                to_start_alpha: 0.0,
+            });
+        }
+    } else {
+        // --- No active transition — start a fresh one ---
+        info!("Biome changed: {} → {}", current.biome_id, new_biome);
+        spawn_biome_parallax(
+            &mut commands,
+            &asset_server,
+            &biome_parallax,
+            &new_biome,
+            0.0,
+        );
+        commands.insert_resource(ParallaxTransition {
+            from_biome: current.biome_id.clone(),
+            to_biome: new_biome.clone(),
+            progress: 0.0,
+            duration: TRANSITION_DURATION,
+            from_start_alpha: 1.0,
+            to_start_alpha: 0.0,
+        });
     }
-
-    info!("Biome changed: {} → {}", current.biome_id, new_biome);
-
-    // Spawn new layers for "to" biome with alpha = 0
-    spawn_biome_parallax(
-        &mut commands,
-        &asset_server,
-        &biome_parallax,
-        &new_biome,
-        0.0,
-    );
-
-    commands.insert_resource(ParallaxTransition {
-        from_biome: current.biome_id.clone(),
-        to_biome: new_biome.clone(),
-        progress: 0.0,
-        duration: TRANSITION_DURATION,
-    });
 
     commands.insert_resource(CurrentBiome {
         biome_id: new_biome,
@@ -129,12 +187,15 @@ pub fn parallax_transition_system(
         return;
     }
 
-    // Update alpha on all parallax layers
+    // Update alpha on all parallax layers using start-alpha anchored formulas
+    let p = trans.progress;
     for (layer, mut sprite) in &mut layer_query {
         if layer.biome_id == trans.from_biome {
-            sprite.color = sprite.color.with_alpha(1.0 - trans.progress);
+            let alpha = trans.from_start_alpha * (1.0 - p);
+            sprite.color = sprite.color.with_alpha(alpha);
         } else if layer.biome_id == trans.to_biome {
-            sprite.color = sprite.color.with_alpha(trans.progress);
+            let alpha = trans.to_start_alpha + (1.0 - trans.to_start_alpha) * p;
+            sprite.color = sprite.color.with_alpha(alpha);
         }
     }
 }
