@@ -8,6 +8,7 @@ use crate::registry::world::WorldConfig;
 use crate::world::atlas::TileAtlas;
 use crate::world::autotile::{compute_bitmask, AutotileRegistry};
 use crate::world::ctx::{WorldCtx, WorldCtxRef};
+use crate::world::lighting;
 use crate::world::mesh_builder::{build_chunk_mesh, MeshBuildBuffers};
 use crate::world::terrain_gen;
 use crate::world::tile_renderer::SharedTileMaterial;
@@ -75,7 +76,7 @@ impl WorldMap {
             ChunkData {
                 tiles,
                 bitmasks: vec![0; len],
-                light_levels: vec![[255, 255, 255]; len],
+                light_levels: vec![[0, 0, 0]; len],
                 damage: vec![0; len],
             }
         })
@@ -262,6 +263,12 @@ pub fn spawn_chunk(
     let bitmasks = init_chunk_bitmasks(world_map, data_chunk_x, chunk_y, ctx);
     if let Some(chunk) = world_map.chunks.get_mut(&(data_chunk_x, chunk_y)) {
         chunk.bitmasks = bitmasks;
+    }
+
+    // Compute lighting (immutable borrow for compute, then mutable to write back)
+    let light_levels = lighting::compute_chunk_lighting(&*world_map, data_chunk_x, chunk_y, ctx);
+    if let Some(chunk) = world_map.chunks.get_mut(&(data_chunk_x, chunk_y)) {
+        chunk.light_levels = light_levels;
     }
 
     let chunk_data = &world_map.chunks[&(data_chunk_x, chunk_y)];

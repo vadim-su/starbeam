@@ -98,7 +98,6 @@ pub fn compute_chunk_sunlight(
 }
 
 /// Compute point light contributions for a chunk via BFS from nearby emitters.
-#[allow(dead_code)] // Called by compute_chunk_lighting; wired into systems in Task 6
 pub fn compute_point_lights(
     world_map: &WorldMap,
     chunk_x: i32,
@@ -220,7 +219,6 @@ fn bfs_from_emitter(
 }
 
 /// Compute combined sunlight + point light for a chunk.
-#[allow(dead_code)] // Wired into lighting system in Task 6
 pub fn compute_chunk_lighting(
     world_map: &WorldMap,
     chunk_x: i32,
