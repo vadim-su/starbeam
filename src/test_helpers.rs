@@ -1,6 +1,6 @@
 pub mod fixtures {
     use crate::registry::biome::{
-        BiomeDef, BiomeRegistry, LayerConfig, LayerConfigs, PlanetConfig,
+        BiomeDef, BiomeRegistry, LayerBoundaries, LayerConfig, LayerConfigs, PlanetConfig,
     };
     use crate::registry::tile::{TileDef, TileId, TileRegistry};
     use crate::registry::world::WorldConfig;
@@ -105,32 +105,39 @@ pub mod fixtures {
     }
 
     pub fn test_planet_config() -> PlanetConfig {
+        let layers = LayerConfigs {
+            surface: LayerConfig {
+                primary_biome: None,
+                terrain_frequency: 0.02,
+                terrain_amplitude: 40.0,
+                depth_ratio: 0.30,
+            },
+            underground: LayerConfig {
+                primary_biome: Some("underground_dirt".into()),
+                terrain_frequency: 0.07,
+                terrain_amplitude: 1.0,
+                depth_ratio: 0.25,
+            },
+            deep_underground: LayerConfig {
+                primary_biome: Some("underground_rock".into()),
+                terrain_frequency: 0.05,
+                terrain_amplitude: 1.0,
+                depth_ratio: 0.33,
+            },
+            core: LayerConfig {
+                primary_biome: Some("core_magma".into()),
+                terrain_frequency: 0.04,
+                terrain_amplitude: 1.0,
+                depth_ratio: 0.12,
+            },
+        };
+        let layer_boundaries = LayerBoundaries::from_layers(&layers, 1024);
         PlanetConfig {
             id: "garden".into(),
             primary_biome: "meadow".into(),
             secondary_biomes: vec!["forest".into(), "rocky".into()],
-            layers: LayerConfigs {
-                surface: LayerConfig {
-                    primary_biome: None,
-                    terrain_frequency: 0.02,
-                    terrain_amplitude: 40.0,
-                },
-                underground: LayerConfig {
-                    primary_biome: Some("underground_dirt".into()),
-                    terrain_frequency: 0.07,
-                    terrain_amplitude: 1.0,
-                },
-                deep_underground: LayerConfig {
-                    primary_biome: Some("underground_rock".into()),
-                    terrain_frequency: 0.05,
-                    terrain_amplitude: 1.0,
-                },
-                core: LayerConfig {
-                    primary_biome: Some("core_magma".into()),
-                    terrain_frequency: 0.04,
-                    terrain_amplitude: 1.0,
-                },
-            },
+            layers,
+            layer_boundaries,
             region_width_min: 300,
             region_width_max: 600,
             primary_region_ratio: 0.6,

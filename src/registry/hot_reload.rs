@@ -8,7 +8,9 @@ use super::assets::{
     BiomeAsset, ParallaxConfigAsset, PlanetTypeAsset, PlayerDefAsset, TileRegistryAsset,
     WorldConfigAsset,
 };
-use super::biome::{BiomeDef, BiomeId, BiomeRegistry, LayerConfig, LayerConfigs, PlanetConfig};
+use super::biome::{
+    BiomeDef, BiomeId, BiomeRegistry, LayerBoundaries, LayerConfig, LayerConfigs, PlanetConfig,
+};
 use super::player::PlayerConfig;
 use super::tile::TileRegistry;
 use super::world::WorldConfig;
@@ -148,23 +150,31 @@ pub(crate) fn hot_reload_planet_type(
                     primary_biome: asset.layers.surface.primary_biome.clone(),
                     terrain_frequency: asset.layers.surface.terrain_frequency,
                     terrain_amplitude: asset.layers.surface.terrain_amplitude,
+                    depth_ratio: asset.layers.surface.depth_ratio,
                 },
                 underground: LayerConfig {
                     primary_biome: asset.layers.underground.primary_biome.clone(),
                     terrain_frequency: asset.layers.underground.terrain_frequency,
                     terrain_amplitude: asset.layers.underground.terrain_amplitude,
+                    depth_ratio: asset.layers.underground.depth_ratio,
                 },
                 deep_underground: LayerConfig {
                     primary_biome: asset.layers.deep_underground.primary_biome.clone(),
                     terrain_frequency: asset.layers.deep_underground.terrain_frequency,
                     terrain_amplitude: asset.layers.deep_underground.terrain_amplitude,
+                    depth_ratio: asset.layers.deep_underground.depth_ratio,
                 },
                 core: LayerConfig {
                     primary_biome: asset.layers.core.primary_biome.clone(),
                     terrain_frequency: asset.layers.core.terrain_frequency,
                     terrain_amplitude: asset.layers.core.terrain_amplitude,
+                    depth_ratio: asset.layers.core.depth_ratio,
                 },
             };
+            planet_config.layer_boundaries = LayerBoundaries::from_layers(
+                &planet_config.layers,
+                world_config.height_tiles,
+            );
             planet_config.region_width_min = asset.region_width_min;
             planet_config.region_width_max = asset.region_width_max;
             planet_config.primary_region_ratio = asset.primary_region_ratio;

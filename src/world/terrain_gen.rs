@@ -56,7 +56,7 @@ pub fn generate_tile(tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> TileId {
     let tile_x = wc.wrap_tile_x(tile_x);
 
     // Determine vertical layer
-    let layer = WorldLayer::from_tile_y(tile_y, wc.height_tiles);
+    let layer = WorldLayer::from_tile_y(tile_y, planet_config);
 
     // Get biome for this position
     let biome_id = match layer {

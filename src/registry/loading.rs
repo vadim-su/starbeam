@@ -8,7 +8,9 @@ use super::assets::{
     AutotileAsset, BiomeAsset, ParallaxConfigAsset, PlanetTypeAsset, PlayerDefAsset,
     TileRegistryAsset, WorldConfigAsset,
 };
-use super::biome::{BiomeDef, BiomeId, BiomeRegistry, LayerConfig, LayerConfigs, PlanetConfig};
+use super::biome::{
+    BiomeDef, BiomeId, BiomeRegistry, LayerBoundaries, LayerConfig, LayerConfigs, PlanetConfig,
+};
 use super::hot_reload::BiomeHandles;
 use super::player::PlayerConfig;
 use super::tile::TileRegistry;
@@ -241,32 +243,39 @@ pub(crate) fn check_biomes_loaded(
     }
 
     // --- Build PlanetConfig ---
+    let layers = LayerConfigs {
+        surface: LayerConfig {
+            primary_biome: planet_asset.layers.surface.primary_biome.clone(),
+            terrain_frequency: planet_asset.layers.surface.terrain_frequency,
+            terrain_amplitude: planet_asset.layers.surface.terrain_amplitude,
+            depth_ratio: planet_asset.layers.surface.depth_ratio,
+        },
+        underground: LayerConfig {
+            primary_biome: planet_asset.layers.underground.primary_biome.clone(),
+            terrain_frequency: planet_asset.layers.underground.terrain_frequency,
+            terrain_amplitude: planet_asset.layers.underground.terrain_amplitude,
+            depth_ratio: planet_asset.layers.underground.depth_ratio,
+        },
+        deep_underground: LayerConfig {
+            primary_biome: planet_asset.layers.deep_underground.primary_biome.clone(),
+            terrain_frequency: planet_asset.layers.deep_underground.terrain_frequency,
+            terrain_amplitude: planet_asset.layers.deep_underground.terrain_amplitude,
+            depth_ratio: planet_asset.layers.deep_underground.depth_ratio,
+        },
+        core: LayerConfig {
+            primary_biome: planet_asset.layers.core.primary_biome.clone(),
+            terrain_frequency: planet_asset.layers.core.terrain_frequency,
+            terrain_amplitude: planet_asset.layers.core.terrain_amplitude,
+            depth_ratio: planet_asset.layers.core.depth_ratio,
+        },
+    };
+    let layer_boundaries = LayerBoundaries::from_layers(&layers, world_config.height_tiles);
     let planet_config = PlanetConfig {
         id: planet_asset.id.clone(),
         primary_biome: planet_asset.primary_biome.clone(),
         secondary_biomes: planet_asset.secondary_biomes.clone(),
-        layers: LayerConfigs {
-            surface: LayerConfig {
-                primary_biome: planet_asset.layers.surface.primary_biome.clone(),
-                terrain_frequency: planet_asset.layers.surface.terrain_frequency,
-                terrain_amplitude: planet_asset.layers.surface.terrain_amplitude,
-            },
-            underground: LayerConfig {
-                primary_biome: planet_asset.layers.underground.primary_biome.clone(),
-                terrain_frequency: planet_asset.layers.underground.terrain_frequency,
-                terrain_amplitude: planet_asset.layers.underground.terrain_amplitude,
-            },
-            deep_underground: LayerConfig {
-                primary_biome: planet_asset.layers.deep_underground.primary_biome.clone(),
-                terrain_frequency: planet_asset.layers.deep_underground.terrain_frequency,
-                terrain_amplitude: planet_asset.layers.deep_underground.terrain_amplitude,
-            },
-            core: LayerConfig {
-                primary_biome: planet_asset.layers.core.primary_biome.clone(),
-                terrain_frequency: planet_asset.layers.core.terrain_frequency,
-                terrain_amplitude: planet_asset.layers.core.terrain_amplitude,
-            },
-        },
+        layers,
+        layer_boundaries,
         region_width_min: planet_asset.region_width_min,
         region_width_max: planet_asset.region_width_max,
         primary_region_ratio: planet_asset.primary_region_ratio,

@@ -80,6 +80,32 @@ impl BiomeRegistry {
     }
 }
 
+/// Computed Y boundaries for each layer (tile coordinates, from bottom).
+#[derive(Debug, Clone)]
+pub struct LayerBoundaries {
+    /// First tile above Core (Core occupies 0..core_top).
+    pub core_top: i32,
+    /// First tile above DeepUnderground.
+    pub deep_underground_top: i32,
+    /// First tile above Underground.
+    pub underground_top: i32,
+}
+
+impl LayerBoundaries {
+    /// Compute boundaries from layer depth ratios and world height.
+    pub fn from_layers(layers: &LayerConfigs, world_height: i32) -> Self {
+        let h = world_height as f64;
+        let core_top = (layers.core.depth_ratio * h) as i32;
+        let deep_underground_top = core_top + (layers.deep_underground.depth_ratio * h) as i32;
+        let underground_top = deep_underground_top + (layers.underground.depth_ratio * h) as i32;
+        Self {
+            core_top,
+            deep_underground_top,
+            underground_top,
+        }
+    }
+}
+
 /// Runtime planet type data, built from PlanetTypeAsset.
 #[derive(Resource, Debug, Clone)]
 pub struct PlanetConfig {
@@ -88,6 +114,8 @@ pub struct PlanetConfig {
     pub primary_biome: String,
     pub secondary_biomes: Vec<String>,
     pub layers: LayerConfigs,
+    /// Computed Y boundaries for each layer.
+    pub layer_boundaries: LayerBoundaries,
     pub region_width_min: u32,
     pub region_width_max: u32,
     pub primary_region_ratio: f64,
@@ -98,6 +126,8 @@ pub struct LayerConfig {
     pub primary_biome: Option<String>,
     pub terrain_frequency: f64,
     pub terrain_amplitude: f64,
+    /// Fraction of world height this layer occupies (0.0–1.0).
+    pub depth_ratio: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -118,15 +148,14 @@ pub enum WorldLayer {
 }
 
 impl WorldLayer {
-    /// Layer boundaries as fractions of world height (from bottom):
-    /// Core: 0-12%, Deep: 12-37%, Underground: 37-70%, Surface: 70-100%
-    pub fn from_tile_y(tile_y: i32, world_height: i32) -> Self {
-        let ratio = tile_y as f64 / world_height as f64;
-        if ratio < 0.12 {
+    /// Determine which vertical layer a tile_y belongs to, using data-driven boundaries.
+    pub fn from_tile_y(tile_y: i32, planet_config: &PlanetConfig) -> Self {
+        let b = &planet_config.layer_boundaries;
+        if tile_y < b.core_top {
             WorldLayer::Core
-        } else if ratio < 0.37 {
+        } else if tile_y < b.deep_underground_top {
             WorldLayer::DeepUnderground
-        } else if ratio < 0.70 {
+        } else if tile_y < b.underground_top {
             WorldLayer::Underground
         } else {
             WorldLayer::Surface
@@ -140,15 +169,21 @@ mod tests {
 
     #[test]
     fn world_layer_boundaries() {
-        assert_eq!(WorldLayer::from_tile_y(0, 1024), WorldLayer::Core);
-        assert_eq!(WorldLayer::from_tile_y(100, 1024), WorldLayer::Core);
+        use crate::test_helpers::fixtures;
+        let pc = fixtures::test_planet_config();
+        // With depth_ratios 0.12, 0.33, 0.25, 0.30 and height 1024:
+        // core_top = (0.12 * 1024) = 122
+        // deep_top = 122 + (0.33 * 1024) = 122 + 337 = 459
+        // underground_top = 459 + (0.25 * 1024) = 459 + 256 = 715
+        assert_eq!(WorldLayer::from_tile_y(0, &pc), WorldLayer::Core);
+        assert_eq!(WorldLayer::from_tile_y(100, &pc), WorldLayer::Core);
         assert_eq!(
-            WorldLayer::from_tile_y(130, 1024),
+            WorldLayer::from_tile_y(130, &pc),
             WorldLayer::DeepUnderground
         );
-        assert_eq!(WorldLayer::from_tile_y(380, 1024), WorldLayer::Underground);
-        assert_eq!(WorldLayer::from_tile_y(720, 1024), WorldLayer::Surface);
-        assert_eq!(WorldLayer::from_tile_y(1023, 1024), WorldLayer::Surface);
+        assert_eq!(WorldLayer::from_tile_y(460, &pc), WorldLayer::Underground);
+        assert_eq!(WorldLayer::from_tile_y(720, &pc), WorldLayer::Surface);
+        assert_eq!(WorldLayer::from_tile_y(1023, &pc), WorldLayer::Surface);
     }
 
     #[test]

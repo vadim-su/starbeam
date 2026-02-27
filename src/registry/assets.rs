@@ -79,6 +79,9 @@ pub struct LayerConfigAsset {
     pub primary_biome: Option<String>,
     pub terrain_frequency: f64,
     pub terrain_amplitude: f64,
+    /// Fraction of world height this layer occupies (0.0–1.0).
+    #[serde(default)]
+    pub depth_ratio: f64,
 }
 
 /// All 4 vertical layers.
