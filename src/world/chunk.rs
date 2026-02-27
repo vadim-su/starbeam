@@ -24,6 +24,16 @@ pub struct ChunkCoord {
 #[derive(Component)]
 pub struct ChunkDirty;
 
+/// Marker component identifying whether a chunk entity is foreground or background.
+#[derive(Component)]
+pub struct ChunkLayer(pub Layer);
+
+/// Both entities for a loaded chunk.
+pub struct ChunkEntities {
+    pub fg: Entity,
+    pub bg: Entity,
+}
+
 /// Identifies which tile layer to operate on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Layer {
@@ -204,7 +214,7 @@ impl WorldMap {
 /// Tracks which chunks currently have spawned tilemap entities.
 #[derive(Resource, Default)]
 pub struct LoadedChunks {
-    pub(crate) map: HashMap<(i32, i32), Entity>,
+    pub(crate) map: HashMap<(i32, i32), ChunkEntities>,
 }
 
 // --- Coordinate conversion helpers ---
@@ -341,37 +351,82 @@ pub fn spawn_chunk(
     }
 
     let chunk_data = &world_map.chunks[&(data_chunk_x, chunk_y)];
-    let mesh = build_chunk_mesh(
-        &chunk_data.fg.tiles,
-        &chunk_data.fg.bitmasks,
+
+    // Build bg mesh first (rendered behind foreground)
+    let bg_mesh = build_chunk_mesh(
+        &chunk_data.bg.tiles,
+        &chunk_data.bg.bitmasks,
         &chunk_data.light_levels,
+        Some(&chunk_data.fg.tiles), // shadow source
         display_chunk_x,
         chunk_y,
         ctx.config.chunk_size,
         ctx.config.tile_size,
         ctx.config.seed,
+        Layer::Bg,
         ctx.tile_registry,
         autotile_registry,
         &atlas.params,
         buffers,
     );
+    let bg_handle = meshes.add(bg_mesh);
 
-    let mesh_handle = meshes.add(mesh);
+    // Build fg mesh
+    let fg_mesh = build_chunk_mesh(
+        &chunk_data.fg.tiles,
+        &chunk_data.fg.bitmasks,
+        &chunk_data.light_levels,
+        None,
+        display_chunk_x,
+        chunk_y,
+        ctx.config.chunk_size,
+        ctx.config.tile_size,
+        ctx.config.seed,
+        Layer::Fg,
+        ctx.tile_registry,
+        autotile_registry,
+        &atlas.params,
+        buffers,
+    );
+    let fg_handle = meshes.add(fg_mesh);
 
-    let entity = commands
+    // Spawn bg entity (z=-1.0, behind foreground)
+    let bg_entity = commands
         .spawn((
             ChunkCoord {
                 x: display_chunk_x,
                 y: chunk_y,
             },
-            Mesh2d(mesh_handle),
-            MeshMaterial2d(material.handle.clone()),
+            ChunkLayer(Layer::Bg),
+            Mesh2d(bg_handle),
+            MeshMaterial2d(material.bg.clone()),
+            Transform::from_translation(Vec3::new(0.0, 0.0, -1.0)),
+            Visibility::default(),
+        ))
+        .id();
+
+    // Spawn fg entity (z=0.0)
+    let fg_entity = commands
+        .spawn((
+            ChunkCoord {
+                x: display_chunk_x,
+                y: chunk_y,
+            },
+            ChunkLayer(Layer::Fg),
+            Mesh2d(fg_handle),
+            MeshMaterial2d(material.fg.clone()),
             Transform::from_translation(Vec3::ZERO),
             Visibility::default(),
         ))
         .id();
 
-    loaded_chunks.map.insert((display_chunk_x, chunk_y), entity);
+    loaded_chunks.map.insert(
+        (display_chunk_x, chunk_y),
+        ChunkEntities {
+            fg: fg_entity,
+            bg: bg_entity,
+        },
+    );
 }
 
 pub fn despawn_chunk(
@@ -380,8 +435,9 @@ pub fn despawn_chunk(
     chunk_x: i32,
     chunk_y: i32,
 ) {
-    if let Some(entity) = loaded_chunks.map.remove(&(chunk_x, chunk_y)) {
-        commands.entity(entity).despawn();
+    if let Some(entities) = loaded_chunks.map.remove(&(chunk_x, chunk_y)) {
+        commands.entity(entities.fg).despawn();
+        commands.entity(entities.bg).despawn();
     }
 }
 
@@ -464,7 +520,7 @@ pub fn chunk_loading_system(
 #[allow(clippy::too_many_arguments)]
 pub fn rebuild_dirty_chunks(
     mut commands: Commands,
-    query: Query<(Entity, &ChunkCoord), With<ChunkDirty>>,
+    query: Query<(Entity, &ChunkCoord, &ChunkLayer), With<ChunkDirty>>,
     mut meshes: ResMut<Assets<Mesh>>,
     world_map: Res<WorldMap>,
     wc: Res<WorldConfig>,
@@ -473,21 +529,38 @@ pub fn rebuild_dirty_chunks(
     atlas: Res<TileAtlas>,
     mut buffers: ResMut<MeshBuildBuffers>,
 ) {
-    for (entity, coord) in &query {
+    for (entity, coord, chunk_layer) in &query {
         let data_chunk_x = wc.wrap_chunk_x(coord.x);
         let Some(chunk_data) = world_map.chunks.get(&(data_chunk_x, coord.y)) else {
             continue;
         };
 
+        let (tiles, bitmasks, fg_tiles_opt, layer) = match chunk_layer.0 {
+            Layer::Fg => (
+                chunk_data.fg.tiles.as_slice(),
+                chunk_data.fg.bitmasks.as_slice(),
+                None,
+                Layer::Fg,
+            ),
+            Layer::Bg => (
+                chunk_data.bg.tiles.as_slice(),
+                chunk_data.bg.bitmasks.as_slice(),
+                Some(chunk_data.fg.tiles.as_slice()),
+                Layer::Bg,
+            ),
+        };
+
         let mesh = build_chunk_mesh(
-            &chunk_data.fg.tiles,
-            &chunk_data.fg.bitmasks,
+            tiles,
+            bitmasks,
             &chunk_data.light_levels,
+            fg_tiles_opt,
             coord.x,
             coord.y,
             wc.chunk_size,
             wc.tile_size,
             wc.seed,
+            layer,
             &registry,
             &autotile_registry,
             &atlas.params,

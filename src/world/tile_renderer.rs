@@ -13,6 +13,8 @@ pub struct TileMaterial {
     #[texture(0)]
     #[sampler(1)]
     pub atlas: Handle<Image>,
+    #[uniform(2)]
+    pub dim: f32,
 }
 
 impl Material2d for TileMaterial {
@@ -39,8 +41,9 @@ impl Material2d for TileMaterial {
     }
 }
 
-/// Shared material handle for all chunk entities
+/// Shared material handles for foreground (full brightness) and background (dimmed) layers.
 #[derive(Resource)]
 pub struct SharedTileMaterial {
-    pub handle: Handle<TileMaterial>,
+    pub fg: Handle<TileMaterial>,
+    pub bg: Handle<TileMaterial>,
 }

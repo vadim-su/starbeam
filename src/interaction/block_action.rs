@@ -109,9 +109,10 @@ pub fn block_interaction_system(
     let all_dirty: HashSet<(i32, i32)> = bitmask_dirty.union(&light_dirty).copied().collect();
 
     for (cx, cy) in all_dirty {
-        for (&(display_cx, display_cy), &entity) in &loaded_chunks.map {
+        for (&(display_cx, display_cy), entities) in &loaded_chunks.map {
             if ctx_ref.config.wrap_chunk_x(display_cx) == cx && display_cy == cy {
-                commands.entity(entity).insert(ChunkDirty);
+                commands.entity(entities.fg).insert(ChunkDirty);
+                commands.entity(entities.bg).insert(ChunkDirty);
             }
         }
     }
