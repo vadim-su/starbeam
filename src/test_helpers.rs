@@ -87,7 +87,7 @@ pub mod fixtures {
                 damage_on_contact: 0.0,
                 effects: vec![],
                 light_emission: [0, 0, 0],
-                light_opacity: 15,
+                light_opacity: 4,
             },
             TileDef {
                 id: "dirt".into(),
@@ -99,7 +99,7 @@ pub mod fixtures {
                 damage_on_contact: 0.0,
                 effects: vec![],
                 light_emission: [0, 0, 0],
-                light_opacity: 15,
+                light_opacity: 5,
             },
             TileDef {
                 id: "stone".into(),
@@ -111,7 +111,19 @@ pub mod fixtures {
                 damage_on_contact: 0.0,
                 effects: vec![],
                 light_emission: [0, 0, 0],
-                light_opacity: 15,
+                light_opacity: 8,
+            },
+            TileDef {
+                id: "torch".into(),
+                autotile: None,
+                solid: false,
+                hardness: 0.5,
+                friction: 0.0,
+                viscosity: 0.0,
+                damage_on_contact: 0.0,
+                effects: vec![],
+                light_emission: [240, 180, 80],
+                light_opacity: 0,
             },
         ])
     }

@@ -110,7 +110,7 @@ mod tests {
                 damage_on_contact: 0.0,
                 effects: vec![],
                 light_emission: [0, 0, 0],
-                light_opacity: 15,
+                light_opacity: 4,
             },
             TileDef {
                 id: "dirt".into(),
@@ -122,7 +122,7 @@ mod tests {
                 damage_on_contact: 0.0,
                 effects: vec![],
                 light_emission: [0, 0, 0],
-                light_opacity: 15,
+                light_opacity: 5,
             },
             TileDef {
                 id: "stone".into(),
@@ -134,7 +134,19 @@ mod tests {
                 damage_on_contact: 0.0,
                 effects: vec![],
                 light_emission: [0, 0, 0],
-                light_opacity: 15,
+                light_opacity: 8,
+            },
+            TileDef {
+                id: "torch".into(),
+                autotile: None,
+                solid: false,
+                hardness: 0.5,
+                friction: 0.0,
+                viscosity: 0.0,
+                damage_on_contact: 0.0,
+                effects: vec![],
+                light_emission: [240, 180, 80],
+                light_opacity: 0,
             },
         ])
     }
@@ -184,8 +196,10 @@ mod tests {
         let reg = test_registry();
         assert_eq!(reg.light_emission(TileId::AIR), [0, 0, 0]);
         assert_eq!(reg.light_opacity(TileId::AIR), 0);
-        assert_eq!(reg.light_opacity(TileId(1)), 15); // grass
-        assert_eq!(reg.light_opacity(TileId(3)), 15); // stone
+        assert_eq!(reg.light_opacity(TileId(1)), 4); // grass
+        assert_eq!(reg.light_opacity(TileId(3)), 8); // stone
+        assert_eq!(reg.light_emission(TileId(4)), [240, 180, 80]); // torch
+        assert_eq!(reg.light_opacity(TileId(4)), 0); // torch
     }
 
     #[test]

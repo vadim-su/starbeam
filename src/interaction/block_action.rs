@@ -93,7 +93,7 @@ pub fn block_interaction_system(
         }
 
         // TODO: replace with player's selected block type from hotbar/inventory
-        let place_id = ctx_ref.tile_registry.by_name("dirt");
+        let place_id = ctx_ref.tile_registry.by_name("torch");
         world_map.set_tile(tile_x, tile_y, place_id, &ctx_ref);
     } else {
         return;

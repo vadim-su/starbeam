@@ -7,6 +7,7 @@ pub const SUN_COLOR: [u8; 3] = [255, 250, 230];
 pub const LIGHT_FALLOFF: u8 = 17;
 pub const OPACITY_SCALE: u16 = 17;
 pub const MAX_LIGHT_RADIUS: i32 = 16;
+pub const AMBIENT_MIN: [u8; 3] = [10, 10, 15];
 
 /// Subtract `amount` from each channel, clamping to 0.
 fn attenuate(light: [u8; 3], amount: u16) -> [u8; 3] {
@@ -227,7 +228,16 @@ pub fn compute_chunk_lighting(
 ) -> Vec<[u8; 3]> {
     let sun = compute_chunk_sunlight(world_map, chunk_x, chunk_y, ctx);
     let point = compute_point_lights(world_map, chunk_x, chunk_y, ctx);
-    merge_chunk_lights(&sun, &point)
+    let mut result = merge_chunk_lights(&sun, &point);
+
+    // Apply ambient minimum so underground is never pitch black
+    for light in &mut result {
+        light[0] = light[0].max(AMBIENT_MIN[0]);
+        light[1] = light[1].max(AMBIENT_MIN[1]);
+        light[2] = light[2].max(AMBIENT_MIN[2]);
+    }
+
+    result
 }
 
 /// Recompute lighting for a 3×3 chunk area around a changed tile.
@@ -354,8 +364,8 @@ mod tests {
         assert_eq!(result[top_idx], SUN_COLOR);
 
         // Bottom row (below many stone tiles) should be dark
-        // Stone has opacity 15, so attenuation per stone = 15 * 17 = 255
-        // After just one stone tile, light is fully attenuated
+        // Stone has opacity 8, so attenuation per stone = 8 * 17 = 136
+        // After 2 stone tiles, light is fully attenuated
         let bottom_idx = 0; // local_y=0, local_x=0
         assert!(
             is_dark(result[bottom_idx]),
