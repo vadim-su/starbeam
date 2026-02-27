@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
-use super::spawn::{ParallaxLayer, ParallaxTile};
+use super::spawn::{ParallaxLayerConfig, ParallaxLayerState, ParallaxTile};
 
 /// Scroll parallax layers based on camera position.
 ///
@@ -24,7 +24,8 @@ pub fn parallax_scroll(
     mut layer_query: Query<
         (
             Entity,
-            &mut ParallaxLayer,
+            &ParallaxLayerConfig,
+            &mut ParallaxLayerState,
             &mut Transform,
             &mut Visibility,
             &Sprite,
@@ -36,7 +37,7 @@ pub fn parallax_scroll(
         (
             With<ParallaxTile>,
             Without<Camera2d>,
-            Without<ParallaxLayer>,
+            Without<ParallaxLayerConfig>,
         ),
     >,
     children_query: Query<&Children>,
@@ -58,29 +59,29 @@ pub fn parallax_scroll(
     let visible_w = window.width() * proj_scale;
     let visible_h = window.height() * proj_scale;
 
-    for (entity, mut layer, mut transform, mut visibility, sprite) in &mut layer_query {
+    for (entity, config, mut state, mut transform, mut visibility, sprite) in &mut layer_query {
         // Resolve texture size on first frame the image is available
-        if layer.texture_size == Vec2::ZERO {
+        if state.texture_size == Vec2::ZERO {
             if let Some(image) = images.get(&sprite.image) {
-                layer.texture_size = image.size_f32();
+                state.texture_size = image.size_f32();
             } else {
                 continue; // image not loaded yet, skip this layer
             }
         }
 
-        let tex_w = layer.texture_size.x;
-        let tex_h = layer.texture_size.y;
+        let tex_w = state.texture_size.x;
+        let tex_h = state.texture_size.y;
 
         // Initialize repeat tiling: hide parent sprite, spawn child tiles
-        if (layer.repeat_x || layer.repeat_y) && !layer.initialized {
+        if (config.repeat_x || config.repeat_y) && !state.initialized {
             *visibility = Visibility::Hidden;
 
-            let copies_x = if layer.repeat_x {
+            let copies_x = if config.repeat_x {
                 (visible_w / tex_w).ceil() as i32 + 2
             } else {
                 1
             };
-            let copies_y = if layer.repeat_y {
+            let copies_y = if config.repeat_y {
                 (visible_h / tex_h).ceil() as i32 + 2
             } else {
                 1
@@ -100,7 +101,7 @@ pub fn parallax_scroll(
                 }
             });
 
-            layer.initialized = true;
+            state.initialized = true;
             info!(
                 "Initialized parallax tiling: {}x{} copies for {}x{} texture",
                 copies_x, copies_y, tex_w, tex_h
@@ -110,10 +111,10 @@ pub fn parallax_scroll(
         // Parallax positioning — preserve z-order set at spawn
         let z = transform.translation.z;
 
-        if layer.initialized {
+        if state.initialized {
             // Repeat layer: position parent at parallax offset, reposition children with wrapping
-            let base_x = cam_x * (1.0 - layer.speed_x);
-            let base_y = cam_y * (1.0 - layer.speed_y);
+            let base_x = cam_x * (1.0 - config.speed_x);
+            let base_y = cam_y * (1.0 - config.speed_y);
 
             transform.translation.x = base_x;
             transform.translation.y = base_y;
@@ -126,12 +127,12 @@ pub fn parallax_scroll(
 
             // Wrapping offset: the fractional position within one texture period.
             // This determines how the tile grid shifts as the camera moves.
-            let wrap_x = if layer.repeat_x && tex_w > 0.0 {
+            let wrap_x = if config.repeat_x && tex_w > 0.0 {
                 local_cam_x.rem_euclid(tex_w)
             } else {
                 0.0
             };
-            let wrap_y = if layer.repeat_y && tex_h > 0.0 {
+            let wrap_y = if config.repeat_y && tex_h > 0.0 {
                 local_cam_y.rem_euclid(tex_h)
             } else {
                 0.0
@@ -140,7 +141,7 @@ pub fn parallax_scroll(
             // Reposition child tiles in local space (relative to parent).
             // Grid is anchored so that tiles seamlessly cover the visible area
             // centered on the camera's local-space position.
-            let copies_x = if layer.repeat_x {
+            let copies_x = if config.repeat_x {
                 (visible_w / tex_w).ceil() as i32 + 2
             } else {
                 1
@@ -156,14 +157,14 @@ pub fn parallax_scroll(
                         // Anchor the grid at the camera's local position.
                         // Start one tile before the left edge of the visible area,
                         // offset by the wrap amount for seamless scrolling.
-                        child_tf.translation.x = if layer.repeat_x {
+                        child_tf.translation.x = if config.repeat_x {
                             local_cam_x - wrap_x + (ix as f32 - 1.0) * tex_w - visible_w / 2.0
                                 + tex_w / 2.0
                         } else {
                             0.0
                         };
 
-                        child_tf.translation.y = if layer.repeat_y {
+                        child_tf.translation.y = if config.repeat_y {
                             local_cam_y - wrap_y + (iy as f32 - 1.0) * tex_h - visible_h / 2.0
                                 + tex_h / 2.0
                         } else {
@@ -176,8 +177,8 @@ pub fn parallax_scroll(
             }
         } else {
             // Non-repeat layer: simple parallax position
-            transform.translation.x = cam_x * (1.0 - layer.speed_x);
-            transform.translation.y = cam_y * (1.0 - layer.speed_y);
+            transform.translation.x = cam_x * (1.0 - config.speed_x);
+            transform.translation.y = cam_y * (1.0 - config.speed_y);
             transform.translation.z = z;
         }
     }

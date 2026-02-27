@@ -7,7 +7,7 @@ use crate::registry::BiomeParallaxConfigs;
 use crate::world::biome_map::BiomeMap;
 use crate::world::chunk::world_to_tile;
 
-use super::spawn::ParallaxLayer;
+use super::spawn::{ParallaxLayerConfig, ParallaxLayerState};
 
 /// Tracks which biome the player is currently in.
 #[derive(Resource, Debug)]
@@ -48,7 +48,7 @@ pub fn track_player_biome(
     transition: Option<Res<ParallaxTransition>>,
     asset_server: Res<AssetServer>,
     biome_parallax: Res<BiomeParallaxConfigs>,
-    layer_entity_query: Query<(Entity, &ParallaxLayer)>,
+    layer_entity_query: Query<(Entity, &ParallaxLayerConfig)>,
 ) {
     let Ok(player_tf) = player_query.single() else {
         return;
@@ -162,8 +162,8 @@ pub fn parallax_transition_system(
     mut commands: Commands,
     time: Res<Time>,
     mut transition: Option<ResMut<ParallaxTransition>>,
-    mut layer_query: Query<(&ParallaxLayer, &mut Sprite)>,
-    layer_entity_query: Query<(Entity, &ParallaxLayer)>,
+    mut layer_query: Query<(&ParallaxLayerConfig, &mut Sprite)>,
+    layer_entity_query: Query<(Entity, &ParallaxLayerConfig)>,
 ) {
     let Some(ref mut trans) = transition else {
         return;
@@ -219,15 +219,14 @@ fn spawn_biome_parallax(
         let color = Color::srgba(1.0, 1.0, 1.0, initial_alpha);
 
         commands.spawn((
-            ParallaxLayer {
+            ParallaxLayerConfig {
                 biome_id,
                 speed_x: layer_def.speed_x,
                 speed_y: layer_def.speed_y,
                 repeat_x: layer_def.repeat_x,
                 repeat_y: layer_def.repeat_y,
-                texture_size: Vec2::ZERO,
-                initialized: false,
             },
+            ParallaxLayerState::default(),
             Sprite {
                 image: image_handle,
                 color,
