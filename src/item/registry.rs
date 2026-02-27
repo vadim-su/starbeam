@@ -8,10 +8,6 @@ use super::definition::ItemDef;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct ItemId(pub u16);
 
-impl ItemId {
-    pub const AIR: ItemId = ItemId(0);
-}
-
 /// Registry of all item definitions. Inserted as a Resource after asset loading.
 #[derive(Resource, Debug)]
 pub struct ItemRegistry {
@@ -109,5 +105,12 @@ mod tests {
         let reg = test_registry();
         assert_eq!(reg.max_stack(ItemId(0)), 999);
         assert_eq!(reg.max_stack(ItemId(1)), 999);
+    }
+
+    #[test]
+    #[should_panic]
+    fn by_name_panics_on_unknown() {
+        let reg = test_registry();
+        reg.by_name("nonexistent_item");
     }
 }
