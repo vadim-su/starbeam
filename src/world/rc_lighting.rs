@@ -252,20 +252,22 @@ fn extract_lighting_data(
         }
     }
 
-    // --- Sun emitters along top row ---
-    // Place sun light on the topmost row of the input range where sky is visible.
-    // After Y-flip: max_ty maps to buf_y=0 (top of GPU texture = top of screen).
-    let sun_ty = max_ty;
-    let sun_buf_y = 0u32;
+    // --- Sun emitters: fill sky columns from top down ---
+    // For each column, scan from the top of the input texture (buf_y=0 = max_ty)
+    // downward. Mark every air tile as a sun emitter until we hit the first solid
+    // tile. This creates a thick emitter band that diagonal rays can reliably hit,
+    // while keeping the emitter boundary at the actual terrain surface.
     for tx in min_tx..=max_tx {
         let buf_x = (tx - min_tx) as u32;
-        let idx = (sun_buf_y * input_w + buf_x) as usize;
-
-        // Only emit sun where there's no solid tile (sky)
-        let is_sky = get_fg_tile(&world_map, tx, sun_ty, &world_config, &tile_registry)
-            .is_none_or(|id| !tile_registry.is_solid(id));
-
-        if is_sky {
+        for buf_y in 0..input_h {
+            // buf_y=0 is max_ty (top of world view), buf_y increases downward
+            let ty = max_ty - buf_y as i32;
+            let is_sky = get_fg_tile(&world_map, tx, ty, &world_config, &tile_registry)
+                .is_none_or(|id| !tile_registry.is_solid(id));
+            if !is_sky {
+                break; // hit terrain surface, stop filling this column
+            }
+            let idx = (buf_y * input_w + buf_x) as usize;
             input.emissive[idx] = [SUN_COLOR[0], SUN_COLOR[1], SUN_COLOR[2], 1.0];
         }
     }
@@ -273,21 +275,66 @@ fn extract_lighting_data(
     input.dirty = true;
 }
 
-/// Update the tile material lightmap handles to point to the current RC lightmap.
+/// Update the tile material lightmap handles to point to the current RC lightmap
+/// and compute the UV correction rect that compensates for sub-tile camera offset.
+///
 /// Runs each frame after `swap_lightmap_handles`. The RC compute node runs
 /// before camera rendering in the render graph, so the lightmap is fully
 /// written before the tile fragment shader samples it.
 fn update_tile_lightmap(
     gpu_images: Option<Res<rc_pipeline::RcGpuImages>>,
+    config: Option<Res<RcLightingConfig>>,
     shared_material: Option<Res<SharedTileMaterial>>,
     mut materials: ResMut<Assets<TileMaterial>>,
+    camera_query: Query<(&GlobalTransform, &Projection), With<Camera2d>>,
 ) {
-    let (Some(gpu_images), Some(shared_material)) = (gpu_images, shared_material) else {
+    let (Some(gpu_images), Some(config), Some(shared_material)) =
+        (gpu_images, config, shared_material)
+    else {
         return;
     };
+
+    let lm_rect = if let Ok((cam_gt, projection)) = camera_query.single() {
+        let cam_pos = cam_gt.translation().truncate();
+        let ts = config.tile_size;
+        let _ortho_scale = match projection {
+            Projection::Orthographic(o) => o.scale,
+            _ => 1.0,
+        };
+
+        let vp_tiles_w = config.viewport_size.x as f32;
+        let vp_tiles_h = config.viewport_size.y as f32;
+
+        // The sub-tile fractional camera offset in world units
+        let cam_frac_x = cam_pos.x - (cam_pos.x / ts).floor() * ts;
+        let cam_frac_y = cam_pos.y - (cam_pos.y / ts).floor() * ts;
+
+        let half_w = (vp_tiles_w as i32) / 2;
+        let half_h = (vp_tiles_h as i32) / 2;
+
+        let lm_world_w = vp_tiles_w * ts;
+        let lm_world_h = vp_tiles_h * ts;
+
+        // Scale: ratio of screen world extent to lightmap world extent
+        // For now approximate as 1.0 (revisit if viewport isn't tile-aligned)
+        let scale_x = 1.0_f32;
+        let scale_y = 1.0_f32;
+
+        // Offset: sub-tile camera position normalized to lightmap extent
+        let vp_world_w_actual = vp_tiles_w * ts;
+        let vp_world_h_actual = vp_tiles_h * ts;
+        let offset_x = (cam_frac_x + half_w as f32 * ts - vp_world_w_actual / 2.0) / lm_world_w;
+        let offset_y = (-cam_frac_y + half_h as f32 * ts - vp_world_h_actual / 2.0) / lm_world_h;
+
+        Vec4::new(scale_x, scale_y, offset_x, offset_y)
+    } else {
+        Vec4::new(1.0, 1.0, 0.0, 0.0)
+    };
+
     for handle in [&shared_material.fg, &shared_material.bg] {
         if let Some(mat) = materials.get_mut(handle) {
             mat.lightmap = gpu_images.lightmap.clone();
+            mat.lightmap_uv_rect = lm_rect;
         }
     }
 }

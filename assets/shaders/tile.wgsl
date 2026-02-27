@@ -28,11 +28,17 @@ struct TileUniforms {
     dim: f32,
 }
 
+struct LightmapRect {
+    scale: vec2<f32>,
+    offset: vec2<f32>,
+}
+
 @group(2) @binding(0) var atlas_texture: texture_2d<f32>;
 @group(2) @binding(1) var atlas_sampler: sampler;
 @group(2) @binding(2) var<uniform> uniforms: TileUniforms;
 @group(2) @binding(3) var lightmap_texture: texture_2d<f32>;
 @group(2) @binding(4) var lightmap_sampler: sampler;
+@group(2) @binding(5) var<uniform> lm_rect: LightmapRect;
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
@@ -44,9 +50,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
 
-    // Sample lightmap using screen UV (clip_position.xy is in framebuffer pixels)
+    // Sample lightmap using screen UV corrected for sub-tile camera offset
     let screen_uv = (in.clip_position.xy - view.viewport.xy) / view.viewport.zw;
-    let light = textureSample(lightmap_texture, lightmap_sampler, screen_uv).rgb;
+    let lightmap_uv = screen_uv * lm_rect.scale + lm_rect.offset;
+    let light = textureSample(lightmap_texture, lightmap_sampler, lightmap_uv).rgb;
 
     return vec4<f32>(color.rgb * light * uniforms.dim, color.a);
 }

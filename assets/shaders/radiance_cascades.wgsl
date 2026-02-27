@@ -160,6 +160,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 break;
             }
 
+            // Skip self-sample: at dist=0 the ray samples its own tile,
+            // causing solid tiles to always self-hit and appear black.
+            if cascade == 0u && dist < 0.5 {
+                continue;
+            }
+
             let sample_pos = probe_center + ray_dir * dist;
             let sample_px = vec2<i32>(sample_pos);
 
