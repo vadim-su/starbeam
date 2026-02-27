@@ -9,6 +9,7 @@ use crate::registry::biome::PlanetConfig;
 use crate::registry::player::PlayerConfig;
 use crate::registry::world::WorldConfig;
 use crate::registry::AppState;
+use crate::sets::GameSet;
 use crate::world::terrain_gen;
 
 use animation::{AnimationKind, AnimationState, CharacterAnimations};
@@ -45,7 +46,7 @@ impl Plugin for PlayerPlugin {
                 animation::animate_player,
             )
                 .chain()
-                .run_if(in_state(AppState::InGame)),
+                .in_set(GameSet::Physics),
         );
     }
 }

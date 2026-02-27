@@ -9,7 +9,7 @@ pub mod tile_renderer;
 
 use bevy::prelude::*;
 
-use crate::registry::AppState;
+use crate::sets::GameSet;
 use crate::world::chunk::{LoadedChunks, WorldMap};
 use crate::world::mesh_builder::MeshBuildBuffers;
 
@@ -24,7 +24,7 @@ impl Plugin for WorldPlugin {
                 Update,
                 (chunk::chunk_loading_system, chunk::rebuild_dirty_chunks)
                     .chain()
-                    .run_if(in_state(AppState::InGame)),
+                    .in_set(GameSet::WorldUpdate),
             );
     }
 }

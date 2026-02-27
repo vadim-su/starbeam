@@ -4,6 +4,7 @@ pub mod math;
 mod parallax;
 mod player;
 mod registry;
+pub mod sets;
 #[cfg(test)]
 mod test_helpers;
 mod ui;
@@ -13,6 +14,8 @@ use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
 use bevy::sprite_render::Material2dPlugin;
 use bevy_egui::EguiPlugin;
+
+use sets::GameSet;
 
 fn main() {
     App::new()
@@ -38,6 +41,19 @@ fn main() {
         .add_plugins(interaction::InteractionPlugin)
         .add_plugins(Material2dPlugin::<world::tile_renderer::TileMaterial>::default())
         .add_plugins(ui::UiPlugin)
+        .configure_sets(
+            Update,
+            (
+                GameSet::Input,
+                GameSet::Physics,
+                GameSet::WorldUpdate,
+                GameSet::Camera,
+                GameSet::Parallax,
+                GameSet::Ui,
+            )
+                .chain()
+                .run_if(in_state(registry::AppState::InGame)),
+        )
         .add_systems(Startup, setup)
         .run();
 }

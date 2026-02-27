@@ -5,8 +5,7 @@ pub mod transition;
 
 use bevy::prelude::*;
 
-use crate::camera::follow::camera_follow_player;
-use crate::registry::AppState;
+use crate::sets::GameSet;
 
 pub struct ParallaxPlugin;
 
@@ -20,8 +19,7 @@ impl Plugin for ParallaxPlugin {
                 scroll::parallax_scroll,
             )
                 .chain()
-                .after(camera_follow_player)
-                .run_if(in_state(AppState::InGame)),
+                .in_set(GameSet::Parallax),
         );
     }
 }
