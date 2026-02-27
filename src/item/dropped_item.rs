@@ -1,5 +1,11 @@
 use bevy::prelude::*;
 
+/// Horizontal velocity damping factor applied on bounce.
+const BOUNCE_HORIZONTAL_DAMPING: f32 = 0.9;
+
+/// Velocity threshold below which friction is applied to slow items.
+const FRICTION_THRESHOLD: f32 = 10.0;
+
 /// A dropped item entity in the world.
 #[derive(Component, Debug)]
 pub struct DroppedItem {
@@ -84,9 +90,10 @@ pub fn apply_friction(velocity: Vec2, friction: f32) -> Vec2 {
 }
 
 /// Apply bounce on collision (pure function for testing).
+// TODO: Integrate bounce when ground collision is implemented (Task 5.x)
 pub fn apply_bounce(velocity: Vec2, bounce: f32, hit_ground: bool) -> Vec2 {
     if hit_ground && velocity.y < 0.0 {
-        Vec2::new(velocity.x * 0.9, -velocity.y * bounce)
+        Vec2::new(velocity.x * BOUNCE_HORIZONTAL_DAMPING, -velocity.y * bounce)
     } else {
         velocity
     }
@@ -108,7 +115,7 @@ pub fn dropped_item_physics_system(
         transform.translation.y += item.velocity.y * delta;
 
         // Apply friction when moving slowly
-        if item.velocity.length() < 10.0 {
+        if item.velocity.length() < FRICTION_THRESHOLD {
             item.velocity = apply_friction(item.velocity, physics.friction);
         }
 
@@ -197,5 +204,23 @@ mod tests {
 
         assert!((new_velocity.x - 90.0).abs() < 0.1);
         assert_eq!(new_velocity.y, 0.0);
+    }
+
+    #[test]
+    fn physics_system_applies_bounce_on_ground_hit() {
+        let velocity = Vec2::new(50.0, -100.0);
+        let bounce = 0.3;
+
+        let new_velocity = apply_bounce(velocity, bounce, true);
+
+        assert!((new_velocity.x - 45.0).abs() < 0.1); // 50 * 0.9
+        assert!((new_velocity.y - 30.0).abs() < 0.1); // 100 * 0.3
+    }
+
+    #[test]
+    fn physics_system_no_bounce_when_rising() {
+        let velocity = Vec2::new(50.0, 100.0);
+        let new_velocity = apply_bounce(velocity, 0.3, true);
+        assert_eq!(new_velocity, velocity);
     }
 }
