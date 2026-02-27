@@ -482,11 +482,13 @@ pub(crate) fn check_autotile_loading(
         atlas: atlas_handle.clone(),
         dim: 1.0,
         lightmap: white_lightmap.clone(),
+        lightmap_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0), // No scaling/offset
     });
     let bg_material = tile_materials.add(TileMaterial {
         atlas: atlas_handle.clone(),
         dim: 0.6,
         lightmap: white_lightmap,
+        lightmap_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0), // No scaling/offset
     });
 
     // Insert all autotile resources

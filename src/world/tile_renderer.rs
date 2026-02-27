@@ -16,6 +16,8 @@ pub struct TileMaterial {
     #[texture(3)]
     #[sampler(4)]
     pub lightmap: Handle<Image>,
+    #[uniform(5)]
+    pub lightmap_uv_rect: Vec4, // (scale_x, scale_y, offset_x, offset_y)
 }
 
 impl Material2d for TileMaterial {
