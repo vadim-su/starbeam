@@ -43,6 +43,7 @@ impl SplitMix64 {
 pub struct BiomeRegion {
     pub biome_id: String,
     pub start_x: u32,
+    #[allow(dead_code)] // used in tests; implicitly encoded via start_x intervals at runtime
     pub width: u32,
 }
 

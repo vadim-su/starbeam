@@ -24,6 +24,7 @@ pub fn toggle_debug_panel(keyboard: Res<ButtonInput<KeyCode>>, mut state: ResMut
 }
 
 /// Draws the debug inspector panel using egui.
+#[allow(clippy::too_many_arguments)]
 pub fn draw_debug_panel(
     mut contexts: EguiContexts,
     state: Res<DebugUiState>,

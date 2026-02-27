@@ -15,6 +15,7 @@ use super::spawn::{ParallaxLayer, ParallaxTile};
 /// For layers with `repeat_x` or `repeat_y`, child tile sprites are spawned
 /// on first initialization and repositioned each frame with wrapping to create
 /// seamless tiling across the visible area.
+#[allow(clippy::type_complexity)]
 pub fn parallax_scroll(
     mut commands: Commands,
     camera_query: Query<(&Transform, &Projection), With<Camera2d>>,

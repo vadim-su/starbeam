@@ -112,17 +112,23 @@ pub struct BiomeAsset {
     pub fill_block: String,
     pub cave_threshold: f64,
     pub parallax: Option<String>,
-    // Future fields — not implemented in MVP
+    // Future fields — not implemented in MVP, kept for RON schema forward-compatibility
+    #[allow(dead_code)]
     #[serde(default)]
     pub weather: Option<Vec<String>>,
+    #[allow(dead_code)]
     #[serde(default)]
     pub music: Option<Vec<String>>,
+    #[allow(dead_code)]
     #[serde(default)]
     pub ambient: Option<Vec<String>>,
+    #[allow(dead_code)]
     #[serde(default)]
     pub placeables: Option<Vec<String>>,
+    #[allow(dead_code)]
     #[serde(default)]
     pub monsters: Option<Vec<String>>,
+    #[allow(dead_code)]
     #[serde(default)]
     pub status_effects: Option<Vec<String>>,
 }

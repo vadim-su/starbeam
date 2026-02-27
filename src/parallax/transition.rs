@@ -26,6 +26,7 @@ pub struct ParallaxTransition {
 const TRANSITION_DURATION: f32 = 1.5;
 
 /// Detect when player enters a new biome region.
+#[allow(clippy::too_many_arguments)]
 pub fn track_player_biome(
     mut commands: Commands,
     player_query: Query<&Transform, With<Player>>,

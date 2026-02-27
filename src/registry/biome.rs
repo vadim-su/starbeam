@@ -7,12 +7,15 @@ use crate::registry::tile::TileId;
 /// Runtime definition of a biome, built from BiomeAsset + TileRegistry lookups.
 #[derive(Debug, Clone)]
 pub struct BiomeDef {
+    #[allow(dead_code)] // used for debug display and hot-reload identification
     pub id: String,
     pub surface_block: TileId,
     pub subsurface_block: TileId,
     pub subsurface_depth: i32,
     pub fill_block: TileId,
     pub cave_threshold: f64,
+    #[allow(dead_code)]
+    // stored for hot-reload; parallax loaded separately via BiomeParallaxConfigs
     pub parallax_path: Option<String>,
 }
 
@@ -29,6 +32,7 @@ impl BiomeRegistry {
             .unwrap_or_else(|| panic!("Unknown biome: {id}"))
     }
 
+    #[allow(dead_code)] // public API for future use; tested
     pub fn get_opt(&self, id: &str) -> Option<&BiomeDef> {
         self.biomes.get(id)
     }
@@ -37,6 +41,7 @@ impl BiomeRegistry {
 /// Runtime planet type data, built from PlanetTypeAsset.
 #[derive(Resource, Debug, Clone)]
 pub struct PlanetConfig {
+    #[allow(dead_code)] // used for debug display and logging
     pub id: String,
     pub primary_biome: String,
     pub secondary_biomes: Vec<String>,

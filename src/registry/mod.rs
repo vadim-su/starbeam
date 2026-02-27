@@ -110,6 +110,9 @@ impl Plugin for RegistryPlugin {
                     hot_reload_player,
                     hot_reload_world,
                     hot_reload_tiles,
+                    hot_reload_biomes,
+                    hot_reload_planet_type,
+                    hot_reload_biome_parallax,
                 )
                     .run_if(in_state(AppState::InGame)),
             );
@@ -395,6 +398,13 @@ fn check_biomes_loaded(
     commands.insert_resource(biome_map);
     commands.insert_resource(biome_parallax);
 
+    // Keep biome handles alive for hot-reload
+    commands.insert_resource(BiomeHandles {
+        planet_type: loading.planet_type.clone(),
+        biomes: loading.biomes.clone(),
+        parallax_configs: loading.parallax_configs.clone(),
+    });
+
     commands.remove_resource::<LoadingBiomeAssets>();
     next_state.set(AppState::LoadingAutotile);
     info!(
@@ -413,15 +423,15 @@ fn start_autotile_loading(
     let mut seen = std::collections::HashSet::new();
 
     for def in &registry.defs {
-        if let Some(ref name) = def.autotile {
-            if seen.insert(name.clone()) {
-                let ron_handle =
-                    asset_server.load::<AutotileAsset>(format!("world/terrain/{name}.autotile.ron"));
-                let img_handle =
-                    asset_server.load::<Image>(format!("world/terrain/{name}.png"));
-                rons.push((name.clone(), ron_handle));
-                imgs.push((name.clone(), img_handle));
-            }
+        if let Some(ref name) = def.autotile
+            && seen.insert(name.clone())
+        {
+            let ron_handle =
+                asset_server.load::<AutotileAsset>(format!("world/terrain/{name}.autotile.ron"));
+            let img_handle =
+                asset_server.load::<Image>(format!("world/terrain/{name}.png"));
+            rons.push((name.clone(), ron_handle));
+            imgs.push((name.clone(), img_handle));
         }
     }
 
@@ -534,17 +544,16 @@ fn hot_reload_player(
     mut config: ResMut<PlayerConfig>,
 ) {
     for event in events.read() {
-        if let AssetEvent::Modified { id } = event {
-            if *id == handles.player.id() {
-                if let Some(asset) = assets.get(&handles.player) {
-                    config.speed = asset.speed;
-                    config.jump_velocity = asset.jump_velocity;
-                    config.gravity = asset.gravity;
-                    config.width = asset.width;
-                    config.height = asset.height;
-                    info!("Hot-reloaded PlayerConfig: speed={}, jump={}, gravity={}", asset.speed, asset.jump_velocity, asset.gravity);
-                }
-            }
+        if let AssetEvent::Modified { id } = event
+            && *id == handles.player.id()
+            && let Some(asset) = assets.get(&handles.player)
+        {
+            config.speed = asset.speed;
+            config.jump_velocity = asset.jump_velocity;
+            config.gravity = asset.gravity;
+            config.width = asset.width;
+            config.height = asset.height;
+            info!("Hot-reloaded PlayerConfig: speed={}, jump={}, gravity={}", asset.speed, asset.jump_velocity, asset.gravity);
         }
     }
 }
@@ -556,19 +565,18 @@ fn hot_reload_world(
     mut config: ResMut<WorldConfig>,
 ) {
     for event in events.read() {
-        if let AssetEvent::Modified { id } = event {
-            if *id == handles.world_config.id() {
-                if let Some(asset) = assets.get(&handles.world_config) {
-                    config.width_tiles = asset.width_tiles;
-                    config.height_tiles = asset.height_tiles;
-                    config.chunk_size = asset.chunk_size;
-                    config.tile_size = asset.tile_size;
-                    config.chunk_load_radius = asset.chunk_load_radius;
-                    config.seed = asset.seed;
-                    config.planet_type = asset.planet_type.clone();
-                    info!("Hot-reloaded WorldConfig");
-                }
-            }
+        if let AssetEvent::Modified { id } = event
+            && *id == handles.world_config.id()
+            && let Some(asset) = assets.get(&handles.world_config)
+        {
+            config.width_tiles = asset.width_tiles;
+            config.height_tiles = asset.height_tiles;
+            config.chunk_size = asset.chunk_size;
+            config.tile_size = asset.tile_size;
+            config.chunk_load_radius = asset.chunk_load_radius;
+            config.seed = asset.seed;
+            config.planet_type = asset.planet_type.clone();
+            info!("Hot-reloaded WorldConfig");
         }
     }
 }
@@ -580,11 +588,147 @@ fn hot_reload_tiles(
     mut registry: ResMut<TileRegistry>,
 ) {
     for event in events.read() {
+        if let AssetEvent::Modified { id } = event
+            && *id == handles.tiles.id()
+            && let Some(asset) = assets.get(&handles.tiles)
+        {
+            *registry = TileRegistry::from_defs(asset.tiles.clone());
+            info!("Hot-reloaded TileRegistry ({} tiles)", asset.tiles.len());
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Biome hot-reload
+// ---------------------------------------------------------------------------
+
+/// Keeps biome-related asset handles alive for hot-reload detection.
+#[derive(Resource)]
+struct BiomeHandles {
+    planet_type: Handle<PlanetTypeAsset>,
+    biomes: Vec<(String, Handle<BiomeAsset>)>,
+    parallax_configs: Vec<(String, Handle<ParallaxConfigAsset>)>,
+}
+
+fn hot_reload_biomes(
+    mut events: MessageReader<AssetEvent<BiomeAsset>>,
+    handles: Res<BiomeHandles>,
+    biome_assets: Res<Assets<BiomeAsset>>,
+    tile_registry: Res<TileRegistry>,
+    mut biome_registry: ResMut<BiomeRegistry>,
+) {
+    for event in events.read() {
         if let AssetEvent::Modified { id } = event {
-            if *id == handles.tiles.id() {
-                if let Some(asset) = assets.get(&handles.tiles) {
-                    *registry = TileRegistry::from_defs(asset.tiles.clone());
-                    info!("Hot-reloaded TileRegistry ({} tiles)", asset.tiles.len());
+            for (biome_id, handle) in &handles.biomes {
+                if *id == handle.id()
+                    && let Some(asset) = biome_assets.get(handle)
+                {
+                    biome_registry.biomes.insert(
+                        biome_id.clone(),
+                        BiomeDef {
+                            id: asset.id.clone(),
+                            surface_block: tile_registry.by_name(&asset.surface_block),
+                            subsurface_block: tile_registry.by_name(&asset.subsurface_block),
+                            subsurface_depth: asset.subsurface_depth,
+                            fill_block: tile_registry.by_name(&asset.fill_block),
+                            cave_threshold: asset.cave_threshold,
+                            parallax_path: asset.parallax.clone(),
+                        },
+                    );
+                    info!("Hot-reloaded biome: {biome_id}");
+                    break;
+                }
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn hot_reload_planet_type(
+    mut events: MessageReader<AssetEvent<PlanetTypeAsset>>,
+    handles: Res<BiomeHandles>,
+    planet_assets: Res<Assets<PlanetTypeAsset>>,
+    world_config: Res<WorldConfig>,
+    mut planet_config: ResMut<PlanetConfig>,
+    mut biome_map: ResMut<BiomeMap>,
+) {
+    for event in events.read() {
+        if let AssetEvent::Modified { id } = event
+            && *id == handles.planet_type.id()
+            && let Some(asset) = planet_assets.get(&handles.planet_type)
+        {
+            planet_config.id = asset.id.clone();
+            planet_config.primary_biome = asset.primary_biome.clone();
+            planet_config.secondary_biomes = asset.secondary_biomes.clone();
+            planet_config.layers = LayerConfigs {
+                surface: LayerConfig {
+                    primary_biome: asset.layers.surface.primary_biome.clone(),
+                    terrain_frequency: asset.layers.surface.terrain_frequency,
+                    terrain_amplitude: asset.layers.surface.terrain_amplitude,
+                },
+                underground: LayerConfig {
+                    primary_biome: asset.layers.underground.primary_biome.clone(),
+                    terrain_frequency: asset.layers.underground.terrain_frequency,
+                    terrain_amplitude: asset.layers.underground.terrain_amplitude,
+                },
+                deep_underground: LayerConfig {
+                    primary_biome: asset.layers.deep_underground.primary_biome.clone(),
+                    terrain_frequency: asset.layers.deep_underground.terrain_frequency,
+                    terrain_amplitude: asset.layers.deep_underground.terrain_amplitude,
+                },
+                core: LayerConfig {
+                    primary_biome: asset.layers.core.primary_biome.clone(),
+                    terrain_frequency: asset.layers.core.terrain_frequency,
+                    terrain_amplitude: asset.layers.core.terrain_amplitude,
+                },
+            };
+            planet_config.region_width_min = asset.region_width_min;
+            planet_config.region_width_max = asset.region_width_max;
+            planet_config.primary_region_ratio = asset.primary_region_ratio;
+
+            // Rebuild BiomeMap with updated planet config
+            let secondaries: Vec<&str> = planet_config
+                .secondary_biomes
+                .iter()
+                .map(|s| s.as_str())
+                .collect();
+            *biome_map = BiomeMap::generate(
+                &planet_config.primary_biome,
+                &secondaries,
+                world_config.seed as u64,
+                world_config.width_tiles as u32,
+                planet_config.region_width_min,
+                planet_config.region_width_max,
+                planet_config.primary_region_ratio,
+            );
+            info!(
+                "Hot-reloaded PlanetConfig + BiomeMap ({} regions)",
+                biome_map.regions.len()
+            );
+        }
+    }
+}
+
+fn hot_reload_biome_parallax(
+    mut events: MessageReader<AssetEvent<ParallaxConfigAsset>>,
+    handles: Res<BiomeHandles>,
+    parallax_assets: Res<Assets<ParallaxConfigAsset>>,
+    mut biome_parallax: ResMut<BiomeParallaxConfigs>,
+) {
+    for event in events.read() {
+        if let AssetEvent::Modified { id } = event {
+            for (biome_id, handle) in &handles.parallax_configs {
+                if *id == handle.id()
+                    && let Some(asset) = parallax_assets.get(handle)
+                {
+                    biome_parallax.configs.insert(
+                        biome_id.clone(),
+                        ParallaxConfig {
+                            layers: asset.layers.clone(),
+                        },
+                    );
+                    info!("Hot-reloaded parallax config for biome: {biome_id}");
+                    break;
                 }
             }
         }
