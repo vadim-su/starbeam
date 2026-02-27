@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
@@ -9,6 +11,7 @@ use crate::world::chunk::{
     update_bitmasks_around, world_to_tile, ChunkDirty, LoadedChunks, WorldMap,
 };
 use crate::world::ctx::WorldCtx;
+use crate::world::lighting;
 
 const BLOCK_REACH: f32 = 5.0;
 
@@ -96,11 +99,16 @@ pub fn block_interaction_system(
         return;
     }
 
-    // Update bitmasks and mark dirty chunks
-    let dirty = update_bitmasks_around(&mut world_map, tile_x, tile_y, &ctx_ref);
+    // Update bitmasks
+    let bitmask_dirty = update_bitmasks_around(&mut world_map, tile_x, tile_y, &ctx_ref);
 
-    for (cx, cy) in dirty {
-        // Find ALL loaded chunk entities that map to this data chunk
+    // Recompute lighting for affected area
+    let light_dirty = lighting::relight_around(&mut world_map, tile_x, tile_y, &ctx_ref);
+
+    // Merge dirty sets and mark chunks for mesh rebuild
+    let all_dirty: HashSet<(i32, i32)> = bitmask_dirty.union(&light_dirty).copied().collect();
+
+    for (cx, cy) in all_dirty {
         for (&(display_cx, display_cy), &entity) in &loaded_chunks.map {
             if ctx_ref.config.wrap_chunk_x(display_cx) == cx && display_cy == cy {
                 commands.entity(entity).insert(ChunkDirty);

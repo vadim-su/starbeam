@@ -233,7 +233,6 @@ pub fn compute_chunk_lighting(
 /// Recompute lighting for a 3×3 chunk area around a changed tile.
 ///
 /// Returns the set of chunk coordinates whose light data was updated.
-#[allow(dead_code)] // Called from block_action on tile break/place (Task 7)
 pub fn relight_around(
     world_map: &mut WorldMap,
     center_x: i32,
