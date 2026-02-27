@@ -7,20 +7,16 @@ pub const SUN_COLOR: [u8; 3] = [255, 250, 230];
 pub const LIGHT_FALLOFF: u8 = 17;
 pub const OPACITY_SCALE: u16 = 17;
 pub const MAX_LIGHT_RADIUS: i32 = 16;
-pub const AMBIENT_MIN: [u8; 3] = [10, 10, 15];
+pub const AMBIENT_MIN: [u8; 3] = [0, 0, 0];
 
-/// Effective light opacity at a position, considering both fg and bg layers.
-/// Uses max(fg_opacity, bg_opacity) so either layer can block light.
-fn effective_opacity(world_map: &WorldMap, tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> u8 {
-    let fg_opacity = world_map
+/// Light opacity at a position from the foreground layer only.
+/// Background walls do not block light (like Starbound/Terraria).
+/// Unloaded chunks return 0 (transparent) — needed for column scans through sky.
+fn fg_opacity(world_map: &WorldMap, tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> u8 {
+    world_map
         .get_tile(tile_x, tile_y, Layer::Fg, ctx)
         .map(|t| ctx.tile_registry.light_opacity(t))
-        .unwrap_or(0);
-    let bg_opacity = world_map
-        .get_tile(tile_x, tile_y, Layer::Bg, ctx)
-        .map(|t| ctx.tile_registry.light_opacity(t))
-        .unwrap_or(0);
-    fg_opacity.max(bg_opacity)
+        .unwrap_or(0)
 }
 
 /// Subtract `amount` from each channel, clamping to 0.
@@ -84,7 +80,7 @@ pub fn compute_chunk_sunlight(
             if is_dark(light) {
                 break;
             }
-            let opacity = effective_opacity(world_map, tile_x, y, ctx);
+            let opacity = fg_opacity(world_map, tile_x, y, ctx);
             if opacity > 0 {
                 light = attenuate(light, opacity as u16 * OPACITY_SCALE);
             }
@@ -99,11 +95,7 @@ pub fn compute_chunk_sunlight(
             result[idx] = light;
 
             let fg_tile = chunk.fg.get(local_x, local_y, cs);
-            let bg_tile = chunk.bg.get(local_x, local_y, cs);
-            let opacity = ctx
-                .tile_registry
-                .light_opacity(fg_tile)
-                .max(ctx.tile_registry.light_opacity(bg_tile));
+            let opacity = ctx.tile_registry.light_opacity(fg_tile);
             if opacity > 0 {
                 light = attenuate(light, opacity as u16 * OPACITY_SCALE);
             }
@@ -212,23 +204,178 @@ fn bfs_from_emitter(
             result[idx] = merge_light(result[idx], light);
         }
 
-        // Compute transmitted light through this tile
-        let opacity = effective_opacity(world_map, wrapped_x, y, ctx);
-        let transmitted = attenuate(light, opacity as u16 * OPACITY_SCALE);
+        // Solid or unloaded fg tiles absorb light: illuminated but block propagation
+        if world_map
+            .get_tile(wrapped_x, y, Layer::Fg, ctx)
+            .is_none_or(|t| ctx.tile_registry.is_solid(t))
+        {
+            continue;
+        }
 
-        // Spread to 4 neighbors
+        // Spread to 4 neighbors (non-solid tile, only per-step falloff)
         for (dx, dy) in [(0, 1), (0, -1), (1, 0), (-1, 0)] {
             let nx = x + dx;
             let ny = y + dy;
             if ny < 0 || ny >= height_tiles {
                 continue;
             }
-            let neighbor_light = attenuate(transmitted, LIGHT_FALLOFF as u16);
+            let neighbor_light = attenuate(light, LIGHT_FALLOFF as u16);
             if !is_dark(neighbor_light) {
                 queue.push_back((nx, ny, neighbor_light));
             }
         }
     }
+}
+
+/// Spread sunlight horizontally via multi-source BFS.
+///
+/// Seeds from this chunk's column-scan sunlight and adjacent loaded chunks'
+/// stored light levels, then BFS flood-fills in all 4 directions.
+/// This handles light entering through side openings and holes in walls.
+fn spread_sunlight(
+    world_map: &WorldMap,
+    sun: &[[u8; 3]],
+    chunk_x: i32,
+    chunk_y: i32,
+    ctx: &WorldCtxRef,
+) -> Vec<[u8; 3]> {
+    let cs = ctx.config.chunk_size;
+    let cs_i32 = cs as i32;
+    let height_tiles = ctx.config.height_tiles;
+    let base_x = chunk_x * cs_i32;
+    let base_y = chunk_y * cs_i32;
+    let total = (cs * cs) as usize;
+    let mut result = vec![[0u8; 3]; total];
+
+    let scan_min_y = (base_y - MAX_LIGHT_RADIUS).max(0);
+    let scan_max_y = (base_y + cs_i32 + MAX_LIGHT_RADIUS).min(height_tiles);
+
+    let mut queue: VecDeque<(i32, i32, [u8; 3])> = VecDeque::new();
+    let mut visited: HashMap<(i32, i32), [u8; 3]> = HashMap::new();
+
+    // Seed from this chunk's column-scan sunlight (reliable, no unloaded chunk issues)
+    for ly in 0..cs_i32 {
+        for lx in 0..cs_i32 {
+            let idx = (ly * cs_i32 + lx) as usize;
+            if !is_dark(sun[idx]) {
+                let tx = base_x + lx;
+                let ty = base_y + ly;
+                visited.insert((tx, ty), sun[idx]);
+                queue.push_back((tx, ty, sun[idx]));
+            }
+        }
+    }
+
+    // Seed from adjacent loaded chunks' already-computed light levels
+    for dy in -1..=1 {
+        for dx in -1..=1 {
+            if dx == 0 && dy == 0 {
+                continue;
+            }
+            let ncx = ctx.config.wrap_chunk_x(chunk_x + dx);
+            let ncy = chunk_y + dy;
+            if ncy < 0 || ncy >= ctx.config.height_chunks() {
+                continue;
+            }
+            let Some(neighbor) = world_map.chunks.get(&(ncx, ncy)) else {
+                continue;
+            };
+            let nbase_x = (chunk_x + dx) * cs_i32;
+            let nbase_y = ncy * cs_i32;
+            for nly in 0..cs_i32 {
+                for nlx in 0..cs_i32 {
+                    let nidx = (nly * cs_i32 + nlx) as usize;
+                    let light = neighbor.light_levels[nidx];
+                    if is_dark(light) {
+                        continue;
+                    }
+                    let tx = nbase_x + nlx;
+                    let ty = nbase_y + nly;
+                    if tx < base_x - MAX_LIGHT_RADIUS
+                        || tx >= base_x + cs_i32 + MAX_LIGHT_RADIUS
+                        || ty < scan_min_y
+                        || ty >= scan_max_y
+                    {
+                        continue;
+                    }
+                    if let Some(existing) = visited.get(&(tx, ty)) {
+                        if light[0] <= existing[0]
+                            && light[1] <= existing[1]
+                            && light[2] <= existing[2]
+                        {
+                            continue;
+                        }
+                        visited.insert((tx, ty), merge_light(light, *existing));
+                    } else {
+                        visited.insert((tx, ty), light);
+                    }
+                    queue.push_back((tx, ty, light));
+                }
+            }
+        }
+    }
+
+    // BFS spread in all 4 directions
+    while let Some((x, y, light)) = queue.pop_front() {
+        if is_dark(light) {
+            continue;
+        }
+
+        // Solid or unloaded fg tiles absorb light: illuminated but block propagation
+        let wrapped_x = ctx.config.wrap_tile_x(x);
+        if world_map
+            .get_tile(wrapped_x, y, Layer::Fg, ctx)
+            .is_none_or(|t| ctx.tile_registry.is_solid(t))
+        {
+            continue;
+        }
+
+        for (dx, dy) in [(0, 1), (0, -1), (1, 0), (-1, 0)] {
+            let nx = x + dx;
+            let ny = y + dy;
+            if ny < 0 || ny >= height_tiles {
+                continue;
+            }
+            if nx < base_x - MAX_LIGHT_RADIUS
+                || nx >= base_x + cs_i32 + MAX_LIGHT_RADIUS
+                || ny < scan_min_y
+                || ny >= scan_max_y
+            {
+                continue;
+            }
+
+            // Air tile: only per-step falloff (solid tiles already filtered above)
+            let neighbor_light = attenuate(light, LIGHT_FALLOFF as u16);
+            if is_dark(neighbor_light) {
+                continue;
+            }
+
+            if let Some(existing) = visited.get(&(nx, ny)) {
+                if neighbor_light[0] <= existing[0]
+                    && neighbor_light[1] <= existing[1]
+                    && neighbor_light[2] <= existing[2]
+                {
+                    continue;
+                }
+                visited.insert((nx, ny), merge_light(neighbor_light, *existing));
+            } else {
+                visited.insert((nx, ny), neighbor_light);
+            }
+            queue.push_back((nx, ny, neighbor_light));
+        }
+    }
+
+    // Phase 3: Extract chunk results
+    for ly in 0..cs_i32 {
+        for lx in 0..cs_i32 {
+            if let Some(&light) = visited.get(&(base_x + lx, base_y + ly)) {
+                let idx = (ly * cs_i32 + lx) as usize;
+                result[idx] = light;
+            }
+        }
+    }
+
+    result
 }
 
 /// Compute combined sunlight + point light for a chunk.
@@ -239,8 +386,10 @@ pub fn compute_chunk_lighting(
     ctx: &WorldCtxRef,
 ) -> Vec<[u8; 3]> {
     let sun = compute_chunk_sunlight(world_map, chunk_x, chunk_y, ctx);
+    let spread = spread_sunlight(world_map, &sun, chunk_x, chunk_y, ctx);
     let point = compute_point_lights(world_map, chunk_x, chunk_y, ctx);
-    let mut result = merge_chunk_lights(&sun, &point);
+    let mut result = merge_chunk_lights(&sun, &spread);
+    result = merge_chunk_lights(&result, &point);
 
     // Apply ambient minimum so underground is never pitch black
     for light in &mut result {
@@ -400,7 +549,8 @@ mod tests {
     }
 
     #[test]
-    fn bg_tile_blocks_sunlight() {
+    fn bg_tile_does_not_block_sunlight() {
+        // Background walls don't block light (like Starbound/Terraria).
         let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
         let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
         let cs = wc.chunk_size;
@@ -417,10 +567,10 @@ mod tests {
         }
 
         let result = compute_chunk_sunlight(&map, 0, top_chunk_y, &ctx);
-        // Bottom should be dark — bg stone blocks light even with fg=AIR
-        assert!(
-            is_dark(result[0]),
-            "bg stone should block sunlight, got {:?}",
+        // Bottom should be lit — bg walls don't block sunlight
+        assert_eq!(
+            result[0], SUN_COLOR,
+            "bg stone should NOT block sunlight, got {:?}",
             result[0]
         );
     }

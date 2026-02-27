@@ -38,6 +38,10 @@ struct TileUniforms {
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let color = textureSample(atlas_texture, atlas_sampler, in.uv);
     if color.a < 0.01 {
+        if uniforms.dim < 1.0 {
+            // BG layer: solid black fill so nothing shows through texture holes
+            return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+        }
         discard;
     }
     return vec4<f32>(color.rgb * in.light * uniforms.dim, color.a);

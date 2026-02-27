@@ -59,15 +59,34 @@ pub fn block_interaction_system(
     }
 
     if left_click {
-        // Break block (read-only check, skip if chunk not loaded)
+        // Foreground layer interaction
         let Some(current) = world_map.get_tile(tile_x, tile_y, Layer::Fg, &ctx_ref) else {
             return;
         };
-        if !ctx_ref.tile_registry.is_solid(current) {
-            return;
-        }
 
-        world_map.set_tile(tile_x, tile_y, Layer::Fg, TileId::AIR, &ctx_ref);
+        if ctx_ref.tile_registry.is_solid(current) {
+            // Break fg tile
+            world_map.set_tile(tile_x, tile_y, Layer::Fg, TileId::AIR, &ctx_ref);
+        } else {
+            // Place fg tile — must be adjacent to an existing solid tile (fg or bg)
+            let has_neighbor = [(-1, 0), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
+                let nx = tile_x + dx;
+                let ny = tile_y + dy;
+                world_map
+                    .get_tile(nx, ny, Layer::Fg, &ctx_ref)
+                    .is_some_and(|t| ctx_ref.tile_registry.is_solid(t))
+                    || world_map
+                        .get_tile(nx, ny, Layer::Bg, &ctx_ref)
+                        .is_some_and(|t| t != TileId::AIR)
+            });
+            if !has_neighbor {
+                return;
+            }
+
+            // TODO: replace with player's selected block type from inventory
+            let place_id = ctx_ref.tile_registry.by_name("dirt");
+            world_map.set_tile(tile_x, tile_y, Layer::Fg, place_id, &ctx_ref);
+        }
     } else if right_click {
         // Background layer interaction
         let Some(current_bg) = world_map.get_tile(tile_x, tile_y, Layer::Bg, &ctx_ref) else {
