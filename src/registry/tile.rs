@@ -11,6 +11,10 @@ impl TileId {
     pub const AIR: TileId = TileId(0);
 }
 
+fn default_light_opacity() -> u8 {
+    15
+}
+
 /// Properties of a single tile type, deserialized from RON.
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)] // Fields reserved for future gameplay systems
@@ -24,6 +28,10 @@ pub struct TileDef {
     pub damage_on_contact: f32,
     #[serde(default)]
     pub effects: Vec<String>,
+    #[serde(default)]
+    pub light_emission: [u8; 3],
+    #[serde(default = "default_light_opacity")]
+    pub light_opacity: u8,
 }
 
 /// Registry of all tile definitions. Inserted as a Resource after asset loading.
@@ -56,6 +64,16 @@ impl TileRegistry {
         self.defs[id.0 as usize].autotile.as_deref()
     }
 
+    #[allow(dead_code)] // Used by lighting propagation system (Task 5)
+    pub fn light_emission(&self, id: TileId) -> [u8; 3] {
+        self.defs[id.0 as usize].light_emission
+    }
+
+    #[allow(dead_code)] // Used by lighting propagation system (Task 5)
+    pub fn light_opacity(&self, id: TileId) -> u8 {
+        self.defs[id.0 as usize].light_opacity
+    }
+
     pub fn by_name(&self, name: &str) -> TileId {
         *self
             .name_to_id
@@ -79,6 +97,8 @@ mod tests {
                 viscosity: 0.0,
                 damage_on_contact: 0.0,
                 effects: vec![],
+                light_emission: [0, 0, 0],
+                light_opacity: 0,
             },
             TileDef {
                 id: "grass".into(),
@@ -89,6 +109,8 @@ mod tests {
                 viscosity: 0.0,
                 damage_on_contact: 0.0,
                 effects: vec![],
+                light_emission: [0, 0, 0],
+                light_opacity: 15,
             },
             TileDef {
                 id: "dirt".into(),
@@ -99,6 +121,8 @@ mod tests {
                 viscosity: 0.0,
                 damage_on_contact: 0.0,
                 effects: vec![],
+                light_emission: [0, 0, 0],
+                light_opacity: 15,
             },
             TileDef {
                 id: "stone".into(),
@@ -109,6 +133,8 @@ mod tests {
                 viscosity: 0.0,
                 damage_on_contact: 0.0,
                 effects: vec![],
+                light_emission: [0, 0, 0],
+                light_opacity: 15,
             },
         ])
     }
@@ -151,6 +177,15 @@ mod tests {
         assert_eq!(stone.id, "stone");
         assert_eq!(stone.hardness, 5.0);
         assert_eq!(stone.friction, 0.6);
+    }
+
+    #[test]
+    fn light_properties() {
+        let reg = test_registry();
+        assert_eq!(reg.light_emission(TileId::AIR), [0, 0, 0]);
+        assert_eq!(reg.light_opacity(TileId::AIR), 0);
+        assert_eq!(reg.light_opacity(TileId(1)), 15); // grass
+        assert_eq!(reg.light_opacity(TileId(3)), 15); // stone
     }
 
     #[test]

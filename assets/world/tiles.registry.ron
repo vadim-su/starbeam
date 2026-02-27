@@ -1,8 +1,8 @@
 (
   tiles: [
-    ( id: "air",   autotile: None,          solid: false, hardness: 0.0, friction: 0.0, viscosity: 0.0, damage_on_contact: 0.0, effects: [] ),
-    ( id: "grass", autotile: Some("grass"),  solid: true,  hardness: 1.0, friction: 0.8, viscosity: 0.0, damage_on_contact: 0.0, effects: [] ),
-    ( id: "dirt",  autotile: Some("dirt"),   solid: true,  hardness: 2.0, friction: 0.7, viscosity: 0.0, damage_on_contact: 0.0, effects: [] ),
-    ( id: "stone", autotile: Some("stone"),  solid: true,  hardness: 5.0, friction: 0.6, viscosity: 0.0, damage_on_contact: 0.0, effects: [] ),
+    ( id: "air",   autotile: None,          solid: false, hardness: 0.0, friction: 0.0, viscosity: 0.0, damage_on_contact: 0.0, effects: [], light_emission: (0, 0, 0), light_opacity: 0 ),
+    ( id: "grass", autotile: Some("grass"),  solid: true,  hardness: 1.0, friction: 0.8, viscosity: 0.0, damage_on_contact: 0.0, effects: [], light_emission: (0, 0, 0), light_opacity: 15 ),
+    ( id: "dirt",  autotile: Some("dirt"),   solid: true,  hardness: 2.0, friction: 0.7, viscosity: 0.0, damage_on_contact: 0.0, effects: [], light_emission: (0, 0, 0), light_opacity: 15 ),
+    ( id: "stone", autotile: Some("stone"),  solid: true,  hardness: 5.0, friction: 0.6, viscosity: 0.0, damage_on_contact: 0.0, effects: [], light_emission: (0, 0, 0), light_opacity: 15 ),
   ]
 )

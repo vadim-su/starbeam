@@ -150,6 +150,8 @@ mod tests {
                 viscosity: 0.0,
                 damage_on_contact: 0.0,
                 effects: vec![],
+                light_emission: [0, 0, 0],
+                light_opacity: 0,
             },
             TileDef {
                 id: "dirt".into(),
@@ -160,6 +162,8 @@ mod tests {
                 viscosity: 0.0,
                 damage_on_contact: 0.0,
                 effects: vec![],
+                light_emission: [0, 0, 0],
+                light_opacity: 15,
             },
         ])
     }

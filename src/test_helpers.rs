@@ -74,6 +74,8 @@ pub mod fixtures {
                 viscosity: 0.0,
                 damage_on_contact: 0.0,
                 effects: vec![],
+                light_emission: [0, 0, 0],
+                light_opacity: 0,
             },
             TileDef {
                 id: "grass".into(),
@@ -84,6 +86,8 @@ pub mod fixtures {
                 viscosity: 0.0,
                 damage_on_contact: 0.0,
                 effects: vec![],
+                light_emission: [0, 0, 0],
+                light_opacity: 15,
             },
             TileDef {
                 id: "dirt".into(),
@@ -94,6 +98,8 @@ pub mod fixtures {
                 viscosity: 0.0,
                 damage_on_contact: 0.0,
                 effects: vec![],
+                light_emission: [0, 0, 0],
+                light_opacity: 15,
             },
             TileDef {
                 id: "stone".into(),
@@ -104,6 +110,8 @@ pub mod fixtures {
                 viscosity: 0.0,
                 damage_on_contact: 0.0,
                 effects: vec![],
+                light_emission: [0, 0, 0],
+                light_opacity: 15,
             },
         ])
     }
