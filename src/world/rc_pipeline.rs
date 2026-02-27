@@ -732,7 +732,7 @@ pub(crate) fn swap_lightmap_handles(mut gpu_images: ResMut<RcGpuImages>) {
 /// Resize GPU textures when the RC input dimensions change.
 /// Replaces image handles in `RcGpuImages` with new ones of the correct size.
 pub(crate) fn resize_gpu_textures(
-    config: Res<RcLightingConfig>,
+    mut config: ResMut<RcLightingConfig>,
     mut gpu_images: ResMut<RcGpuImages>,
     mut images: ResMut<Assets<Image>>,
 ) {
@@ -781,6 +781,8 @@ pub(crate) fn resize_gpu_textures(
     // Lightmap textures: viewport-sized, initialized to white to avoid dark flash
     gpu_images.lightmap = make_white_gpu_texture(&mut images, vp_w.max(1), vp_h.max(1));
     gpu_images.lightmap_prev = make_white_gpu_texture(&mut images, vp_w.max(1), vp_h.max(1));
+
+    config.lightmap_size = UVec2::new(vp_w.max(1), vp_h.max(1));
 }
 
 #[cfg(test)]

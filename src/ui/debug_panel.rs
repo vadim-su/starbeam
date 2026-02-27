@@ -286,6 +286,13 @@ pub fn draw_debug_panel(
                             ui.monospace(format!("{}", rc_config.cascade_count));
                             ui.end_row();
 
+                            ui.label("Lightmap:");
+                            ui.monospace(format!(
+                                "{} × {} tiles",
+                                rc_config.lightmap_size.x, rc_config.lightmap_size.y
+                            ));
+                            ui.end_row();
+
                             ui.label("Tile size:");
                             ui.monospace(format!("{}px", rc_config.tile_size));
                             ui.end_row();

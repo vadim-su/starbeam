@@ -30,6 +30,8 @@ pub struct RcLightingConfig {
     pub cascade_count: u32,
     /// Damping factor for bounce light (0.0 = no bounce, 1.0 = full energy).
     pub bounce_damping: f32,
+    /// Lightmap output size in tiles (set by `resize_gpu_textures`).
+    pub lightmap_size: UVec2,
 }
 
 impl Default for RcLightingConfig {
@@ -41,6 +43,7 @@ impl Default for RcLightingConfig {
             tile_size: 32.0,
             cascade_count: 1,
             bounce_damping: 0.4,
+            lightmap_size: UVec2::ZERO,
         }
     }
 }
