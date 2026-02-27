@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
@@ -9,7 +7,6 @@ use crate::world::chunk::{
     update_bitmasks_around, world_to_tile, ChunkDirty, Layer, LoadedChunks, WorldMap,
 };
 use crate::world::ctx::WorldCtx;
-use crate::world::lighting;
 
 const BLOCK_REACH: f32 = 5.0;
 
@@ -125,11 +122,7 @@ pub fn block_interaction_system(
     let bitmask_dirty =
         update_bitmasks_around(&mut world_map, tile_x, tile_y, modified_layer, &ctx_ref);
 
-    // Recompute lighting for affected area
-    let light_dirty = lighting::relight_around(&mut world_map, tile_x, tile_y, &ctx_ref);
-
-    // Merge dirty sets and mark chunks for mesh rebuild
-    let all_dirty: HashSet<(i32, i32)> = bitmask_dirty.union(&light_dirty).copied().collect();
+    let all_dirty = bitmask_dirty;
 
     for (cx, cy) in all_dirty {
         for (&(display_cx, display_cy), entities) in &loaded_chunks.map {

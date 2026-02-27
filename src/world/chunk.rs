@@ -8,7 +8,6 @@ use crate::registry::world::WorldConfig;
 use crate::world::atlas::TileAtlas;
 use crate::world::autotile::{compute_bitmask, AutotileRegistry};
 use crate::world::ctx::{WorldCtx, WorldCtxRef};
-use crate::world::lighting;
 use crate::world::mesh_builder::{build_chunk_mesh, MeshBuildBuffers};
 use crate::world::terrain_gen;
 use crate::world::tile_renderer::SharedTileMaterial;
@@ -69,8 +68,6 @@ impl TileLayer {
 pub struct ChunkData {
     pub fg: TileLayer,
     pub bg: TileLayer,
-    /// Per-tile RGB light level (shared across both layers).
-    pub light_levels: Vec<[u8; 3]>,
     #[allow(dead_code)] // Reserved for future block-damage system
     pub damage: Vec<u8>,
 }
@@ -129,7 +126,6 @@ impl WorldMap {
                     tiles: chunk_tiles.bg,
                     bitmasks: vec![0; len],
                 },
-                light_levels: vec![[0, 0, 0]; len],
                 damage: vec![0; len],
             }
         })
@@ -344,20 +340,12 @@ pub fn spawn_chunk(
         chunk.bg.bitmasks = bg_bitmasks;
     }
 
-    // Compute lighting (immutable borrow for compute, then mutable to write back)
-    let light_levels = lighting::compute_chunk_lighting(&*world_map, data_chunk_x, chunk_y, ctx);
-    if let Some(chunk) = world_map.chunks.get_mut(&(data_chunk_x, chunk_y)) {
-        chunk.light_levels = light_levels;
-    }
-
     let chunk_data = &world_map.chunks[&(data_chunk_x, chunk_y)];
 
     // Build bg mesh first (rendered behind foreground)
     let bg_mesh = build_chunk_mesh(
         &chunk_data.bg.tiles,
         &chunk_data.bg.bitmasks,
-        &chunk_data.light_levels,
-        Some(&chunk_data.fg.tiles), // shadow source
         display_chunk_x,
         chunk_y,
         ctx.config.chunk_size,
@@ -375,8 +363,6 @@ pub fn spawn_chunk(
     let fg_mesh = build_chunk_mesh(
         &chunk_data.fg.tiles,
         &chunk_data.fg.bitmasks,
-        &chunk_data.light_levels,
-        None,
         display_chunk_x,
         chunk_y,
         ctx.config.chunk_size,
@@ -535,17 +521,15 @@ pub fn rebuild_dirty_chunks(
             continue;
         };
 
-        let (tiles, bitmasks, fg_tiles_opt, layer) = match chunk_layer.0 {
+        let (tiles, bitmasks, layer) = match chunk_layer.0 {
             Layer::Fg => (
                 chunk_data.fg.tiles.as_slice(),
                 chunk_data.fg.bitmasks.as_slice(),
-                None,
                 Layer::Fg,
             ),
             Layer::Bg => (
                 chunk_data.bg.tiles.as_slice(),
                 chunk_data.bg.bitmasks.as_slice(),
-                Some(chunk_data.fg.tiles.as_slice()),
                 Layer::Bg,
             ),
         };
@@ -553,8 +537,6 @@ pub fn rebuild_dirty_chunks(
         let mesh = build_chunk_mesh(
             tiles,
             bitmasks,
-            &chunk_data.light_levels,
-            fg_tiles_opt,
             coord.x,
             coord.y,
             wc.chunk_size,
