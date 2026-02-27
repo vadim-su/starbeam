@@ -12,7 +12,6 @@ mod world;
 
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
-use bevy::sprite_render::Material2dPlugin;
 use bevy_egui::EguiPlugin;
 
 use sets::GameSet;
@@ -39,7 +38,6 @@ fn main() {
         .add_plugins(camera::CameraPlugin)
         .add_plugins(parallax::ParallaxPlugin)
         .add_plugins(interaction::InteractionPlugin)
-        .add_plugins(Material2dPlugin::<world::tile_renderer::TileMaterial>::default())
         .add_plugins(ui::UiPlugin)
         .configure_sets(
             Update,
@@ -54,16 +52,5 @@ fn main() {
                 .chain()
                 .run_if(in_state(registry::AppState::InGame)),
         )
-        .add_systems(Startup, setup)
         .run();
-}
-
-fn setup(mut commands: Commands) {
-    commands.spawn((
-        Camera2d,
-        Projection::Orthographic(OrthographicProjection {
-            scale: 0.7,
-            ..OrthographicProjection::default_2d()
-        }),
-    ));
 }
