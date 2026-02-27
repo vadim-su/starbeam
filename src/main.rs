@@ -1,5 +1,6 @@
 mod camera;
 mod interaction;
+pub mod inventory;
 pub mod item;
 pub mod math;
 mod parallax;
