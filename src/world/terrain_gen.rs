@@ -154,167 +154,13 @@ pub fn generate_chunk_tiles(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::biome::{BiomeDef, LayerConfig, LayerConfigs};
-    use crate::registry::tile::TileDef;
+    use crate::test_helpers::fixtures::*;
 
     const TEST_SEED: u32 = 42;
 
-    fn test_wc() -> WorldConfig {
-        WorldConfig {
-            width_tiles: 2048,
-            height_tiles: 1024,
-            chunk_size: 32,
-            tile_size: 32.0,
-            chunk_load_radius: 3,
-            seed: 42,
-            planet_type: "garden".into(),
-        }
-    }
-
-    fn test_biome_map() -> BiomeMap {
-        BiomeMap::generate("meadow", &["forest", "rocky"], 42, 2048, 300, 600, 0.6)
-    }
-
-    fn test_biome_registry() -> BiomeRegistry {
-        let mut reg = BiomeRegistry::default();
-        reg.biomes.insert(
-            "meadow".into(),
-            BiomeDef {
-                id: "meadow".into(),
-                surface_block: TileId(1),
-                subsurface_block: TileId(2),
-                subsurface_depth: 4,
-                fill_block: TileId(3),
-                cave_threshold: 0.3,
-                parallax_path: None,
-            },
-        );
-        reg.biomes.insert(
-            "forest".into(),
-            BiomeDef {
-                id: "forest".into(),
-                surface_block: TileId(1),
-                subsurface_block: TileId(2),
-                subsurface_depth: 4,
-                fill_block: TileId(3),
-                cave_threshold: 0.3,
-                parallax_path: None,
-            },
-        );
-        reg.biomes.insert(
-            "rocky".into(),
-            BiomeDef {
-                id: "rocky".into(),
-                surface_block: TileId(3),
-                subsurface_block: TileId(3),
-                subsurface_depth: 2,
-                fill_block: TileId(3),
-                cave_threshold: 0.3,
-                parallax_path: None,
-            },
-        );
-        for (id, threshold) in [
-            ("underground_dirt", 0.3),
-            ("underground_rock", 0.25),
-            ("core_magma", 0.15),
-        ] {
-            reg.biomes.insert(
-                id.into(),
-                BiomeDef {
-                    id: id.into(),
-                    surface_block: TileId(3),
-                    subsurface_block: TileId(3),
-                    subsurface_depth: 0,
-                    fill_block: TileId(3),
-                    cave_threshold: threshold,
-                    parallax_path: None,
-                },
-            );
-        }
-        reg
-    }
-
-    fn test_tile_registry() -> TileRegistry {
-        TileRegistry::from_defs(vec![
-            TileDef {
-                id: "air".into(),
-                autotile: None,
-                solid: false,
-                hardness: 0.0,
-                friction: 0.0,
-                viscosity: 0.0,
-                damage_on_contact: 0.0,
-                effects: vec![],
-            },
-            TileDef {
-                id: "grass".into(),
-                autotile: Some("grass".into()),
-                solid: true,
-                hardness: 1.0,
-                friction: 0.8,
-                viscosity: 0.0,
-                damage_on_contact: 0.0,
-                effects: vec![],
-            },
-            TileDef {
-                id: "dirt".into(),
-                autotile: Some("dirt".into()),
-                solid: true,
-                hardness: 2.0,
-                friction: 0.7,
-                viscosity: 0.0,
-                damage_on_contact: 0.0,
-                effects: vec![],
-            },
-            TileDef {
-                id: "stone".into(),
-                autotile: Some("stone".into()),
-                solid: true,
-                hardness: 5.0,
-                friction: 0.6,
-                viscosity: 0.0,
-                damage_on_contact: 0.0,
-                effects: vec![],
-            },
-        ])
-    }
-
-    fn test_planet_config() -> PlanetConfig {
-        PlanetConfig {
-            id: "garden".into(),
-            primary_biome: "meadow".into(),
-            secondary_biomes: vec!["forest".into(), "rocky".into()],
-            layers: LayerConfigs {
-                surface: LayerConfig {
-                    primary_biome: None,
-                    terrain_frequency: 0.02,
-                    terrain_amplitude: 40.0,
-                },
-                underground: LayerConfig {
-                    primary_biome: Some("underground_dirt".into()),
-                    terrain_frequency: 0.07,
-                    terrain_amplitude: 1.0,
-                },
-                deep_underground: LayerConfig {
-                    primary_biome: Some("underground_rock".into()),
-                    terrain_frequency: 0.05,
-                    terrain_amplitude: 1.0,
-                },
-                core: LayerConfig {
-                    primary_biome: Some("core_magma".into()),
-                    terrain_frequency: 0.04,
-                    terrain_amplitude: 1.0,
-                },
-            },
-            region_width_min: 300,
-            region_width_max: 600,
-            primary_region_ratio: 0.6,
-        }
-    }
-
     #[test]
     fn surface_height_is_deterministic() {
-        let wc = test_wc();
+        let wc = test_world_config();
         let pc = test_planet_config();
         let h1 = surface_height(
             TEST_SEED,
@@ -335,7 +181,7 @@ mod tests {
 
     #[test]
     fn surface_height_is_within_bounds() {
-        let wc = test_wc();
+        let wc = test_world_config();
         let pc = test_planet_config();
         for x in 0..wc.width_tiles {
             let h = surface_height(
@@ -351,7 +197,7 @@ mod tests {
 
     #[test]
     fn above_surface_is_air() {
-        let wc = test_wc();
+        let wc = test_world_config();
         let bm = test_biome_map();
         let br = test_biome_registry();
         let tr = test_tile_registry();
@@ -375,7 +221,7 @@ mod tests {
 
     #[test]
     fn surface_is_biome_surface_block() {
-        let wc = test_wc();
+        let wc = test_world_config();
         let bm = test_biome_map();
         let br = test_biome_registry();
         let tr = test_tile_registry();
@@ -396,7 +242,7 @@ mod tests {
 
     #[test]
     fn below_surface_is_subsurface_then_fill_or_air() {
-        let wc = test_wc();
+        let wc = test_world_config();
         let bm = test_biome_map();
         let br = test_biome_registry();
         let tr = test_tile_registry();
@@ -422,7 +268,7 @@ mod tests {
 
     #[test]
     fn chunk_generation_has_correct_size() {
-        let wc = test_wc();
+        let wc = test_world_config();
         let bm = test_biome_map();
         let br = test_biome_registry();
         let tr = test_tile_registry();
@@ -433,7 +279,7 @@ mod tests {
 
     #[test]
     fn chunk_generation_is_deterministic() {
-        let wc = test_wc();
+        let wc = test_world_config();
         let bm = test_biome_map();
         let br = test_biome_registry();
         let tr = test_tile_registry();
@@ -445,7 +291,7 @@ mod tests {
 
     #[test]
     fn out_of_bounds_y_is_air() {
-        let wc = test_wc();
+        let wc = test_world_config();
         let bm = test_biome_map();
         let br = test_biome_registry();
         let tr = test_tile_registry();
@@ -462,7 +308,7 @@ mod tests {
 
     #[test]
     fn x_wraps_around() {
-        let wc = test_wc();
+        let wc = test_world_config();
         let bm = test_biome_map();
         let br = test_biome_registry();
         let tr = test_tile_registry();
@@ -478,7 +324,7 @@ mod tests {
 
     #[test]
     fn surface_height_wraps_seamlessly() {
-        let wc = test_wc();
+        let wc = test_world_config();
         let pc = test_planet_config();
         let freq = pc.layers.surface.terrain_frequency;
         let amp = pc.layers.surface.terrain_amplitude;

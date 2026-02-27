@@ -3,6 +3,8 @@ mod interaction;
 mod parallax;
 mod player;
 mod registry;
+#[cfg(test)]
+mod test_helpers;
 mod ui;
 mod world;
 
