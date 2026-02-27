@@ -77,6 +77,7 @@ pub mod fixtures {
                 light_emission: [0, 0, 0],
                 light_opacity: 0,
                 albedo: [0, 0, 0],
+                drops: vec![],
             },
             TileDef {
                 id: "grass".into(),
@@ -90,6 +91,7 @@ pub mod fixtures {
                 light_emission: [0, 0, 0],
                 light_opacity: 4,
                 albedo: [34, 139, 34],
+                drops: vec![],
             },
             TileDef {
                 id: "dirt".into(),
@@ -103,6 +105,7 @@ pub mod fixtures {
                 light_emission: [0, 0, 0],
                 light_opacity: 5,
                 albedo: [139, 90, 43],
+                drops: vec![],
             },
             TileDef {
                 id: "stone".into(),
@@ -116,6 +119,7 @@ pub mod fixtures {
                 light_emission: [0, 0, 0],
                 light_opacity: 8,
                 albedo: [128, 128, 128],
+                drops: vec![],
             },
             TileDef {
                 id: "torch".into(),
@@ -129,6 +133,7 @@ pub mod fixtures {
                 light_emission: [240, 180, 80],
                 light_opacity: 0,
                 albedo: [200, 160, 80],
+                drops: vec![],
             },
         ])
     }
