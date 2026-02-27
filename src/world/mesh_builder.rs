@@ -240,6 +240,7 @@ mod tests {
                 effects: vec![],
                 light_emission: [0, 0, 0],
                 light_opacity: 0,
+                albedo: [0, 0, 0],
             },
             TileDef {
                 id: "dirt".into(),
@@ -252,6 +253,7 @@ mod tests {
                 effects: vec![],
                 light_emission: [0, 0, 0],
                 light_opacity: 15,
+                albedo: [139, 90, 43],
             },
         ])
     }

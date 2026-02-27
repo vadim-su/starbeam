@@ -1,9 +1,9 @@
 (
   tiles: [
-    ( id: "air",   autotile: None,          solid: false, hardness: 0.0, friction: 0.0, viscosity: 0.0, damage_on_contact: 0.0, effects: [], light_emission: (0, 0, 0), light_opacity: 0 ),
-    ( id: "grass", autotile: Some("grass"),  solid: true,  hardness: 1.0, friction: 0.8, viscosity: 0.0, damage_on_contact: 0.0, effects: [], light_emission: (0, 0, 0), light_opacity: 4 ),
-    ( id: "dirt",  autotile: Some("dirt"),   solid: true,  hardness: 2.0, friction: 0.7, viscosity: 0.0, damage_on_contact: 0.0, effects: [], light_emission: (0, 0, 0), light_opacity: 5 ),
-    ( id: "stone", autotile: Some("stone"),  solid: true,  hardness: 5.0, friction: 0.6, viscosity: 0.0, damage_on_contact: 0.0, effects: [], light_emission: (0, 0, 0), light_opacity: 8 ),
-    ( id: "torch", autotile: None,           solid: false, hardness: 0.5, friction: 0.0, viscosity: 0.0, damage_on_contact: 0.0, effects: [], light_emission: (240, 180, 80), light_opacity: 0 ),
+    ( id: "air",   autotile: None,          solid: false, hardness: 0.0, friction: 0.0, viscosity: 0.0, damage_on_contact: 0.0, effects: [], light_emission: (0, 0, 0), light_opacity: 0, albedo: (0, 0, 0) ),
+    ( id: "grass", autotile: Some("grass"),  solid: true,  hardness: 1.0, friction: 0.8, viscosity: 0.0, damage_on_contact: 0.0, effects: [], light_emission: (0, 0, 0), light_opacity: 4, albedo: (34, 139, 34) ),
+    ( id: "dirt",  autotile: Some("dirt"),   solid: true,  hardness: 2.0, friction: 0.7, viscosity: 0.0, damage_on_contact: 0.0, effects: [], light_emission: (0, 0, 0), light_opacity: 5, albedo: (139, 90, 43) ),
+    ( id: "stone", autotile: Some("stone"),  solid: true,  hardness: 5.0, friction: 0.6, viscosity: 0.0, damage_on_contact: 0.0, effects: [], light_emission: (0, 0, 0), light_opacity: 8, albedo: (128, 128, 128) ),
+    ( id: "torch", autotile: None,           solid: false, hardness: 0.5, friction: 0.0, viscosity: 0.0, damage_on_contact: 0.0, effects: [], light_emission: (240, 180, 80), light_opacity: 0, albedo: (200, 160, 80) ),
   ]
 )

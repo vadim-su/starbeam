@@ -15,6 +15,10 @@ fn default_light_opacity() -> u8 {
     15
 }
 
+fn default_albedo() -> [u8; 3] {
+    [128, 128, 128]
+}
+
 /// Properties of a single tile type, deserialized from RON.
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)] // Fields reserved for future gameplay systems
@@ -32,6 +36,8 @@ pub struct TileDef {
     pub light_emission: [u8; 3],
     #[serde(default = "default_light_opacity")]
     pub light_opacity: u8,
+    #[serde(default = "default_albedo")]
+    pub albedo: [u8; 3],
 }
 
 /// Registry of all tile definitions. Inserted as a Resource after asset loading.
@@ -74,6 +80,11 @@ impl TileRegistry {
         self.defs[id.0 as usize].light_opacity
     }
 
+    #[allow(dead_code)] // Used by radiance cascades for bounce light
+    pub fn albedo(&self, id: TileId) -> [u8; 3] {
+        self.defs[id.0 as usize].albedo
+    }
+
     pub fn by_name(&self, name: &str) -> TileId {
         *self
             .name_to_id
@@ -99,6 +110,7 @@ mod tests {
                 effects: vec![],
                 light_emission: [0, 0, 0],
                 light_opacity: 0,
+                albedo: [0, 0, 0],
             },
             TileDef {
                 id: "grass".into(),
@@ -111,6 +123,7 @@ mod tests {
                 effects: vec![],
                 light_emission: [0, 0, 0],
                 light_opacity: 4,
+                albedo: [34, 139, 34],
             },
             TileDef {
                 id: "dirt".into(),
@@ -123,6 +136,7 @@ mod tests {
                 effects: vec![],
                 light_emission: [0, 0, 0],
                 light_opacity: 5,
+                albedo: [139, 90, 43],
             },
             TileDef {
                 id: "stone".into(),
@@ -135,6 +149,7 @@ mod tests {
                 effects: vec![],
                 light_emission: [0, 0, 0],
                 light_opacity: 8,
+                albedo: [128, 128, 128],
             },
             TileDef {
                 id: "torch".into(),
@@ -147,6 +162,7 @@ mod tests {
                 effects: vec![],
                 light_emission: [240, 180, 80],
                 light_opacity: 0,
+                albedo: [200, 160, 80],
             },
         ])
     }
@@ -200,6 +216,13 @@ mod tests {
         assert_eq!(reg.light_opacity(TileId(3)), 8); // stone
         assert_eq!(reg.light_emission(TileId(4)), [240, 180, 80]); // torch
         assert_eq!(reg.light_opacity(TileId(4)), 0); // torch
+    }
+
+    #[test]
+    fn albedo_properties() {
+        let reg = test_registry();
+        assert_eq!(reg.albedo(TileId::AIR), [0, 0, 0]);
+        assert_eq!(reg.albedo(TileId(3)), [128, 128, 128]); // stone
     }
 
     #[test]
