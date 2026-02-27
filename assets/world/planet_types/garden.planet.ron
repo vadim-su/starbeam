@@ -1,0 +1,30 @@
+(
+    id: "garden",
+    primary_biome: "meadow",
+    secondary_biomes: ["forest", "rocky"],
+    layers: (
+        surface: (
+            primary_biome: None,
+            terrain_frequency: 0.02,
+            terrain_amplitude: 40.0,
+        ),
+        underground: (
+            primary_biome: Some("underground_dirt"),
+            terrain_frequency: 0.07,
+            terrain_amplitude: 1.0,
+        ),
+        deep_underground: (
+            primary_biome: Some("underground_rock"),
+            terrain_frequency: 0.05,
+            terrain_amplitude: 1.0,
+        ),
+        core: (
+            primary_biome: Some("core_magma"),
+            terrain_frequency: 0.04,
+            terrain_amplitude: 1.0,
+        ),
+    ),
+    region_width_min: 300,
+    region_width_max: 600,
+    primary_region_ratio: 0.6,
+)

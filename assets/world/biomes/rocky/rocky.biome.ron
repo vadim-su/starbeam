@@ -1,0 +1,9 @@
+(
+    id: "rocky",
+    surface_block: "stone",
+    subsurface_block: "stone",
+    subsurface_depth: 2,
+    fill_block: "stone",
+    cave_threshold: 0.3,
+    parallax: Some("world/biomes/rocky/parallax.ron"),
+)

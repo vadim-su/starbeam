@@ -1,0 +1,9 @@
+(
+    id: "underground_dirt",
+    surface_block: "dirt",
+    subsurface_block: "dirt",
+    subsurface_depth: 0,
+    fill_block: "stone",
+    cave_threshold: 0.3,
+    parallax: None,
+)

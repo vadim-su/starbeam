@@ -1,0 +1,9 @@
+(
+    id: "underground_rock",
+    surface_block: "stone",
+    subsurface_block: "stone",
+    subsurface_depth: 0,
+    fill_block: "stone",
+    cave_threshold: 0.25,
+    parallax: None,
+)

@@ -1,0 +1,7 @@
+(
+    layers: [
+        ( name: "sky", image: "world/biomes/rocky/backgrounds/sky.png", speed_x: 0.0, speed_y: 0.0, repeat_x: false, repeat_y: false, z_order: -100.0 ),
+        ( name: "far_rocks", image: "world/biomes/rocky/backgrounds/far_rocks.png", speed_x: 0.1, speed_y: 0.05, repeat_x: true, repeat_y: false, z_order: -90.0 ),
+        ( name: "near_rocks", image: "world/biomes/rocky/backgrounds/near_rocks.png", speed_x: 0.3, speed_y: 0.15, repeat_x: true, repeat_y: false, z_order: -80.0 ),
+    ],
+)

@@ -5,4 +5,5 @@
   tile_size: 8.0,
   chunk_load_radius: 3,
   seed: 42,
+  planet_type: "garden",
 )

@@ -1,0 +1,9 @@
+(
+    id: "meadow",
+    surface_block: "grass",
+    subsurface_block: "dirt",
+    subsurface_depth: 4,
+    fill_block: "stone",
+    cave_threshold: 0.3,
+    parallax: Some("world/biomes/meadow/parallax.ron"),
+)

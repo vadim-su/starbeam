@@ -1,0 +1,9 @@
+(
+    id: "core_magma",
+    surface_block: "stone",
+    subsurface_block: "stone",
+    subsurface_depth: 0,
+    fill_block: "stone",
+    cave_threshold: 0.15,
+    parallax: None,
+)
