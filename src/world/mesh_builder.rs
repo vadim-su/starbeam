@@ -7,16 +7,16 @@ use super::atlas::{atlas_uv, AtlasParams};
 use super::autotile::{select_variant, AutotileRegistry, CHUNK_TILE_COUNT};
 use crate::registry::tile::{TileId, TileRegistry};
 
-/// Custom vertex attribute for per-tile light level (0.0 = dark, 1.0 = full light).
+/// Custom vertex attribute for per-vertex RGB light (0.0 = dark, 1.0 = full light per channel).
 pub const ATTRIBUTE_LIGHT: MeshVertexAttribute =
-    MeshVertexAttribute::new("Light", 988_540_917, VertexFormat::Float32);
+    MeshVertexAttribute::new("Light", 988_540_917, VertexFormat::Float32x3);
 
 /// Reusable buffers for building chunk meshes, avoiding per-frame allocations.
 #[derive(Resource)]
 pub struct MeshBuildBuffers {
     pub positions: Vec<[f32; 3]>,
     pub uvs: Vec<[f32; 2]>,
-    pub lights: Vec<f32>,
+    pub lights: Vec<[f32; 3]>,
     pub indices: Vec<u32>,
 }
 
@@ -31,6 +31,34 @@ impl Default for MeshBuildBuffers {
     }
 }
 
+/// Get light at a local chunk position, clamping out-of-bounds to nearest edge tile.
+fn get_light(light_levels: &[[u8; 3]], chunk_size: u32, lx: i32, ly: i32) -> [u8; 3] {
+    let cx = lx.clamp(0, chunk_size as i32 - 1) as u32;
+    let cy = ly.clamp(0, chunk_size as i32 - 1) as u32;
+    light_levels[(cy * chunk_size + cx) as usize]
+}
+
+/// Compute smoothed light for one vertex by averaging 4 tiles sharing that corner.
+/// `dx`, `dy`: direction to the 3 neighbor tiles (-1 or +1).
+fn corner_light(
+    light_levels: &[[u8; 3]],
+    chunk_size: u32,
+    local_x: i32,
+    local_y: i32,
+    dx: i32,
+    dy: i32,
+) -> [f32; 3] {
+    let s0 = get_light(light_levels, chunk_size, local_x, local_y);
+    let s1 = get_light(light_levels, chunk_size, local_x + dx, local_y);
+    let s2 = get_light(light_levels, chunk_size, local_x, local_y + dy);
+    let s3 = get_light(light_levels, chunk_size, local_x + dx, local_y + dy);
+    [
+        (s0[0] as f32 + s1[0] as f32 + s2[0] as f32 + s3[0] as f32) / (4.0 * 255.0),
+        (s0[1] as f32 + s1[1] as f32 + s2[1] as f32 + s3[1] as f32) / (4.0 * 255.0),
+        (s0[2] as f32 + s1[2] as f32 + s2[2] as f32 + s3[2] as f32) / (4.0 * 255.0),
+    ]
+}
+
 /// Build a Bevy `Mesh` for a single chunk from its tile and bitmask data.
 ///
 /// Each non-air tile becomes a textured quad. The mesh uses the combined atlas
@@ -39,7 +67,7 @@ impl Default for MeshBuildBuffers {
 pub fn build_chunk_mesh(
     tiles: &[TileId],
     bitmasks: &[u8],
-    light_levels: &[u8],
+    light_levels: &[[u8; 3]],
     display_chunk_x: i32,
     chunk_y: i32,
     chunk_size: u32,
@@ -106,10 +134,13 @@ pub fn build_chunk_mesh(
                 [u_min, v_min],
             ]);
 
-            let light = light_levels[idx] as f32 / 255.0;
-            buffers
-                .lights
-                .extend_from_slice(&[light, light, light, light]);
+            let lx = local_x as i32;
+            let ly = local_y as i32;
+            let bl = corner_light(light_levels, chunk_size, lx, ly, -1, -1);
+            let br = corner_light(light_levels, chunk_size, lx, ly, 1, -1);
+            let tr = corner_light(light_levels, chunk_size, lx, ly, 1, 1);
+            let tl = corner_light(light_levels, chunk_size, lx, ly, -1, 1);
+            buffers.lights.extend_from_slice(&[bl, br, tr, tl]);
 
             buffers
                 .indices
@@ -213,7 +244,7 @@ mod tests {
         // 2×2 chunk: [dirt, air, air, dirt]
         let tiles = vec![TileId(1), TileId(0), TileId(0), TileId(1)];
         let bitmasks = vec![0u8; 4];
-        let light_levels = vec![255u8; 4];
+        let light_levels = vec![[255u8, 255, 255]; 4];
         let chunk_size = 2;
         let tile_size = 8.0;
 
@@ -238,11 +269,22 @@ mod tests {
         assert_eq!(buffers.lights.len(), 8, "2 quads × 4 lights");
         assert_eq!(buffers.indices.len(), 12, "2 quads × 6 indices");
 
-        // All lights should be 1.0 (255/255)
-        for &l in &buffers.lights {
+        // All lights should be [1.0, 1.0, 1.0] (uniform 255 → corner avg = 1.0)
+        for l in &buffers.lights {
             assert!(
-                (l - 1.0).abs() < f32::EPSILON,
-                "light should be 1.0, got {l}"
+                (l[0] - 1.0).abs() < f32::EPSILON,
+                "R should be 1.0, got {}",
+                l[0]
+            );
+            assert!(
+                (l[1] - 1.0).abs() < f32::EPSILON,
+                "G should be 1.0, got {}",
+                l[1]
+            );
+            assert!(
+                (l[2] - 1.0).abs() < f32::EPSILON,
+                "B should be 1.0, got {}",
+                l[2]
             );
         }
 
@@ -290,7 +332,7 @@ mod tests {
 
         let tiles = vec![TileId::AIR; 4];
         let bitmasks = vec![0u8; 4];
-        let light_levels = vec![255u8; 4];
+        let light_levels = vec![[255u8, 255, 255]; 4];
 
         build_chunk_mesh(
             &tiles,
@@ -309,5 +351,29 @@ mod tests {
 
         assert_eq!(buffers.positions.len(), 0, "all air = no vertices");
         assert_eq!(buffers.indices.len(), 0, "all air = no indices");
+    }
+
+    #[test]
+    fn corner_averaging_uniform_light() {
+        let lights = vec![[200u8, 100, 50]; 4]; // 2x2 chunk, all same
+        let bl = corner_light(&lights, 2, 0, 0, -1, -1);
+        assert!((bl[0] - 200.0 / 255.0).abs() < 0.01);
+        assert!((bl[1] - 100.0 / 255.0).abs() < 0.01);
+        assert!((bl[2] - 50.0 / 255.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn corner_averaging_gradient() {
+        // 2x2: (0,0)=[128,128,128], (1,0)=[0,0,0], (0,1)=[255,255,255], (1,1)=[128,128,128]
+        let lights = vec![
+            [128, 128, 128], // (0,0)
+            [0, 0, 0],       // (1,0)
+            [255, 255, 255], // (0,1)
+            [128, 128, 128], // (1,1)
+        ];
+        // top-right vertex of (0,0): averages tiles (0,0),(1,0),(0,1),(1,1) = avg(128,0,255,128) = 127.75
+        let tr = corner_light(&lights, 2, 0, 0, 1, 1);
+        let expected = (128.0 + 0.0 + 255.0 + 128.0) / (4.0 * 255.0);
+        assert!((tr[0] - expected).abs() < 0.01);
     }
 }
