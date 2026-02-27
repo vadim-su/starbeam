@@ -3,10 +3,11 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::{egui, EguiContexts};
 
-use crate::parallax::config::ParallaxConfig;
+use crate::parallax::transition::CurrentBiome;
 use crate::player::{Grounded, Player, Velocity};
 use crate::registry::tile::TileRegistry;
 use crate::registry::world::WorldConfig;
+use crate::registry::BiomeParallaxConfigs;
 use crate::world::chunk::{tile_to_chunk, world_to_tile, LoadedChunks, WorldMap};
 
 /// Tracks debug panel visibility.
@@ -40,7 +41,8 @@ pub fn draw_debug_panel(
     diagnostics: Res<DiagnosticsStore>,
     entities: Query<Entity>,
     // Parallax
-    parallax_config: Option<Res<ParallaxConfig>>,
+    biome_parallax: Option<Res<BiomeParallaxConfigs>>,
+    current_biome: Option<Res<CurrentBiome>>,
 ) -> Result {
     if !state.visible {
         return Ok(());
@@ -244,35 +246,40 @@ pub fn draw_debug_panel(
                 });
 
             // --- Parallax ---
-            if let Some(ref parallax_config) = parallax_config {
+            if let (Some(biome_parallax), Some(current_biome)) = (&biome_parallax, &current_biome) {
                 egui::CollapsingHeader::new(egui::RichText::new("Parallax").strong())
                     .default_open(false)
                     .show(ui, |ui| {
-                        ui.label(format!("{} layers", parallax_config.layers.len()));
-                        for (i, layer_def) in parallax_config.layers.iter().enumerate() {
-                            ui.separator();
-                            egui::Grid::new(format!("parallax_layer_{i}"))
-                                .num_columns(2)
-                                .spacing([20.0, 4.0])
-                                .show(ui, |ui| {
-                                    ui.label("Name:");
-                                    ui.monospace(&layer_def.name);
-                                    ui.end_row();
+                        ui.label(format!("Biome: {}", current_biome.biome_id));
+                        if let Some(config) = biome_parallax.configs.get(&current_biome.biome_id) {
+                            ui.label(format!("{} layers", config.layers.len()));
+                            for (i, layer_def) in config.layers.iter().enumerate() {
+                                ui.separator();
+                                egui::Grid::new(format!("parallax_layer_{i}"))
+                                    .num_columns(2)
+                                    .spacing([20.0, 4.0])
+                                    .show(ui, |ui| {
+                                        ui.label("Name:");
+                                        ui.monospace(&layer_def.name);
+                                        ui.end_row();
 
-                                    ui.label("Speed:");
-                                    ui.monospace(format!(
-                                        "{:.2}, {:.2}",
-                                        layer_def.speed_x, layer_def.speed_y
-                                    ));
-                                    ui.end_row();
+                                        ui.label("Speed:");
+                                        ui.monospace(format!(
+                                            "{:.2}, {:.2}",
+                                            layer_def.speed_x, layer_def.speed_y
+                                        ));
+                                        ui.end_row();
 
-                                    ui.label("Repeat:");
-                                    ui.monospace(format!(
-                                        "x={}, y={}",
-                                        layer_def.repeat_x, layer_def.repeat_y
-                                    ));
-                                    ui.end_row();
-                                });
+                                        ui.label("Repeat:");
+                                        ui.monospace(format!(
+                                            "x={}, y={}",
+                                            layer_def.repeat_x, layer_def.repeat_y
+                                        ));
+                                        ui.end_row();
+                                    });
+                            }
+                        } else {
+                            ui.label("No parallax config for this biome");
                         }
                     });
             }

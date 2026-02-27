@@ -33,7 +33,6 @@ pub struct RegistryHandles {
     pub tiles: Handle<TileRegistryAsset>,
     pub player: Handle<PlayerDefAsset>,
     pub world_config: Handle<WorldConfigAsset>,
-    pub parallax: Handle<ParallaxConfigAsset>,
 }
 
 /// Application state: Loading waits for assets, InGame runs gameplay.
@@ -52,7 +51,6 @@ struct LoadingAssets {
     tiles: Handle<TileRegistryAsset>,
     player: Handle<PlayerDefAsset>,
     world_config: Handle<WorldConfigAsset>,
-    parallax: Handle<ParallaxConfigAsset>,
 }
 
 /// Intermediate resource holding autotile asset handles during loading.
@@ -112,7 +110,6 @@ impl Plugin for RegistryPlugin {
                     hot_reload_player,
                     hot_reload_world,
                     hot_reload_tiles,
-                    hot_reload_parallax,
                 )
                     .run_if(in_state(AppState::InGame)),
             );
@@ -123,12 +120,10 @@ fn start_loading(mut commands: Commands, asset_server: Res<AssetServer>) {
     let tiles = asset_server.load::<TileRegistryAsset>("world/tiles.registry.ron");
     let player = asset_server.load::<PlayerDefAsset>("characters/adventurer/adventurer.def.ron");
     let world_config = asset_server.load::<WorldConfigAsset>("world/world.config.ron");
-    let parallax = asset_server.load::<ParallaxConfigAsset>("world/parallax.ron");
     commands.insert_resource(LoadingAssets {
         tiles,
         player,
         world_config,
-        parallax,
     });
 }
 
@@ -139,14 +134,12 @@ fn check_loading(
     tile_assets: Res<Assets<TileRegistryAsset>>,
     player_assets: Res<Assets<PlayerDefAsset>>,
     world_assets: Res<Assets<WorldConfigAsset>>,
-    parallax_assets: Res<Assets<ParallaxConfigAsset>>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
-    let (Some(tiles), Some(player), Some(world_cfg), Some(parallax)) = (
+    let (Some(tiles), Some(player), Some(world_cfg)) = (
         tile_assets.get(&loading.tiles),
         player_assets.get(&loading.player),
         world_assets.get(&loading.world_config),
-        parallax_assets.get(&loading.parallax),
     ) else {
         return; // not loaded yet
     };
@@ -170,16 +163,12 @@ fn check_loading(
         seed: world_cfg.seed,
         planet_type: world_cfg.planet_type.clone(),
     });
-    commands.insert_resource(ParallaxConfig {
-        layers: parallax.layers.clone(),
-    });
 
     // Keep handles alive for hot-reload
     commands.insert_resource(RegistryHandles {
         tiles: loading.tiles.clone(),
         player: loading.player.clone(),
         world_config: loading.world_config.clone(),
-        parallax: loading.parallax.clone(),
     });
 
     // Start loading the planet type asset for the biome pipeline
@@ -602,29 +591,4 @@ fn hot_reload_tiles(
     }
 }
 
-fn hot_reload_parallax(
-    mut commands: Commands,
-    mut events: MessageReader<AssetEvent<ParallaxConfigAsset>>,
-    handles: Res<RegistryHandles>,
-    assets: Res<Assets<ParallaxConfigAsset>>,
-    mut config: ResMut<ParallaxConfig>,
-    layer_query: Query<Entity, With<crate::parallax::spawn::ParallaxLayer>>,
-) {
-    for event in events.read() {
-        if let AssetEvent::Modified { id } = event {
-            if *id == handles.parallax.id() {
-                if let Some(asset) = assets.get(&handles.parallax) {
-                    config.layers = asset.layers.clone();
-                    // Despawn existing layers so spawn system recreates them next frame
-                    for entity in &layer_query {
-                        commands.entity(entity).despawn();
-                    }
-                    info!(
-                        "Hot-reloaded ParallaxConfig ({} layers), despawned old entities",
-                        asset.layers.len()
-                    );
-                }
-            }
-        }
-    }
-}
+
