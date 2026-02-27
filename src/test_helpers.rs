@@ -5,6 +5,7 @@ pub mod fixtures {
     use crate::registry::tile::{TileDef, TileId, TileRegistry};
     use crate::registry::world::WorldConfig;
     use crate::world::biome_map::BiomeMap;
+    use crate::world::ctx::WorldCtxRef;
 
     pub fn test_world_config() -> WorldConfig {
         WorldConfig {
@@ -123,6 +124,40 @@ pub mod fixtures {
             region_width_min: 300,
             region_width_max: 600,
             primary_region_ratio: 0.6,
+        }
+    }
+
+    /// Returns all resources needed to construct a `WorldCtxRef` for tests.
+    pub fn test_world_ctx() -> (
+        WorldConfig,
+        BiomeMap,
+        BiomeRegistry,
+        TileRegistry,
+        PlanetConfig,
+    ) {
+        (
+            test_world_config(),
+            test_biome_map(),
+            test_biome_registry(),
+            test_tile_registry(),
+            test_planet_config(),
+        )
+    }
+
+    /// Convenience constructor for `WorldCtxRef` from individual references.
+    pub fn make_ctx<'a>(
+        wc: &'a WorldConfig,
+        bm: &'a BiomeMap,
+        br: &'a BiomeRegistry,
+        tr: &'a TileRegistry,
+        pc: &'a PlanetConfig,
+    ) -> WorldCtxRef<'a> {
+        WorldCtxRef {
+            config: wc,
+            biome_map: bm,
+            biome_registry: br,
+            tile_registry: tr,
+            planet_config: pc,
         }
     }
 }

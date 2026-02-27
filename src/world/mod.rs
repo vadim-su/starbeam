@@ -2,6 +2,7 @@ pub mod atlas;
 pub mod autotile;
 pub mod biome_map;
 pub mod chunk;
+pub mod ctx;
 pub mod mesh_builder;
 pub mod terrain_gen;
 pub mod tile_renderer;

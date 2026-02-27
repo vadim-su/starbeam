@@ -5,10 +5,11 @@ use bevy_egui::{egui, EguiContexts};
 
 use crate::parallax::transition::CurrentBiome;
 use crate::player::{Grounded, Player, Velocity};
+use crate::registry::tile::TileId;
 use crate::registry::tile::TileRegistry;
 use crate::registry::world::WorldConfig;
 use crate::registry::BiomeParallaxConfigs;
-use crate::world::chunk::{tile_to_chunk, world_to_tile, LoadedChunks, WorldMap};
+use crate::world::chunk::{tile_to_chunk, tile_to_local, world_to_tile, LoadedChunks, WorldMap};
 
 /// Tracks debug panel visibility.
 #[derive(Resource, Default)]
@@ -154,8 +155,17 @@ pub fn draw_debug_panel(
                         let (cx, cy) = tile_to_chunk(wrapped_tx, ty, world_config.chunk_size);
 
                         // Get tile info (read-only, no chunk generation)
-                        let tile_info =
-                            world_map.get_tile_if_loaded(tx, ty, &world_config, &tile_registry);
+                        let tile_info = if ty < 0 {
+                            Some(tile_registry.by_name("stone"))
+                        } else if ty >= world_config.height_tiles {
+                            Some(TileId::AIR)
+                        } else {
+                            let (lx, ly) = tile_to_local(wrapped_tx, ty, world_config.chunk_size);
+                            world_map
+                                .chunks
+                                .get(&(cx, cy))
+                                .map(|chunk| chunk.get(lx, ly, world_config.chunk_size))
+                        };
 
                         if let Some(tile_id) = tile_info {
                             let tile_def = tile_registry.get(tile_id);

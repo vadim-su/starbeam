@@ -1,15 +1,14 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
+use crate::math::{tile_aabb, Aabb};
 use crate::player::Player;
-use crate::registry::biome::{BiomeRegistry, PlanetConfig};
 use crate::registry::player::PlayerConfig;
-use crate::registry::tile::{TileId, TileRegistry};
-use crate::registry::world::WorldConfig;
-use crate::world::biome_map::BiomeMap;
+use crate::registry::tile::TileId;
 use crate::world::chunk::{
     update_bitmasks_around, world_to_tile, ChunkDirty, LoadedChunks, WorldMap,
 };
+use crate::world::ctx::WorldCtx;
 
 const BLOCK_REACH: f32 = 5.0;
 
@@ -21,11 +20,7 @@ pub fn block_interaction_system(
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
     player_query: Query<&Transform, With<Player>>,
     player_config: Res<PlayerConfig>,
-    world_config: Res<WorldConfig>,
-    tile_registry: Res<TileRegistry>,
-    biome_map: Res<BiomeMap>,
-    biome_registry: Res<BiomeRegistry>,
-    planet_config: Res<PlanetConfig>,
+    ctx: WorldCtx,
     mut world_map: ResMut<WorldMap>,
     loaded_chunks: Res<LoadedChunks>,
 ) {
@@ -50,109 +45,64 @@ pub fn block_interaction_system(
         return;
     };
 
-    let (tile_x, tile_y) = world_to_tile(world_pos.x, world_pos.y, world_config.tile_size);
+    let ctx_ref = ctx.as_ref();
+    let (tile_x, tile_y) = world_to_tile(world_pos.x, world_pos.y, ctx_ref.config.tile_size);
 
     // Range check (wrap-aware on X axis)
-    let player_tile_x = (player_tf.translation.x / world_config.tile_size).floor();
-    let player_tile_y = (player_tf.translation.y / world_config.tile_size).floor();
+    let player_tile_x = (player_tf.translation.x / ctx_ref.config.tile_size).floor();
+    let player_tile_y = (player_tf.translation.y / ctx_ref.config.tile_size).floor();
     let raw_dx = (tile_x as f32 - player_tile_x).abs();
-    let dx = raw_dx.min(world_config.width_tiles as f32 - raw_dx);
+    let dx = raw_dx.min(ctx_ref.config.width_tiles as f32 - raw_dx);
     let dy = (tile_y as f32 - player_tile_y).abs();
     if dx > BLOCK_REACH || dy > BLOCK_REACH {
         return;
     }
 
     if left_click {
-        // Break block
-        let current = world_map.get_tile(
-            tile_x,
-            tile_y,
-            &world_config,
-            &biome_map,
-            &biome_registry,
-            &tile_registry,
-            &planet_config,
-        );
-        if !tile_registry.is_solid(current) {
+        // Break block (read-only check, skip if chunk not loaded)
+        let Some(current) = world_map.get_tile(tile_x, tile_y, &ctx_ref) else {
+            return;
+        };
+        if !ctx_ref.tile_registry.is_solid(current) {
             return;
         }
 
-        world_map.set_tile(
-            tile_x,
-            tile_y,
-            TileId::AIR,
-            &world_config,
-            &biome_map,
-            &biome_registry,
-            &tile_registry,
-            &planet_config,
-        );
+        world_map.set_tile(tile_x, tile_y, TileId::AIR, &ctx_ref);
     } else if right_click {
-        // Place block
-        let current = world_map.get_tile(
-            tile_x,
-            tile_y,
-            &world_config,
-            &biome_map,
-            &biome_registry,
-            &tile_registry,
-            &planet_config,
-        );
-        if tile_registry.is_solid(current) {
+        // Place block (read-only check, skip if chunk not loaded)
+        let Some(current) = world_map.get_tile(tile_x, tile_y, &ctx_ref) else {
+            return;
+        };
+        if ctx_ref.tile_registry.is_solid(current) {
             return;
         }
 
         // Check player overlap
-        let half_w = player_config.width / 2.0;
-        let half_h = player_config.height / 2.0;
-        let player_min_x = player_tf.translation.x - half_w;
-        let player_max_x = player_tf.translation.x + half_w;
-        let player_min_y = player_tf.translation.y - half_h;
-        let player_max_y = player_tf.translation.y + half_h;
-        let tile_min_x = tile_x as f32 * world_config.tile_size;
-        let tile_max_x = tile_min_x + world_config.tile_size;
-        let tile_min_y = tile_y as f32 * world_config.tile_size;
-        let tile_max_y = tile_min_y + world_config.tile_size;
-        if player_max_x > tile_min_x
-            && player_min_x < tile_max_x
-            && player_max_y > tile_min_y
-            && player_min_y < tile_max_y
-        {
+        let player_aabb = Aabb::from_center(
+            player_tf.translation.x,
+            player_tf.translation.y,
+            player_config.width,
+            player_config.height,
+        );
+        let target_tile = tile_aabb(tile_x, tile_y, ctx_ref.config.tile_size);
+        if player_aabb.overlaps(&target_tile) {
             return;
         }
 
         // TODO: replace with player's selected block type from hotbar/inventory
-        let place_id = tile_registry.by_name("dirt");
-        world_map.set_tile(
-            tile_x,
-            tile_y,
-            place_id,
-            &world_config,
-            &biome_map,
-            &biome_registry,
-            &tile_registry,
-            &planet_config,
-        );
+        let place_id = ctx_ref.tile_registry.by_name("dirt");
+        world_map.set_tile(tile_x, tile_y, place_id, &ctx_ref);
     } else {
         return;
     }
 
     // Update bitmasks and mark dirty chunks
-    let dirty = update_bitmasks_around(
-        &mut world_map,
-        tile_x,
-        tile_y,
-        &world_config,
-        &biome_map,
-        &biome_registry,
-        &tile_registry,
-        &planet_config,
-    );
+    let dirty = update_bitmasks_around(&mut world_map, tile_x, tile_y, &ctx_ref);
 
     for (cx, cy) in dirty {
         // Find ALL loaded chunk entities that map to this data chunk
         for (&(display_cx, display_cy), &entity) in &loaded_chunks.map {
-            if world_config.wrap_chunk_x(display_cx) == cx && display_cy == cy {
+            if ctx_ref.config.wrap_chunk_x(display_cx) == cx && display_cy == cy {
                 commands.entity(entity).insert(ChunkDirty);
             }
         }

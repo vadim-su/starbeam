@@ -3,12 +3,11 @@ use std::collections::HashSet;
 
 use bevy::prelude::*;
 
-use crate::registry::biome::{BiomeRegistry, PlanetConfig};
 use crate::registry::tile::{TileId, TileRegistry};
 use crate::registry::world::WorldConfig;
 use crate::world::atlas::TileAtlas;
 use crate::world::autotile::{compute_bitmask, AutotileRegistry};
-use crate::world::biome_map::BiomeMap;
+use crate::world::ctx::{WorldCtx, WorldCtxRef};
 use crate::world::mesh_builder::{build_chunk_mesh, MeshBuildBuffers};
 use crate::world::terrain_gen;
 use crate::world::tile_renderer::SharedTileMaterial;
@@ -49,28 +48,14 @@ pub struct WorldMap {
 }
 
 impl WorldMap {
-    #[allow(clippy::too_many_arguments)]
     pub fn get_or_generate_chunk(
         &mut self,
         chunk_x: i32,
         chunk_y: i32,
-        wc: &WorldConfig,
-        biome_map: &BiomeMap,
-        biome_registry: &BiomeRegistry,
-        tile_registry: &TileRegistry,
-        planet_config: &PlanetConfig,
+        ctx: &WorldCtxRef,
     ) -> &ChunkData {
         self.chunks.entry((chunk_x, chunk_y)).or_insert_with(|| {
-            let tiles = terrain_gen::generate_chunk_tiles(
-                wc.seed,
-                chunk_x,
-                chunk_y,
-                wc,
-                biome_map,
-                biome_registry,
-                tile_registry,
-                planet_config,
-            );
+            let tiles = terrain_gen::generate_chunk_tiles(ctx.config.seed, chunk_x, chunk_y, ctx);
             let len = tiles.len();
             ChunkData {
                 tiles,
@@ -80,114 +65,57 @@ impl WorldMap {
         })
     }
 
-    /// Returns the tile at the given coordinates if the chunk is already loaded.
-    /// Unlike `get_tile`, this does not generate chunks and takes `&self`.
-    pub fn get_tile_if_loaded(
-        &self,
-        tile_x: i32,
-        tile_y: i32,
-        wc: &WorldConfig,
-        tile_registry: &TileRegistry,
-    ) -> Option<TileId> {
+    /// Read-only: returns tile if chunk is loaded, None otherwise.
+    /// Takes &self — safe for parallel access.
+    pub fn get_tile(&self, tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> Option<TileId> {
         if tile_y < 0 {
-            return Some(tile_registry.by_name("stone"));
+            return Some(ctx.tile_registry.by_name("stone"));
         }
-        if tile_y >= wc.height_tiles {
+        if tile_y >= ctx.config.height_tiles {
             return Some(TileId::AIR);
         }
-        let wrapped_x = wc.wrap_tile_x(tile_x);
-        let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, wc.chunk_size);
-        let (lx, ly) = tile_to_local(wrapped_x, tile_y, wc.chunk_size);
+        let wrapped_x = ctx.config.wrap_tile_x(tile_x);
+        let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, ctx.config.chunk_size);
+        let (lx, ly) = tile_to_local(wrapped_x, tile_y, ctx.config.chunk_size);
         self.chunks
             .get(&(cx, cy))
-            .map(|chunk| chunk.get(lx, ly, wc.chunk_size))
+            .map(|chunk| chunk.get(lx, ly, ctx.config.chunk_size))
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn get_tile(
-        &mut self,
-        tile_x: i32,
-        tile_y: i32,
-        wc: &WorldConfig,
-        biome_map: &BiomeMap,
-        biome_registry: &BiomeRegistry,
-        tile_registry: &TileRegistry,
-        planet_config: &PlanetConfig,
-    ) -> TileId {
+    /// Mutating: gets tile with lazy chunk generation.
+    /// Only for systems that need to generate world (chunk_loading, block_action).
+    pub fn get_tile_mut(&mut self, tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> TileId {
         if tile_y < 0 {
-            return tile_registry.by_name("stone"); // bedrock
+            return ctx.tile_registry.by_name("stone"); // bedrock
         }
-        if tile_y >= wc.height_tiles {
+        if tile_y >= ctx.config.height_tiles {
             return TileId::AIR; // sky
         }
-        let wrapped_x = wc.wrap_tile_x(tile_x);
-        let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, wc.chunk_size);
-        let (lx, ly) = tile_to_local(wrapped_x, tile_y, wc.chunk_size);
-        self.get_or_generate_chunk(
-            cx,
-            cy,
-            wc,
-            biome_map,
-            biome_registry,
-            tile_registry,
-            planet_config,
-        )
-        .get(lx, ly, wc.chunk_size)
+        let wrapped_x = ctx.config.wrap_tile_x(tile_x);
+        let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, ctx.config.chunk_size);
+        let (lx, ly) = tile_to_local(wrapped_x, tile_y, ctx.config.chunk_size);
+        self.get_or_generate_chunk(cx, cy, ctx)
+            .get(lx, ly, ctx.config.chunk_size)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn set_tile(
-        &mut self,
-        tile_x: i32,
-        tile_y: i32,
-        tile: TileId,
-        wc: &WorldConfig,
-        biome_map: &BiomeMap,
-        biome_registry: &BiomeRegistry,
-        tile_registry: &TileRegistry,
-        planet_config: &PlanetConfig,
-    ) {
-        if tile_y < 0 || tile_y >= wc.height_tiles {
+    pub fn set_tile(&mut self, tile_x: i32, tile_y: i32, tile: TileId, ctx: &WorldCtxRef) {
+        if tile_y < 0 || tile_y >= ctx.config.height_tiles {
             return;
         }
-        let wrapped_x = wc.wrap_tile_x(tile_x);
-        let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, wc.chunk_size);
-        let (lx, ly) = tile_to_local(wrapped_x, tile_y, wc.chunk_size);
-        self.get_or_generate_chunk(
-            cx,
-            cy,
-            wc,
-            biome_map,
-            biome_registry,
-            tile_registry,
-            planet_config,
-        );
+        let wrapped_x = ctx.config.wrap_tile_x(tile_x);
+        let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, ctx.config.chunk_size);
+        let (lx, ly) = tile_to_local(wrapped_x, tile_y, ctx.config.chunk_size);
+        self.get_or_generate_chunk(cx, cy, ctx);
         self.chunks
             .get_mut(&(cx, cy))
             .unwrap()
-            .set(lx, ly, tile, wc.chunk_size);
+            .set(lx, ly, tile, ctx.config.chunk_size);
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn is_solid(
-        &mut self,
-        tile_x: i32,
-        tile_y: i32,
-        wc: &WorldConfig,
-        biome_map: &BiomeMap,
-        biome_registry: &BiomeRegistry,
-        tile_registry: &TileRegistry,
-        planet_config: &PlanetConfig,
-    ) -> bool {
-        tile_registry.is_solid(self.get_tile(
-            tile_x,
-            tile_y,
-            wc,
-            biome_map,
-            biome_registry,
-            tile_registry,
-            planet_config,
-        ))
+    /// Read-only: returns whether tile is solid (false for unloaded chunks).
+    pub fn is_solid(&self, tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> bool {
+        self.get_tile(tile_x, tile_y, ctx)
+            .is_some_and(|tile| ctx.tile_registry.is_solid(tile))
     }
 }
 
@@ -220,18 +148,13 @@ pub fn world_to_tile(world_x: f32, world_y: f32, tile_size: f32) -> (i32, i32) {
     )
 }
 
-/// Recompute bitmasks for 3×3 area around (center_x, center_y).
+/// Recompute bitmasks for 3x3 area around (center_x, center_y).
 /// Returns set of affected data chunk coords that need mesh rebuild.
-#[allow(clippy::too_many_arguments)]
 pub fn update_bitmasks_around(
     world_map: &mut WorldMap,
     center_x: i32,
     center_y: i32,
-    wc: &WorldConfig,
-    biome_map: &BiomeMap,
-    biome_registry: &BiomeRegistry,
-    tile_registry: &TileRegistry,
-    planet_config: &PlanetConfig,
+    ctx: &WorldCtxRef,
 ) -> HashSet<(i32, i32)> {
     let mut dirty_chunks = HashSet::new();
 
@@ -240,27 +163,19 @@ pub fn update_bitmasks_around(
             let x = center_x + dx;
             let y = center_y + dy;
 
-            if y < 0 || y >= wc.height_tiles {
+            if y < 0 || y >= ctx.config.height_tiles {
                 continue;
             }
 
-            let wrapped_x = wc.wrap_tile_x(x);
-            let (cx, cy) = tile_to_chunk(wrapped_x, y, wc.chunk_size);
-            let (lx, ly) = tile_to_local(wrapped_x, y, wc.chunk_size);
-            let idx = (ly * wc.chunk_size + lx) as usize;
+            let wrapped_x = ctx.config.wrap_tile_x(x);
+            let (cx, cy) = tile_to_chunk(wrapped_x, y, ctx.config.chunk_size);
+            let (lx, ly) = tile_to_local(wrapped_x, y, ctx.config.chunk_size);
+            let idx = (ly * ctx.config.chunk_size + lx) as usize;
 
             let new_mask = compute_bitmask(
                 |bx, by| {
-                    let tile = world_map.get_tile(
-                        bx,
-                        by,
-                        wc,
-                        biome_map,
-                        biome_registry,
-                        tile_registry,
-                        planet_config,
-                    );
-                    tile_registry.is_solid(tile)
+                    let tile = world_map.get_tile_mut(bx, by, ctx);
+                    ctx.tile_registry.is_solid(tile)
                 },
                 wrapped_x,
                 y,
@@ -277,18 +192,13 @@ pub fn update_bitmasks_around(
 }
 
 /// Compute bitmasks for all tiles in a chunk using neighbor solidity checks.
-#[allow(clippy::too_many_arguments)]
 pub fn init_chunk_bitmasks(
     world_map: &mut WorldMap,
     chunk_x: i32,
     chunk_y: i32,
-    wc: &WorldConfig,
-    biome_map: &BiomeMap,
-    biome_registry: &BiomeRegistry,
-    tile_registry: &TileRegistry,
-    planet_config: &PlanetConfig,
+    ctx: &WorldCtxRef,
 ) -> Vec<u8> {
-    let chunk_size = wc.chunk_size;
+    let chunk_size = ctx.config.chunk_size;
     let mut bitmasks = vec![0u8; (chunk_size * chunk_size) as usize];
     let base_x = chunk_x * chunk_size as i32;
     let base_y = chunk_y * chunk_size as i32;
@@ -300,16 +210,8 @@ pub fn init_chunk_bitmasks(
             let idx = (local_y * chunk_size + local_x) as usize;
             bitmasks[idx] = compute_bitmask(
                 |x, y| {
-                    let tile = world_map.get_tile(
-                        x,
-                        y,
-                        wc,
-                        biome_map,
-                        biome_registry,
-                        tile_registry,
-                        planet_config,
-                    );
-                    tile_registry.is_solid(tile)
+                    let tile = world_map.get_tile_mut(x, y, ctx);
+                    ctx.tile_registry.is_solid(tile)
                 },
                 world_x,
                 world_y,
@@ -326,11 +228,7 @@ pub fn spawn_chunk(
     meshes: &mut Assets<Mesh>,
     world_map: &mut WorldMap,
     loaded_chunks: &mut LoadedChunks,
-    wc: &WorldConfig,
-    biome_map: &BiomeMap,
-    biome_registry: &BiomeRegistry,
-    tile_registry: &TileRegistry,
-    planet_config: &PlanetConfig,
+    ctx: &WorldCtxRef,
     autotile_registry: &AutotileRegistry,
     atlas: &TileAtlas,
     material: &SharedTileMaterial,
@@ -342,27 +240,10 @@ pub fn spawn_chunk(
         return;
     }
 
-    let data_chunk_x = wc.wrap_chunk_x(display_chunk_x);
-    world_map.get_or_generate_chunk(
-        data_chunk_x,
-        chunk_y,
-        wc,
-        biome_map,
-        biome_registry,
-        tile_registry,
-        planet_config,
-    );
+    let data_chunk_x = ctx.config.wrap_chunk_x(display_chunk_x);
+    world_map.get_or_generate_chunk(data_chunk_x, chunk_y, ctx);
 
-    let bitmasks = init_chunk_bitmasks(
-        world_map,
-        data_chunk_x,
-        chunk_y,
-        wc,
-        biome_map,
-        biome_registry,
-        tile_registry,
-        planet_config,
-    );
+    let bitmasks = init_chunk_bitmasks(world_map, data_chunk_x, chunk_y, ctx);
     if let Some(chunk) = world_map.chunks.get_mut(&(data_chunk_x, chunk_y)) {
         chunk.bitmasks = bitmasks;
     }
@@ -373,10 +254,10 @@ pub fn spawn_chunk(
         &chunk_data.bitmasks,
         display_chunk_x,
         chunk_y,
-        wc.chunk_size,
-        wc.tile_size,
-        wc.seed,
-        tile_registry,
+        ctx.config.chunk_size,
+        ctx.config.tile_size,
+        ctx.config.seed,
+        ctx.tile_registry,
         autotile_registry,
         &atlas.params,
         buffers,
@@ -415,35 +296,34 @@ pub fn despawn_chunk(
 pub fn chunk_loading_system(
     mut commands: Commands,
     camera_query: Query<&Transform, With<Camera2d>>,
+    ctx: WorldCtx,
     mut world_map: ResMut<WorldMap>,
     mut loaded_chunks: ResMut<LoadedChunks>,
     mut meshes: ResMut<Assets<Mesh>>,
-    registry: Res<TileRegistry>,
     autotile_registry: Res<AutotileRegistry>,
     atlas: Res<TileAtlas>,
     material: Res<SharedTileMaterial>,
     mut buffers: ResMut<MeshBuildBuffers>,
-    wc: Res<WorldConfig>,
-    biome_map: Res<BiomeMap>,
-    biome_registry: Res<BiomeRegistry>,
-    planet_config: Res<PlanetConfig>,
 ) {
     let Ok(camera_transform) = camera_query.single() else {
         return;
     };
     let camera_pos = camera_transform.translation.truncate();
+    let ctx_ref = ctx.as_ref();
 
-    let (cam_tile_x, cam_tile_y) = world_to_tile(camera_pos.x, camera_pos.y, wc.tile_size);
-    let (cam_chunk_x, cam_chunk_y) = tile_to_chunk(cam_tile_x, cam_tile_y, wc.chunk_size);
+    let (cam_tile_x, cam_tile_y) =
+        world_to_tile(camera_pos.x, camera_pos.y, ctx_ref.config.tile_size);
+    let (cam_chunk_x, cam_chunk_y) =
+        tile_to_chunk(cam_tile_x, cam_tile_y, ctx_ref.config.chunk_size);
 
     let mut desired: HashSet<(i32, i32)> = HashSet::new();
-    let load_radius = wc.chunk_load_radius;
-    let world_chunks = wc.width_chunks();
+    let load_radius = ctx_ref.config.chunk_load_radius;
+    let world_chunks = ctx_ref.config.width_chunks();
 
     let mut add_chunks_around = |center_cx: i32| {
         for display_cx in (center_cx - load_radius)..=(center_cx + load_radius) {
             for cy in (cam_chunk_y - load_radius)..=(cam_chunk_y + load_radius) {
-                if cy >= 0 && cy < wc.height_chunks() {
+                if cy >= 0 && cy < ctx_ref.config.height_chunks() {
                     desired.insert((display_cx, cy));
                 }
             }
@@ -465,11 +345,7 @@ pub fn chunk_loading_system(
                 &mut meshes,
                 &mut world_map,
                 &mut loaded_chunks,
-                &wc,
-                &biome_map,
-                &biome_registry,
-                &registry,
-                &planet_config,
+                &ctx_ref,
                 &autotile_registry,
                 &atlas,
                 &material,
@@ -535,11 +411,11 @@ pub fn rebuild_dirty_chunks(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_helpers::fixtures::*;
+    use crate::test_helpers::fixtures;
 
     #[test]
     fn tile_to_chunk_basic() {
-        let wc = test_world_config();
+        let wc = fixtures::test_world_config();
         assert_eq!(tile_to_chunk(0, 0, wc.chunk_size), (0, 0));
         assert_eq!(tile_to_chunk(31, 31, wc.chunk_size), (0, 0));
         assert_eq!(tile_to_chunk(32, 0, wc.chunk_size), (1, 0));
@@ -548,7 +424,7 @@ mod tests {
 
     #[test]
     fn tile_to_local_basic() {
-        let wc = test_world_config();
+        let wc = fixtures::test_world_config();
         assert_eq!(tile_to_local(0, 0, wc.chunk_size), (0, 0));
         assert_eq!(tile_to_local(31, 31, wc.chunk_size), (31, 31));
         assert_eq!(tile_to_local(32, 0, wc.chunk_size), (0, 0));
@@ -557,7 +433,7 @@ mod tests {
 
     #[test]
     fn world_to_tile_basic() {
-        let wc = test_world_config();
+        let wc = fixtures::test_world_config();
         assert_eq!(world_to_tile(0.0, 0.0, wc.tile_size), (0, 0));
         assert_eq!(world_to_tile(32.0, 0.0, wc.tile_size), (1, 0));
         assert_eq!(world_to_tile(31.9, 63.9, wc.tile_size), (0, 1));
@@ -566,83 +442,90 @@ mod tests {
 
     #[test]
     fn world_to_tile_negative() {
-        let wc = test_world_config();
+        let wc = fixtures::test_world_config();
         assert_eq!(world_to_tile(-1.0, -1.0, wc.tile_size), (-1, -1));
         assert_eq!(world_to_tile(-32.0, 0.0, wc.tile_size), (-1, 0));
     }
 
     #[test]
-    fn worldmap_get_tile_deterministic() {
-        let wc = test_world_config();
-        let bm = test_biome_map();
-        let br = test_biome_registry();
-        let tr = test_tile_registry();
-        let pc = test_planet_config();
+    fn worldmap_get_tile_mut_deterministic() {
+        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
         let mut map = WorldMap::default();
-        let t1 = map.get_tile(100, 500, &wc, &bm, &br, &tr, &pc);
-        let t2 = map.get_tile(100, 500, &wc, &bm, &br, &tr, &pc);
+        let t1 = map.get_tile_mut(100, 500, &ctx);
+        let t2 = map.get_tile_mut(100, 500, &ctx);
         assert_eq!(t1, t2);
+    }
+
+    #[test]
+    fn worldmap_get_tile_returns_none_for_unloaded() {
+        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
+        let map = WorldMap::default();
+        assert_eq!(map.get_tile(100, 500, &ctx), None);
+    }
+
+    #[test]
+    fn worldmap_get_tile_returns_some_for_loaded() {
+        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
+        let mut map = WorldMap::default();
+        // Pre-generate the chunk via get_tile_mut
+        let expected = map.get_tile_mut(100, 500, &ctx);
+        // Read-only get_tile should return the same value
+        assert_eq!(map.get_tile(100, 500, &ctx), Some(expected));
+    }
+
+    #[test]
+    fn worldmap_is_solid_returns_false_for_unloaded() {
+        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
+        let map = WorldMap::default();
+        assert!(!map.is_solid(100, 500, &ctx));
     }
 
     #[test]
     fn worldmap_set_tile() {
-        let wc = test_world_config();
-        let bm = test_biome_map();
-        let br = test_biome_registry();
-        let tr = test_tile_registry();
-        let pc = test_planet_config();
+        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
         let mut map = WorldMap::default();
-        map.set_tile(100, 500, TileId::AIR, &wc, &bm, &br, &tr, &pc);
-        assert_eq!(map.get_tile(100, 500, &wc, &bm, &br, &tr, &pc), TileId::AIR);
+        map.set_tile(100, 500, TileId::AIR, &ctx);
+        assert_eq!(map.get_tile(100, 500, &ctx), Some(TileId::AIR));
     }
 
     #[test]
     fn worldmap_y_out_of_bounds() {
-        let wc = test_world_config();
-        let bm = test_biome_map();
-        let br = test_biome_registry();
-        let tr = test_tile_registry();
-        let pc = test_planet_config();
-        let mut map = WorldMap::default();
-        assert_eq!(
-            map.get_tile(0, wc.height_tiles, &wc, &bm, &br, &tr, &pc),
-            TileId::AIR
-        );
-        assert_eq!(
-            map.get_tile(0, -1, &wc, &bm, &br, &tr, &pc),
-            tr.by_name("stone")
-        );
+        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
+        let map = WorldMap::default();
+        assert_eq!(map.get_tile(0, wc.height_tiles, &ctx), Some(TileId::AIR));
+        assert_eq!(map.get_tile(0, -1, &ctx), Some(tr.by_name("stone")));
     }
 
     #[test]
     fn worldmap_x_wraps() {
-        let wc = test_world_config();
-        let bm = test_biome_map();
-        let br = test_biome_registry();
-        let tr = test_tile_registry();
-        let pc = test_planet_config();
+        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
         let mut map = WorldMap::default();
-        let t1 = map.get_tile(-1, 500, &wc, &bm, &br, &tr, &pc);
-        let t2 = map.get_tile(wc.width_tiles - 1, 500, &wc, &bm, &br, &tr, &pc);
+        // Use get_tile_mut to lazily generate chunks for wrap test
+        let t1 = map.get_tile_mut(-1, 500, &ctx);
+        let t2 = map.get_tile_mut(wc.width_tiles - 1, 500, &ctx);
         assert_eq!(t1, t2);
 
-        let t3 = map.get_tile(wc.width_tiles, 500, &wc, &bm, &br, &tr, &pc);
-        let t4 = map.get_tile(0, 500, &wc, &bm, &br, &tr, &pc);
+        let t3 = map.get_tile_mut(wc.width_tiles, 500, &ctx);
+        let t4 = map.get_tile_mut(0, 500, &ctx);
         assert_eq!(t3, t4);
     }
 
     #[test]
     fn worldmap_set_tile_wraps() {
-        let wc = test_world_config();
-        let bm = test_biome_map();
-        let br = test_biome_registry();
-        let tr = test_tile_registry();
-        let pc = test_planet_config();
+        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
         let mut map = WorldMap::default();
-        map.set_tile(-1, 500, TileId::AIR, &wc, &bm, &br, &tr, &pc);
+        map.set_tile(-1, 500, TileId::AIR, &ctx);
         assert_eq!(
-            map.get_tile(wc.width_tiles - 1, 500, &wc, &bm, &br, &tr, &pc),
-            TileId::AIR
+            map.get_tile(wc.width_tiles - 1, 500, &ctx),
+            Some(TileId::AIR)
         );
     }
 }
