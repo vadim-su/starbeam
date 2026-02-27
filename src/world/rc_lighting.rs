@@ -1,9 +1,11 @@
 use bevy::prelude::*;
+use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 
 use crate::registry::tile::{TileId, TileRegistry};
 use crate::registry::world::WorldConfig;
 use crate::sets::GameSet;
 use crate::world::chunk::{tile_to_chunk, tile_to_local, world_to_tile, WorldMap};
+use crate::world::rc_pipeline;
 
 /// Padding in tiles around the visible viewport for the RC input textures.
 /// Ensures cascades have enough data beyond screen edges.
@@ -13,7 +15,7 @@ const RC_PADDING_TILES: i32 = 32;
 const SUN_COLOR: [f32; 3] = [1.0, 0.98, 0.90];
 
 /// Configuration for the radiance cascades lighting pipeline.
-#[derive(Resource, Clone)]
+#[derive(Resource, Clone, ExtractResource)]
 pub struct RcLightingConfig {
     /// Size of RC input textures (viewport + padding) in tiles.
     pub input_size: UVec2,
@@ -41,7 +43,7 @@ impl Default for RcLightingConfig {
 
 /// CPU-side buffers holding per-tile density, emissive, and albedo data
 /// extracted each frame for GPU upload.
-#[derive(Resource, Clone)]
+#[derive(Resource, Clone, ExtractResource)]
 pub struct RcInputData {
     /// 0 = air, 255 = solid. One byte per tile.
     pub density: Vec<u8>,
@@ -75,9 +77,34 @@ pub struct RcLightingPlugin;
 
 impl Plugin for RcLightingPlugin {
     fn build(&self, app: &mut App) {
+        // Create GPU image handles in the main world (small defaults, resized each frame).
+        let gpu_images = rc_pipeline::create_gpu_images(
+            app.world_mut().resource_mut::<Assets<Image>>().as_mut(),
+        );
+
         app.init_resource::<RcLightingConfig>()
             .init_resource::<RcInputData>()
-            .add_systems(Update, extract_lighting_data.in_set(GameSet::WorldUpdate));
+            .insert_resource(gpu_images)
+            .add_plugins((
+                ExtractResourcePlugin::<RcLightingConfig>::default(),
+                ExtractResourcePlugin::<RcInputData>::default(),
+                ExtractResourcePlugin::<rc_pipeline::RcGpuImages>::default(),
+            ))
+            .add_systems(
+                Update,
+                (
+                    extract_lighting_data.in_set(GameSet::WorldUpdate),
+                    rc_pipeline::resize_gpu_textures
+                        .after(extract_lighting_data)
+                        .in_set(GameSet::WorldUpdate),
+                    rc_pipeline::swap_lightmap_handles
+                        .after(rc_pipeline::resize_gpu_textures)
+                        .in_set(GameSet::WorldUpdate),
+                ),
+            );
+
+        // Set up the render-side pipeline (render app systems + graph node).
+        rc_pipeline::setup_render_pipeline(app);
     }
 }
 

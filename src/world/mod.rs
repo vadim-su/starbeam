@@ -5,6 +5,7 @@ pub mod chunk;
 pub mod ctx;
 pub mod mesh_builder;
 pub mod rc_lighting;
+pub mod rc_pipeline;
 pub mod terrain_gen;
 pub mod tile_renderer;
 
