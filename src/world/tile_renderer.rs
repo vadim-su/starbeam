@@ -13,6 +13,9 @@ pub struct TileMaterial {
     pub atlas: Handle<Image>,
     #[uniform(2)]
     pub dim: f32,
+    #[texture(3)]
+    #[sampler(4)]
+    pub lightmap: Handle<Image>,
 }
 
 impl Material2d for TileMaterial {

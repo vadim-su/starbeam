@@ -2,7 +2,9 @@
 
 use std::collections::HashSet;
 
+use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use super::assets::{
     AutotileAsset, BiomeAsset, ParallaxConfigAsset, PlanetTypeAsset, PlayerDefAsset,
@@ -460,14 +462,31 @@ pub(crate) fn check_autotile_loading(
         autotile_reg.insert(name.clone(), AutotileEntry::from_asset(asset, col_idx));
     }
 
+    // Create 1×1 white fallback lightmap (replaced by RC pipeline each frame).
+    // Uses Rgba16Float to match the RC pipeline's lightmap format exactly.
+    let white_lightmap = image_assets.add(Image::new_fill(
+        Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        // f16 1.0 = 0x3C00 → little-endian [0x00, 0x3C] per channel
+        &[0x00u8, 0x3C, 0x00, 0x3C, 0x00, 0x3C, 0x00, 0x3C],
+        TextureFormat::Rgba16Float,
+        RenderAssetUsages::RENDER_WORLD,
+    ));
+
     // Create shared tile materials: full brightness for foreground, dimmed for background
     let fg_material = tile_materials.add(TileMaterial {
         atlas: atlas_handle.clone(),
         dim: 1.0,
+        lightmap: white_lightmap.clone(),
     });
     let bg_material = tile_materials.add(TileMaterial {
         atlas: atlas_handle.clone(),
         dim: 0.6,
+        lightmap: white_lightmap,
     });
 
     // Insert all autotile resources

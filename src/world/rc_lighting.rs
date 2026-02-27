@@ -6,6 +6,7 @@ use crate::registry::world::WorldConfig;
 use crate::sets::GameSet;
 use crate::world::chunk::{tile_to_chunk, tile_to_local, world_to_tile, WorldMap};
 use crate::world::rc_pipeline;
+use crate::world::tile_renderer::{SharedTileMaterial, TileMaterial};
 
 /// Padding in tiles around the visible viewport for the RC input textures.
 /// Ensures cascades have enough data beyond screen edges.
@@ -91,6 +92,9 @@ impl Plugin for RcLightingPlugin {
                         .in_set(GameSet::WorldUpdate),
                     rc_pipeline::swap_lightmap_handles
                         .after(rc_pipeline::resize_gpu_textures)
+                        .in_set(GameSet::WorldUpdate),
+                    update_tile_lightmap
+                        .after(rc_pipeline::swap_lightmap_handles)
                         .in_set(GameSet::WorldUpdate),
                 ),
             );
@@ -262,6 +266,25 @@ fn extract_lighting_data(
     }
 
     input.dirty = true;
+}
+
+/// Update the tile material lightmap handles to point to the current RC lightmap.
+/// Runs each frame after `swap_lightmap_handles`. The RC compute node runs
+/// before camera rendering in the render graph, so the lightmap is fully
+/// written before the tile fragment shader samples it.
+fn update_tile_lightmap(
+    gpu_images: Option<Res<rc_pipeline::RcGpuImages>>,
+    shared_material: Option<Res<SharedTileMaterial>>,
+    mut materials: ResMut<Assets<TileMaterial>>,
+) {
+    let (Some(gpu_images), Some(shared_material)) = (gpu_images, shared_material) else {
+        return;
+    };
+    for handle in [&shared_material.fg, &shared_material.bg] {
+        if let Some(mat) = materials.get_mut(handle) {
+            mat.lightmap = gpu_images.lightmap.clone();
+        }
+    }
 }
 
 #[cfg(test)]

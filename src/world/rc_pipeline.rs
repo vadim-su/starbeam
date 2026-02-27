@@ -682,6 +682,29 @@ fn make_gpu_texture(
     images.add(image)
 }
 
+/// Create a GPU texture initialized to white (1.0 in all channels, Rgba16Float).
+/// Used for lightmap textures so tiles render at full brightness before the RC
+/// pipeline produces its first output.
+fn make_white_gpu_texture(images: &mut Assets<Image>, w: u32, h: u32) -> Handle<Image> {
+    let size = Extent3d {
+        width: w.max(1),
+        height: h.max(1),
+        depth_or_array_layers: 1,
+    };
+    // f16 1.0 = 0x3C00 → little-endian [0x00, 0x3C]
+    let white_f16: [u8; 8] = [0x00, 0x3C, 0x00, 0x3C, 0x00, 0x3C, 0x00, 0x3C];
+    let mut image = Image::new_fill(
+        size,
+        TextureDimension::D2,
+        &white_f16,
+        TextureFormat::Rgba16Float,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    image.texture_descriptor.usage =
+        TextureUsages::COPY_DST | TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING;
+    images.add(image)
+}
+
 /// Create all GPU image handles with small default sizes.
 /// Called once during plugin setup.
 pub(crate) fn create_gpu_images(images: &mut Assets<Image>) -> RcGpuImages {
@@ -692,8 +715,8 @@ pub(crate) fn create_gpu_images(images: &mut Assets<Image>) -> RcGpuImages {
         albedo: make_gpu_texture(images, s, s, TextureFormat::Rgba8Unorm),
         cascade_a: make_gpu_texture(images, s * 2, s * 2, TextureFormat::Rgba16Float),
         cascade_b: make_gpu_texture(images, s * 2, s * 2, TextureFormat::Rgba16Float),
-        lightmap: make_gpu_texture(images, s, s, TextureFormat::Rgba16Float),
-        lightmap_prev: make_gpu_texture(images, s, s, TextureFormat::Rgba16Float),
+        lightmap: make_white_gpu_texture(images, s, s),
+        lightmap_prev: make_white_gpu_texture(images, s, s),
     }
 }
 
@@ -755,19 +778,9 @@ pub(crate) fn resize_gpu_textures(
         TextureFormat::Rgba16Float,
     );
 
-    // Lightmap textures: viewport-sized
-    gpu_images.lightmap = make_gpu_texture(
-        &mut images,
-        vp_w.max(1),
-        vp_h.max(1),
-        TextureFormat::Rgba16Float,
-    );
-    gpu_images.lightmap_prev = make_gpu_texture(
-        &mut images,
-        vp_w.max(1),
-        vp_h.max(1),
-        TextureFormat::Rgba16Float,
-    );
+    // Lightmap textures: viewport-sized, initialized to white to avoid dark flash
+    gpu_images.lightmap = make_white_gpu_texture(&mut images, vp_w.max(1), vp_h.max(1));
+    gpu_images.lightmap_prev = make_white_gpu_texture(&mut images, vp_w.max(1), vp_h.max(1));
 }
 
 #[cfg(test)]

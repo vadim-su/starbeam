@@ -1,4 +1,5 @@
 #import bevy_sprite::mesh2d_functions as mesh_functions
+#import bevy_sprite::mesh2d_view_bindings::view
 
 struct VertexInput {
     @builtin(instance_index) instance_index: u32,
@@ -30,6 +31,8 @@ struct TileUniforms {
 @group(2) @binding(0) var atlas_texture: texture_2d<f32>;
 @group(2) @binding(1) var atlas_sampler: sampler;
 @group(2) @binding(2) var<uniform> uniforms: TileUniforms;
+@group(2) @binding(3) var lightmap_texture: texture_2d<f32>;
+@group(2) @binding(4) var lightmap_sampler: sampler;
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
@@ -40,6 +43,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         }
         discard;
     }
-    // Temporary: full brightness until RC pipeline is connected
-    return vec4<f32>(color.rgb * uniforms.dim, color.a);
+
+    // Sample lightmap using screen UV (clip_position.xy is in framebuffer pixels)
+    let screen_uv = (in.clip_position.xy - view.viewport.xy) / view.viewport.zw;
+    let light = textureSample(lightmap_texture, lightmap_sampler, screen_uv).rgb;
+
+    return vec4<f32>(color.rgb * light * uniforms.dim, color.a);
 }
