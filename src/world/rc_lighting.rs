@@ -219,7 +219,9 @@ fn extract_lighting_data(
     for ty in min_ty..=max_ty {
         for tx in min_tx..=max_tx {
             let buf_x = (tx - min_tx) as u32;
-            let buf_y = (ty - min_ty) as u32;
+            // GPU textures have Y=0 at top; world Y increases upward.
+            // Flip so that max_ty (top of world view) maps to texel row 0.
+            let buf_y = (max_ty - ty) as u32;
             let idx = (buf_y * input_w + buf_x) as usize;
 
             let Some(tile_id) = get_fg_tile(&world_map, tx, ty, &world_config, &tile_registry)
@@ -252,9 +254,9 @@ fn extract_lighting_data(
 
     // --- Sun emitters along top row ---
     // Place sun light on the topmost row of the input range where sky is visible.
-    // Buffer Y=input_h-1 corresponds to tile max_ty (top of visible range).
+    // After Y-flip: max_ty maps to buf_y=0 (top of GPU texture = top of screen).
     let sun_ty = max_ty;
-    let sun_buf_y = input_h - 1;
+    let sun_buf_y = 0u32;
     for tx in min_tx..=max_tx {
         let buf_x = (tx - min_tx) as u32;
         let idx = (sun_buf_y * input_w + buf_x) as usize;
