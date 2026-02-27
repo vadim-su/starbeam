@@ -8,7 +8,7 @@ use super::assets::{
     BiomeAsset, ParallaxConfigAsset, PlanetTypeAsset, PlayerDefAsset, TileRegistryAsset,
     WorldConfigAsset,
 };
-use super::biome::{BiomeDef, BiomeRegistry, LayerConfig, LayerConfigs, PlanetConfig};
+use super::biome::{BiomeDef, BiomeId, BiomeRegistry, LayerConfig, LayerConfigs, PlanetConfig};
 use super::player::PlayerConfig;
 use super::tile::TileRegistry;
 use super::world::WorldConfig;
@@ -21,8 +21,8 @@ use crate::world::biome_map::BiomeMap;
 #[derive(Resource)]
 pub(crate) struct BiomeHandles {
     pub(crate) planet_type: Handle<PlanetTypeAsset>,
-    pub(crate) biomes: Vec<(String, Handle<BiomeAsset>)>,
-    pub(crate) parallax_configs: Vec<(String, Handle<ParallaxConfigAsset>)>,
+    pub(crate) biomes: Vec<(BiomeId, Handle<BiomeAsset>)>,
+    pub(crate) parallax_configs: Vec<(BiomeId, Handle<ParallaxConfigAsset>)>,
 }
 
 pub(crate) fn hot_reload_player(
@@ -102,8 +102,9 @@ pub(crate) fn hot_reload_biomes(
                 if *id == handle.id()
                     && let Some(asset) = biome_assets.get(handle)
                 {
-                    biome_registry.biomes.insert(
-                        biome_id.clone(),
+                    let name = biome_registry.name_of(*biome_id).to_string();
+                    biome_registry.insert(
+                        &name,
                         BiomeDef {
                             id: asset.id.clone(),
                             surface_block: tile_registry.by_name(&asset.surface_block),
@@ -114,7 +115,7 @@ pub(crate) fn hot_reload_biomes(
                             parallax_path: asset.parallax.clone(),
                         },
                     );
-                    info!("Hot-reloaded biome: {biome_id}");
+                    info!("Hot-reloaded biome: {name}");
                     break;
                 }
             }
@@ -127,6 +128,7 @@ pub(crate) fn hot_reload_planet_type(
     handles: Res<BiomeHandles>,
     planet_assets: Res<Assets<PlanetTypeAsset>>,
     world_config: Res<WorldConfig>,
+    biome_registry: Res<BiomeRegistry>,
     mut planet_config: ResMut<PlanetConfig>,
     mut biome_map: ResMut<BiomeMap>,
 ) {
@@ -178,6 +180,7 @@ pub(crate) fn hot_reload_planet_type(
                 planet_config.region_width_min,
                 planet_config.region_width_max,
                 planet_config.primary_region_ratio,
+                &biome_registry,
             );
             info!(
                 "Hot-reloaded PlanetConfig + BiomeMap ({} regions)",
@@ -200,7 +203,7 @@ pub(crate) fn hot_reload_biome_parallax(
                     && let Some(asset) = parallax_assets.get(handle)
                 {
                     biome_parallax.configs.insert(
-                        biome_id.clone(),
+                        *biome_id,
                         ParallaxConfig {
                             layers: asset.layers.clone(),
                         },

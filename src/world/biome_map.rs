@@ -5,6 +5,8 @@
 
 use bevy::prelude::Resource;
 
+use crate::registry::biome::{BiomeId, BiomeRegistry};
+
 // ---------------------------------------------------------------------------
 // Minimal splitmix64 RNG — no external crate needed
 // ---------------------------------------------------------------------------
@@ -41,7 +43,7 @@ impl SplitMix64 {
 
 #[derive(Debug, Clone)]
 pub struct BiomeRegion {
-    pub biome_id: String,
+    pub biome_id: BiomeId,
     pub start_x: u32,
     #[allow(dead_code)] // used in tests; implicitly encoded via start_x intervals at runtime
     pub width: u32,
@@ -56,13 +58,15 @@ pub struct BiomeMap {
 impl BiomeMap {
     /// Generate a deterministic biome map from the given parameters.
     ///
-    /// * `primary`       – biome that should dominate (~`primary_ratio` of slots)
-    /// * `secondaries`   – other biomes to fill the remaining slots
-    /// * `seed`          – deterministic RNG seed
-    /// * `world_width`   – total world width in tiles
-    /// * `region_min`    – minimum region width in tiles
-    /// * `region_max`    – maximum region width in tiles
-    /// * `primary_ratio` – target fraction of regions assigned to the primary biome
+    /// * `primary`         – biome that should dominate (~`primary_ratio` of slots)
+    /// * `secondaries`     – other biomes to fill the remaining slots
+    /// * `seed`            – deterministic RNG seed
+    /// * `world_width`     – total world width in tiles
+    /// * `region_min`      – minimum region width in tiles
+    /// * `region_max`      – maximum region width in tiles
+    /// * `primary_ratio`   – target fraction of regions assigned to the primary biome
+    /// * `biome_registry`  – used to resolve biome names to BiomeId
+    #[allow(clippy::too_many_arguments)]
     pub fn generate(
         primary: &str,
         secondaries: &[&str],
@@ -71,6 +75,7 @@ impl BiomeMap {
         region_min: u32,
         region_max: u32,
         primary_ratio: f64,
+        biome_registry: &BiomeRegistry,
     ) -> Self {
         assert!(region_min > 0, "region_min must be > 0");
         assert!(region_max >= region_min, "region_max must be >= region_min");
@@ -93,26 +98,26 @@ impl BiomeMap {
         let primary_slots = ((region_count as f64 * primary_ratio).round() as usize).max(1);
         let secondary_slots = region_count - primary_slots;
 
-        let mut biome_ids: Vec<String> = Vec::with_capacity(region_count);
+        let mut biome_names: Vec<String> = Vec::with_capacity(region_count);
         for _ in 0..primary_slots {
-            biome_ids.push(primary.to_string());
+            biome_names.push(primary.to_string());
         }
         for i in 0..secondary_slots {
             let idx = i % secondaries.len();
-            biome_ids.push(secondaries[idx].to_string());
+            biome_names.push(secondaries[idx].to_string());
         }
 
         // --- Fisher-Yates shuffle ---
-        for i in (1..biome_ids.len()).rev() {
+        for i in (1..biome_names.len()).rev() {
             let j = rng.range(0, i as u32) as usize;
-            biome_ids.swap(i, j);
+            biome_names.swap(i, j);
         }
 
         // --- Fix adjacent duplicates ---
-        fix_adjacent_duplicates(&mut biome_ids, &all_biomes, &mut rng);
+        fix_adjacent_duplicates(&mut biome_names, &all_biomes, &mut rng);
 
         // --- Fix wrap-around (first != last for cylindrical world) ---
-        fix_wrap(&mut biome_ids, &all_biomes, &mut rng);
+        fix_wrap(&mut biome_names, &all_biomes, &mut rng);
 
         // --- Assign widths ---
         let mut widths: Vec<u32> = (0..region_count)
@@ -138,12 +143,12 @@ impl BiomeMap {
             debug_assert!(excess == 0, "could not shrink regions to fit world_width");
         }
 
-        // --- Build regions with contiguous start_x ---
+        // --- Build regions with contiguous start_x, resolving names to BiomeId ---
         let mut regions = Vec::with_capacity(region_count);
         let mut start_x = 0u32;
-        for (biome_id, width) in biome_ids.into_iter().zip(widths) {
+        for (biome_name, width) in biome_names.into_iter().zip(widths) {
             regions.push(BiomeRegion {
-                biome_id,
+                biome_id: biome_registry.id_by_name(&biome_name),
                 start_x,
                 width,
             });
@@ -156,10 +161,10 @@ impl BiomeMap {
         }
     }
 
-    /// Return the biome name at the given tile x-coordinate. O(log n) via binary search.
-    pub fn biome_at(&self, tile_x: u32) -> &str {
+    /// Return the BiomeId at the given tile x-coordinate. O(log n) via binary search.
+    pub fn biome_at(&self, tile_x: u32) -> BiomeId {
         let idx = self.region_index_at(tile_x);
-        &self.regions[idx].biome_id
+        self.regions[idx].biome_id
     }
 
     /// Return the region index at the given tile x-coordinate. O(log n) via binary search.
@@ -270,6 +275,8 @@ fn fix_wrap(ids: &mut [String], all_biomes: &[String], rng: &mut SplitMix64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registry::biome::BiomeDef;
+    use crate::registry::tile::TileId;
 
     const TEST_SEED: u64 = 42;
     const WORLD_WIDTH: u32 = 2048;
@@ -277,8 +284,28 @@ mod tests {
     const REGION_MAX: u32 = 600;
     const PRIMARY_RATIO: f64 = 0.6;
 
-    fn test_map() -> BiomeMap {
-        BiomeMap::generate(
+    fn test_registry() -> BiomeRegistry {
+        let mut reg = BiomeRegistry::default();
+        for name in ["meadow", "forest", "rocky"] {
+            reg.insert(
+                name,
+                BiomeDef {
+                    id: name.into(),
+                    surface_block: TileId(1),
+                    subsurface_block: TileId(2),
+                    subsurface_depth: 4,
+                    fill_block: TileId(3),
+                    cave_threshold: 0.3,
+                    parallax_path: None,
+                },
+            );
+        }
+        reg
+    }
+
+    fn test_map() -> (BiomeMap, BiomeRegistry) {
+        let reg = test_registry();
+        let map = BiomeMap::generate(
             "meadow",
             &["forest", "rocky"],
             TEST_SEED,
@@ -286,25 +313,27 @@ mod tests {
             REGION_MIN,
             REGION_MAX,
             PRIMARY_RATIO,
-        )
+            &reg,
+        );
+        (map, reg)
     }
 
     #[test]
     fn generate_produces_regions() {
-        let map = test_map();
+        let (map, _) = test_map();
         assert!(!map.regions.is_empty(), "regions must not be empty");
     }
 
     #[test]
     fn regions_cover_entire_width() {
-        let map = test_map();
+        let (map, _) = test_map();
         let total: u32 = map.regions.iter().map(|r| r.width).sum();
         assert_eq!(total, WORLD_WIDTH, "region widths must sum to world_width");
     }
 
     #[test]
     fn regions_start_x_is_contiguous() {
-        let map = test_map();
+        let (map, _) = test_map();
         let mut expected_start = 0u32;
         for r in &map.regions {
             assert_eq!(
@@ -317,7 +346,7 @@ mod tests {
 
     #[test]
     fn no_adjacent_same_biome() {
-        let map = test_map();
+        let (map, _) = test_map();
         for pair in map.regions.windows(2) {
             assert_ne!(
                 pair[0].biome_id, pair[1].biome_id,
@@ -329,9 +358,9 @@ mod tests {
 
     #[test]
     fn first_last_region_differ_for_wrap() {
-        let map = test_map();
-        let first = &map.regions.first().unwrap().biome_id;
-        let last = &map.regions.last().unwrap().biome_id;
+        let (map, _) = test_map();
+        let first = map.regions.first().unwrap().biome_id;
+        let last = map.regions.last().unwrap().biome_id;
         assert_ne!(
             first, last,
             "first and last regions must differ for cylindrical wrap"
@@ -340,11 +369,12 @@ mod tests {
 
     #[test]
     fn primary_biome_ratio_approximately_correct() {
-        let map = test_map();
+        let (map, reg) = test_map();
+        let meadow_id = reg.id_by_name("meadow");
         let primary_count = map
             .regions
             .iter()
-            .filter(|r| r.biome_id == "meadow")
+            .filter(|r| r.biome_id == meadow_id)
             .count();
         let ratio = primary_count as f64 / map.regions.len() as f64;
         assert!(
@@ -355,7 +385,7 @@ mod tests {
 
     #[test]
     fn biome_at_returns_correct_biome() {
-        let map = test_map();
+        let (map, _) = test_map();
         // First region: biome_at(0) should match regions[0]
         assert_eq!(
             map.biome_at(0),
@@ -373,7 +403,7 @@ mod tests {
 
     #[test]
     fn biome_at_wraps_around() {
-        let map = test_map();
+        let (map, _) = test_map();
         assert_eq!(
             map.biome_at(0),
             map.biome_at(WORLD_WIDTH),
@@ -383,8 +413,8 @@ mod tests {
 
     #[test]
     fn deterministic_generation() {
-        let map1 = test_map();
-        let map2 = test_map();
+        let (map1, _) = test_map();
+        let (map2, _) = test_map();
         assert_eq!(map1.regions.len(), map2.regions.len());
         for (a, b) in map1.regions.iter().zip(map2.regions.iter()) {
             assert_eq!(a.biome_id, b.biome_id);
@@ -395,7 +425,8 @@ mod tests {
 
     #[test]
     fn different_seed_different_result() {
-        let map1 = test_map();
+        let (map1, _) = test_map();
+        let reg = test_registry();
         let map2 = BiomeMap::generate(
             "meadow",
             &["forest", "rocky"],
@@ -404,6 +435,7 @@ mod tests {
             REGION_MIN,
             REGION_MAX,
             PRIMARY_RATIO,
+            &reg,
         );
         // At least one region should differ in biome_id or start_x
         let differs = map1
@@ -416,7 +448,7 @@ mod tests {
 
     #[test]
     fn region_index_at_returns_index() {
-        let map = test_map();
+        let (map, _) = test_map();
         // Index 0 at tile 0
         assert_eq!(map.region_index_at(0), 0);
         // Index 1 at start of second region

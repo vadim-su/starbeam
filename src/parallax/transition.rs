@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use crate::player::Player;
+use crate::registry::biome::BiomeId;
 use crate::registry::world::WorldConfig;
 use crate::registry::BiomeParallaxConfigs;
 use crate::world::biome_map::BiomeMap;
@@ -11,7 +12,7 @@ use super::spawn::ParallaxLayer;
 /// Tracks which biome the player is currently in.
 #[derive(Resource, Debug)]
 pub struct CurrentBiome {
-    pub biome_id: String,
+    pub biome_id: BiomeId,
 }
 
 /// Active parallax crossfade transition.
@@ -24,8 +25,8 @@ pub struct CurrentBiome {
 /// so the crossfade continues seamlessly from wherever it was.
 #[derive(Resource, Debug)]
 pub struct ParallaxTransition {
-    pub from_biome: String,
-    pub to_biome: String,
+    pub from_biome: BiomeId,
+    pub to_biome: BiomeId,
     pub progress: f32,
     pub duration: f32,
     /// Alpha the "from" layers start fading from (1.0 for a fresh transition).
@@ -58,7 +59,7 @@ pub fn track_player_biome(
         wc.tile_size,
     );
     let wrapped_x = wc.wrap_tile_x(tile_x) as u32;
-    let new_biome = biome_map.biome_at(wrapped_x).to_string();
+    let new_biome = biome_map.biome_at(wrapped_x);
 
     // Initialize on first frame
     let Some(current) = current_biome else {
@@ -67,7 +68,7 @@ pub fn track_player_biome(
             &mut commands,
             &asset_server,
             &biome_parallax,
-            &new_biome,
+            new_biome,
             1.0,
         );
         commands.insert_resource(CurrentBiome {
@@ -95,8 +96,8 @@ pub fn track_player_biome(
                 trans.to_biome, trans.from_biome, cur_to_alpha, cur_from_alpha
             );
             commands.insert_resource(ParallaxTransition {
-                from_biome: trans.to_biome.clone(),
-                to_biome: trans.from_biome.clone(),
+                from_biome: trans.to_biome,
+                to_biome: trans.from_biome,
                 progress: 0.0,
                 duration: TRANSITION_DURATION * max_change,
                 from_start_alpha: cur_to_alpha,
@@ -119,12 +120,12 @@ pub fn track_player_biome(
                 &mut commands,
                 &asset_server,
                 &biome_parallax,
-                &new_biome,
+                new_biome,
                 0.0,
             );
             commands.insert_resource(ParallaxTransition {
-                from_biome: trans.to_biome.clone(),
-                to_biome: new_biome.clone(),
+                from_biome: trans.to_biome,
+                to_biome: new_biome,
                 progress: 0.0,
                 duration: TRANSITION_DURATION,
                 from_start_alpha: cur_to_alpha,
@@ -138,12 +139,12 @@ pub fn track_player_biome(
             &mut commands,
             &asset_server,
             &biome_parallax,
-            &new_biome,
+            new_biome,
             0.0,
         );
         commands.insert_resource(ParallaxTransition {
-            from_biome: current.biome_id.clone(),
-            to_biome: new_biome.clone(),
+            from_biome: current.biome_id,
+            to_biome: new_biome,
             progress: 0.0,
             duration: TRANSITION_DURATION,
             from_start_alpha: 1.0,
@@ -205,10 +206,10 @@ fn spawn_biome_parallax(
     commands: &mut Commands,
     asset_server: &AssetServer,
     biome_parallax: &BiomeParallaxConfigs,
-    biome_id: &str,
+    biome_id: BiomeId,
     initial_alpha: f32,
 ) {
-    let Some(config) = biome_parallax.configs.get(biome_id) else {
+    let Some(config) = biome_parallax.configs.get(&biome_id) else {
         warn!("No parallax config for biome: {}", biome_id);
         return;
     };
@@ -219,7 +220,7 @@ fn spawn_biome_parallax(
 
         commands.spawn((
             ParallaxLayer {
-                biome_id: biome_id.to_string(),
+                biome_id,
                 speed_x: layer_def.speed_x,
                 speed_y: layer_def.speed_y,
                 repeat_x: layer_def.repeat_x,

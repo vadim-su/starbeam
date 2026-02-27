@@ -19,13 +19,22 @@ pub mod fixtures {
         }
     }
 
-    pub fn test_biome_map() -> BiomeMap {
-        BiomeMap::generate("meadow", &["forest", "rocky"], 42, 2048, 300, 600, 0.6)
+    pub fn test_biome_map(biome_registry: &BiomeRegistry) -> BiomeMap {
+        BiomeMap::generate(
+            "meadow",
+            &["forest", "rocky"],
+            42,
+            2048,
+            300,
+            600,
+            0.6,
+            biome_registry,
+        )
     }
 
     pub fn test_biome_registry() -> BiomeRegistry {
         let mut reg = BiomeRegistry::default();
-        for (id, surface, subsurface, depth, fill, threshold) in [
+        for (name, surface, subsurface, depth, fill, threshold) in [
             ("meadow", TileId(1), TileId(2), 4, TileId(3), 0.3),
             ("forest", TileId(1), TileId(2), 4, TileId(3), 0.3),
             ("rocky", TileId(3), TileId(3), 2, TileId(3), 0.3),
@@ -33,10 +42,10 @@ pub mod fixtures {
             ("underground_rock", TileId(3), TileId(3), 0, TileId(3), 0.25),
             ("core_magma", TileId(3), TileId(3), 0, TileId(3), 0.15),
         ] {
-            reg.biomes.insert(
-                id.into(),
+            reg.insert(
+                name,
                 BiomeDef {
-                    id: id.into(),
+                    id: name.into(),
                     surface_block: surface,
                     subsurface_block: subsurface,
                     subsurface_depth: depth,
@@ -135,10 +144,12 @@ pub mod fixtures {
         TileRegistry,
         PlanetConfig,
     ) {
+        let br = test_biome_registry();
+        let bm = test_biome_map(&br);
         (
             test_world_config(),
-            test_biome_map(),
-            test_biome_registry(),
+            bm,
+            br,
             test_tile_registry(),
             test_planet_config(),
         )

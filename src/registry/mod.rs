@@ -15,6 +15,7 @@ use assets::{
     AutotileAsset, BiomeAsset, ParallaxConfigAsset, PlanetTypeAsset, PlayerDefAsset,
     TileRegistryAsset, WorldConfigAsset,
 };
+use biome::BiomeId;
 use hot_reload::{
     hot_reload_biome_parallax, hot_reload_biomes, hot_reload_planet_type, hot_reload_player,
     hot_reload_tiles, hot_reload_world,
@@ -45,10 +46,10 @@ pub enum AppState {
     InGame,
 }
 
-/// Per-biome parallax configs, keyed by biome ID.
+/// Per-biome parallax configs, keyed by BiomeId.
 #[derive(Resource, Debug, Default, Clone)]
 pub struct BiomeParallaxConfigs {
-    pub configs: HashMap<String, ParallaxConfig>,
+    pub configs: HashMap<BiomeId, ParallaxConfig>,
 }
 
 pub struct RegistryPlugin;

@@ -4,6 +4,16 @@ use bevy::prelude::*;
 
 use crate::registry::tile::TileId;
 
+/// Type-safe biome identifier backed by a `u16`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct BiomeId(pub u16);
+
+impl std::fmt::Display for BiomeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "BiomeId({})", self.0)
+    }
+}
+
 /// Runtime definition of a biome, built from BiomeAsset + TileRegistry lookups.
 #[derive(Debug, Clone)]
 pub struct BiomeDef {
@@ -19,22 +29,54 @@ pub struct BiomeDef {
     pub parallax_path: Option<String>,
 }
 
-/// All loaded biome definitions keyed by biome ID.
+/// All loaded biome definitions keyed by BiomeId.
 #[derive(Resource, Debug, Default)]
 pub struct BiomeRegistry {
-    pub biomes: HashMap<String, BiomeDef>,
+    biomes: HashMap<BiomeId, BiomeDef>,
+    name_to_id: HashMap<String, BiomeId>,
+    id_to_name: HashMap<BiomeId, String>,
+    next_id: u16,
 }
 
 impl BiomeRegistry {
-    pub fn get(&self, id: &str) -> &BiomeDef {
+    /// Insert or update a biome definition. Returns the BiomeId (existing or newly allocated).
+    pub fn insert(&mut self, name: &str, def: BiomeDef) -> BiomeId {
+        if let Some(&id) = self.name_to_id.get(name) {
+            self.biomes.insert(id, def);
+            id
+        } else {
+            let id = BiomeId(self.next_id);
+            self.next_id += 1;
+            self.name_to_id.insert(name.to_string(), id);
+            self.id_to_name.insert(id, name.to_string());
+            self.biomes.insert(id, def);
+            id
+        }
+    }
+
+    pub fn get(&self, id: BiomeId) -> &BiomeDef {
         self.biomes
-            .get(id)
+            .get(&id)
             .unwrap_or_else(|| panic!("Unknown biome: {id}"))
     }
 
     #[allow(dead_code)] // public API for future use; tested
-    pub fn get_opt(&self, id: &str) -> Option<&BiomeDef> {
-        self.biomes.get(id)
+    pub fn get_opt(&self, id: BiomeId) -> Option<&BiomeDef> {
+        self.biomes.get(&id)
+    }
+
+    pub fn id_by_name(&self, name: &str) -> BiomeId {
+        *self
+            .name_to_id
+            .get(name)
+            .unwrap_or_else(|| panic!("Unknown biome name: {name}"))
+    }
+
+    pub fn name_of(&self, id: BiomeId) -> &str {
+        self.id_to_name
+            .get(&id)
+            .map(|s| s.as_str())
+            .unwrap_or_else(|| panic!("Unknown biome id: {id}"))
     }
 }
 
@@ -110,10 +152,10 @@ mod tests {
     }
 
     #[test]
-    fn biome_registry_get() {
+    fn biome_registry_insert_and_get() {
         let mut reg = BiomeRegistry::default();
-        reg.biomes.insert(
-            "meadow".into(),
+        let id = reg.insert(
+            "meadow",
             BiomeDef {
                 id: "meadow".into(),
                 surface_block: TileId(1),
@@ -124,21 +166,61 @@ mod tests {
                 parallax_path: Some("biomes/meadow/parallax.ron".into()),
             },
         );
-        let def = reg.get("meadow");
+        let def = reg.get(id);
         assert_eq!(def.id, "meadow");
         assert_eq!(def.surface_block, TileId(1));
+        assert_eq!(reg.id_by_name("meadow"), id);
+        assert_eq!(reg.name_of(id), "meadow");
+    }
+
+    #[test]
+    fn biome_registry_insert_updates_existing() {
+        let mut reg = BiomeRegistry::default();
+        let id1 = reg.insert(
+            "meadow",
+            BiomeDef {
+                id: "meadow".into(),
+                surface_block: TileId(1),
+                subsurface_block: TileId(2),
+                subsurface_depth: 4,
+                fill_block: TileId(3),
+                cave_threshold: 0.3,
+                parallax_path: None,
+            },
+        );
+        let id2 = reg.insert(
+            "meadow",
+            BiomeDef {
+                id: "meadow".into(),
+                surface_block: TileId(10),
+                subsurface_block: TileId(2),
+                subsurface_depth: 4,
+                fill_block: TileId(3),
+                cave_threshold: 0.3,
+                parallax_path: None,
+            },
+        );
+        assert_eq!(id1, id2, "re-insert must return same BiomeId");
+        assert_eq!(reg.get(id1).surface_block, TileId(10));
     }
 
     #[test]
     fn biome_registry_get_opt_none() {
         let reg = BiomeRegistry::default();
-        assert!(reg.get_opt("missing").is_none());
+        assert!(reg.get_opt(BiomeId(999)).is_none());
     }
 
     #[test]
-    #[should_panic(expected = "Unknown biome: missing")]
+    #[should_panic(expected = "Unknown biome: BiomeId(999)")]
     fn biome_registry_get_panics() {
         let reg = BiomeRegistry::default();
-        reg.get("missing");
+        reg.get(BiomeId(999));
+    }
+
+    #[test]
+    #[should_panic(expected = "Unknown biome name: missing")]
+    fn biome_registry_id_by_name_panics() {
+        let reg = BiomeRegistry::default();
+        reg.id_by_name("missing");
     }
 }

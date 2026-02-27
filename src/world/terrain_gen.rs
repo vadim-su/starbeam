@@ -43,28 +43,34 @@ pub fn generate_tile(seed: u32, tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> 
 
     // Get biome for this position
     let biome_id = match layer {
-        WorldLayer::Surface => biome_map.biome_at(tile_x as u32).to_string(),
-        WorldLayer::Underground => planet_config
-            .layers
-            .underground
-            .primary_biome
-            .clone()
-            .unwrap_or_else(|| "underground_dirt".to_string()),
-        WorldLayer::DeepUnderground => planet_config
-            .layers
-            .deep_underground
-            .primary_biome
-            .clone()
-            .unwrap_or_else(|| "underground_rock".to_string()),
-        WorldLayer::Core => planet_config
-            .layers
-            .core
-            .primary_biome
-            .clone()
-            .unwrap_or_else(|| "core_magma".to_string()),
+        WorldLayer::Surface => biome_map.biome_at(tile_x as u32),
+        WorldLayer::Underground => biome_registry.id_by_name(
+            planet_config
+                .layers
+                .underground
+                .primary_biome
+                .as_deref()
+                .unwrap_or("underground_dirt"),
+        ),
+        WorldLayer::DeepUnderground => biome_registry.id_by_name(
+            planet_config
+                .layers
+                .deep_underground
+                .primary_biome
+                .as_deref()
+                .unwrap_or("underground_rock"),
+        ),
+        WorldLayer::Core => biome_registry.id_by_name(
+            planet_config
+                .layers
+                .core
+                .primary_biome
+                .as_deref()
+                .unwrap_or("core_magma"),
+        ),
     };
 
-    let biome = biome_registry.get(&biome_id);
+    let biome = biome_registry.get(biome_id);
 
     // Surface height (using surface layer params)
     let surface_y = surface_height(
@@ -82,8 +88,7 @@ pub fn generate_tile(seed: u32, tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> 
 
     // Surface/subsurface blocks: always use the surface biome regardless of
     // vertical layer, since the surface height can straddle layer boundaries.
-    let surface_biome_id = biome_map.biome_at(tile_x as u32);
-    let surface_biome = biome_registry.get(surface_biome_id);
+    let surface_biome = biome_registry.get(biome_map.biome_at(tile_x as u32));
     if tile_y == surface_y {
         return surface_biome.surface_block;
     }
@@ -204,8 +209,7 @@ mod tests {
             pc.layers.surface.terrain_amplitude,
         );
         let tile = generate_tile(TEST_SEED, 500, h, &ctx);
-        let biome_id = bm.biome_at(500);
-        let biome = br.get(biome_id);
+        let biome = br.get(bm.biome_at(500));
         assert_eq!(tile, biome.surface_block);
     }
 
@@ -220,8 +224,7 @@ mod tests {
             pc.layers.surface.terrain_frequency,
             pc.layers.surface.terrain_amplitude,
         );
-        let biome_id = bm.biome_at(500);
-        let biome = br.get(biome_id);
+        let biome = br.get(bm.biome_at(500));
         assert_eq!(
             generate_tile(TEST_SEED, 500, h - 1, &ctx),
             biome.subsurface_block

@@ -1,9 +1,11 @@
 use bevy::prelude::*;
 
+use crate::registry::biome::BiomeId;
+
 /// Marker component for a parallax layer entity.
 #[derive(Component)]
 pub struct ParallaxLayer {
-    pub biome_id: String,
+    pub biome_id: BiomeId,
     pub speed_x: f32,
     pub speed_y: f32,
     pub repeat_x: bool,

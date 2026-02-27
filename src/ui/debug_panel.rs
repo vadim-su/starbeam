@@ -5,6 +5,7 @@ use bevy_egui::{egui, EguiContexts};
 
 use crate::parallax::transition::CurrentBiome;
 use crate::player::{Grounded, Player, Velocity};
+use crate::registry::biome::BiomeRegistry;
 use crate::registry::tile::TileId;
 use crate::registry::tile::TileRegistry;
 use crate::registry::world::WorldConfig;
@@ -43,6 +44,7 @@ pub fn draw_debug_panel(
     diagnostics: Res<DiagnosticsStore>,
     entities: Query<Entity>,
     // Parallax
+    biome_registry: Res<BiomeRegistry>,
     biome_parallax: Option<Res<BiomeParallaxConfigs>>,
     current_biome: Option<Res<CurrentBiome>>,
 ) -> Result {
@@ -261,7 +263,8 @@ pub fn draw_debug_panel(
                 egui::CollapsingHeader::new(egui::RichText::new("Parallax").strong())
                     .default_open(false)
                     .show(ui, |ui| {
-                        ui.label(format!("Biome: {}", current_biome.biome_id));
+                        let biome_name = biome_registry.name_of(current_biome.biome_id);
+                        ui.label(format!("Biome: {}", biome_name));
                         if let Some(config) = biome_parallax.configs.get(&current_biome.biome_id) {
                             ui.label(format!("{} layers", config.layers.len()));
                             for (i, layer_def) in config.layers.iter().enumerate() {

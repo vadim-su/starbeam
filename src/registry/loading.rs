@@ -8,7 +8,7 @@ use super::assets::{
     AutotileAsset, BiomeAsset, ParallaxConfigAsset, PlanetTypeAsset, PlayerDefAsset,
     TileRegistryAsset, WorldConfigAsset,
 };
-use super::biome::{BiomeDef, BiomeRegistry, LayerConfig, LayerConfigs, PlanetConfig};
+use super::biome::{BiomeDef, BiomeId, BiomeRegistry, LayerConfig, LayerConfigs, PlanetConfig};
 use super::hot_reload::BiomeHandles;
 use super::player::PlayerConfig;
 use super::tile::TileRegistry;
@@ -272,10 +272,10 @@ pub(crate) fn check_biomes_loaded(
 
     // --- Build BiomeRegistry ---
     let mut biome_registry = BiomeRegistry::default();
-    for (id, handle) in &loading.biomes {
+    for (name, handle) in &loading.biomes {
         let asset = biome_assets.get(handle).unwrap();
-        biome_registry.biomes.insert(
-            id.clone(),
+        biome_registry.insert(
+            name,
             BiomeDef {
                 id: asset.id.clone(),
                 surface_block: tile_registry.by_name(&asset.surface_block),
@@ -302,32 +302,44 @@ pub(crate) fn check_biomes_loaded(
         planet_config.region_width_min,
         planet_config.region_width_max,
         planet_config.primary_region_ratio,
+        &biome_registry,
     );
     let region_count = biome_map.regions.len();
 
     // --- Build BiomeParallaxConfigs ---
     let mut biome_parallax = BiomeParallaxConfigs::default();
-    for (biome_id, handle) in &loading.parallax_configs {
+    for (biome_name, handle) in &loading.parallax_configs {
         let asset = parallax_assets.get(handle).unwrap();
+        let id = biome_registry.id_by_name(biome_name);
         biome_parallax.configs.insert(
-            biome_id.clone(),
+            id,
             ParallaxConfig {
                 layers: asset.layers.clone(),
             },
         );
     }
 
+    // Build biome handles before moving biome_registry (resolve names to BiomeId)
+    let biome_handles: Vec<(BiomeId, Handle<BiomeAsset>)> = loading
+        .biomes
+        .iter()
+        .map(|(name, handle)| (biome_registry.id_by_name(name), handle.clone()))
+        .collect();
+    let parallax_handles: Vec<(BiomeId, Handle<ParallaxConfigAsset>)> = loading
+        .parallax_configs
+        .iter()
+        .map(|(name, handle)| (biome_registry.id_by_name(name), handle.clone()))
+        .collect();
+
     // Insert all resources
     commands.insert_resource(planet_config);
     commands.insert_resource(biome_registry);
     commands.insert_resource(biome_map);
     commands.insert_resource(biome_parallax);
-
-    // Keep biome handles alive for hot-reload
     commands.insert_resource(BiomeHandles {
         planet_type: loading.planet_type.clone(),
-        biomes: loading.biomes.clone(),
-        parallax_configs: loading.parallax_configs.clone(),
+        biomes: biome_handles,
+        parallax_configs: parallax_handles,
     });
 
     commands.remove_resource::<LoadingBiomeAssets>();
