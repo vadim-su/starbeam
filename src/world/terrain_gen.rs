@@ -1,3 +1,4 @@
+use bevy::prelude::*;
 use noise::{NoiseFn, Perlin};
 
 use crate::registry::biome::WorldLayer;
@@ -7,14 +8,30 @@ use crate::world::ctx::WorldCtxRef;
 
 const SURFACE_BASE: f64 = 0.7;
 
+/// Cached Perlin noise instances to avoid per-tile allocation.
+#[derive(Resource)]
+pub struct TerrainNoiseCache {
+    pub surface: Perlin,
+    pub cave: Perlin,
+}
+
+impl TerrainNoiseCache {
+    pub fn new(seed: u32) -> Self {
+        Self {
+            surface: Perlin::new(seed),
+            cave: Perlin::new(seed.wrapping_add(1)),
+        }
+    }
+}
+
 pub fn surface_height(
-    seed: u32,
+    noise: &TerrainNoiseCache,
     tile_x: i32,
     wc: &WorldConfig,
     frequency: f64,
     amplitude: f64,
 ) -> i32 {
-    let perlin = Perlin::new(seed);
+    let perlin = &noise.surface;
     let base = SURFACE_BASE * wc.height_tiles as f64;
 
     let angle = tile_x as f64 / wc.width_tiles as f64 * 2.0 * std::f64::consts::PI;
@@ -26,7 +43,7 @@ pub fn surface_height(
     (base + noise_val * amplitude) as i32
 }
 
-pub fn generate_tile(seed: u32, tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> TileId {
+pub fn generate_tile(tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> TileId {
     let wc = ctx.config;
     let biome_map = ctx.biome_map;
     let biome_registry = ctx.biome_registry;
@@ -74,7 +91,7 @@ pub fn generate_tile(seed: u32, tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> 
 
     // Surface height (using surface layer params)
     let surface_y = surface_height(
-        seed,
+        ctx.noise_cache,
         tile_x,
         wc,
         planet_config.layers.surface.terrain_frequency,
@@ -97,7 +114,7 @@ pub fn generate_tile(seed: u32, tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> 
     }
 
     // Cave generation using layer-specific frequency
-    let cave_perlin = Perlin::new(seed.wrapping_add(1));
+    let cave_perlin = &ctx.noise_cache.cave;
     let layer_freq = match layer {
         WorldLayer::Surface => planet_config.layers.surface.terrain_frequency,
         WorldLayer::Underground => planet_config.layers.underground.terrain_frequency,
@@ -118,12 +135,7 @@ pub fn generate_tile(seed: u32, tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> 
     }
 }
 
-pub fn generate_chunk_tiles(
-    seed: u32,
-    chunk_x: i32,
-    chunk_y: i32,
-    ctx: &WorldCtxRef,
-) -> Vec<TileId> {
+pub fn generate_chunk_tiles(chunk_x: i32, chunk_y: i32, ctx: &WorldCtxRef) -> Vec<TileId> {
     let chunk_size = ctx.config.chunk_size;
     let base_x = chunk_x * chunk_size as i32;
     let base_y = chunk_y * chunk_size as i32;
@@ -131,7 +143,7 @@ pub fn generate_chunk_tiles(
 
     for local_y in 0..chunk_size as i32 {
         for local_x in 0..chunk_size as i32 {
-            tiles.push(generate_tile(seed, base_x + local_x, base_y + local_y, ctx));
+            tiles.push(generate_tile(base_x + local_x, base_y + local_y, ctx));
         }
     }
 
@@ -149,15 +161,16 @@ mod tests {
     fn surface_height_is_deterministic() {
         let wc = fixtures::test_world_config();
         let pc = fixtures::test_planet_config();
+        let cache = TerrainNoiseCache::new(TEST_SEED);
         let h1 = surface_height(
-            TEST_SEED,
+            &cache,
             100,
             &wc,
             pc.layers.surface.terrain_frequency,
             pc.layers.surface.terrain_amplitude,
         );
         let h2 = surface_height(
-            TEST_SEED,
+            &cache,
             100,
             &wc,
             pc.layers.surface.terrain_frequency,
@@ -170,9 +183,10 @@ mod tests {
     fn surface_height_is_within_bounds() {
         let wc = fixtures::test_world_config();
         let pc = fixtures::test_planet_config();
+        let cache = TerrainNoiseCache::new(TEST_SEED);
         for x in 0..wc.width_tiles {
             let h = surface_height(
-                TEST_SEED,
+                &cache,
                 x,
                 &wc,
                 pc.layers.surface.terrain_frequency,
@@ -184,93 +198,87 @@ mod tests {
 
     #[test]
     fn above_surface_is_air() {
-        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
-        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
         let h = surface_height(
-            TEST_SEED,
+            &nc,
             500,
             &wc,
             pc.layers.surface.terrain_frequency,
             pc.layers.surface.terrain_amplitude,
         );
-        assert_eq!(generate_tile(TEST_SEED, 500, h + 1, &ctx), TileId::AIR);
-        assert_eq!(generate_tile(TEST_SEED, 500, h + 10, &ctx), TileId::AIR);
+        assert_eq!(generate_tile(500, h + 1, &ctx), TileId::AIR);
+        assert_eq!(generate_tile(500, h + 10, &ctx), TileId::AIR);
     }
 
     #[test]
     fn surface_is_biome_surface_block() {
-        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
-        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
         let h = surface_height(
-            TEST_SEED,
+            &nc,
             500,
             &wc,
             pc.layers.surface.terrain_frequency,
             pc.layers.surface.terrain_amplitude,
         );
-        let tile = generate_tile(TEST_SEED, 500, h, &ctx);
+        let tile = generate_tile(500, h, &ctx);
         let biome = br.get(bm.biome_at(500));
         assert_eq!(tile, biome.surface_block);
     }
 
     #[test]
     fn below_surface_is_subsurface_then_fill_or_air() {
-        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
-        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
         let h = surface_height(
-            TEST_SEED,
+            &nc,
             500,
             &wc,
             pc.layers.surface.terrain_frequency,
             pc.layers.surface.terrain_amplitude,
         );
         let biome = br.get(bm.biome_at(500));
-        assert_eq!(
-            generate_tile(TEST_SEED, 500, h - 1, &ctx),
-            biome.subsurface_block
-        );
-        let deep_tile = generate_tile(TEST_SEED, 500, 10, &ctx);
+        assert_eq!(generate_tile(500, h - 1, &ctx), biome.subsurface_block);
+        let deep_tile = generate_tile(500, 10, &ctx);
         assert!(deep_tile == TileId(3) || deep_tile == TileId::AIR);
     }
 
     #[test]
     fn chunk_generation_has_correct_size() {
-        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
-        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
-        let tiles = generate_chunk_tiles(TEST_SEED, 0, 0, &ctx);
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
+        let tiles = generate_chunk_tiles(0, 0, &ctx);
         assert_eq!(tiles.len(), (wc.chunk_size * wc.chunk_size) as usize);
     }
 
     #[test]
     fn chunk_generation_is_deterministic() {
-        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
-        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
-        let tiles1 = generate_chunk_tiles(TEST_SEED, 5, 10, &ctx);
-        let tiles2 = generate_chunk_tiles(TEST_SEED, 5, 10, &ctx);
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
+        let tiles1 = generate_chunk_tiles(5, 10, &ctx);
+        let tiles2 = generate_chunk_tiles(5, 10, &ctx);
         assert_eq!(tiles1, tiles2);
     }
 
     #[test]
     fn out_of_bounds_y_is_air() {
-        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
-        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
-        assert_eq!(generate_tile(TEST_SEED, 500, -1, &ctx), TileId::AIR);
-        assert_eq!(
-            generate_tile(TEST_SEED, 500, wc.height_tiles, &ctx),
-            TileId::AIR
-        );
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
+        assert_eq!(generate_tile(500, -1, &ctx), TileId::AIR);
+        assert_eq!(generate_tile(500, wc.height_tiles, &ctx), TileId::AIR);
     }
 
     #[test]
     fn x_wraps_around() {
-        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
-        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
-        let t1 = generate_tile(TEST_SEED, -1, 500, &ctx);
-        let t2 = generate_tile(TEST_SEED, wc.width_tiles - 1, 500, &ctx);
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
+        let t1 = generate_tile(-1, 500, &ctx);
+        let t2 = generate_tile(wc.width_tiles - 1, 500, &ctx);
         assert_eq!(t1, t2);
 
-        let t3 = generate_tile(TEST_SEED, wc.width_tiles, 500, &ctx);
-        let t4 = generate_tile(TEST_SEED, 0, 500, &ctx);
+        let t3 = generate_tile(wc.width_tiles, 500, &ctx);
+        let t4 = generate_tile(0, 500, &ctx);
         assert_eq!(t3, t4);
     }
 
@@ -278,14 +286,15 @@ mod tests {
     fn surface_height_wraps_seamlessly() {
         let wc = fixtures::test_world_config();
         let pc = fixtures::test_planet_config();
+        let cache = TerrainNoiseCache::new(TEST_SEED);
         let freq = pc.layers.surface.terrain_frequency;
         let amp = pc.layers.surface.terrain_amplitude;
-        let h0 = surface_height(TEST_SEED, 0, &wc, freq, amp);
-        let h_wrap = surface_height(TEST_SEED, wc.width_tiles, &wc, freq, amp);
+        let h0 = surface_height(&cache, 0, &wc, freq, amp);
+        let h_wrap = surface_height(&cache, wc.width_tiles, &wc, freq, amp);
         assert_eq!(h0, h_wrap);
 
-        let h_neg = surface_height(TEST_SEED, -1, &wc, freq, amp);
-        let h_pos = surface_height(TEST_SEED, wc.width_tiles - 1, &wc, freq, amp);
+        let h_neg = surface_height(&cache, -1, &wc, freq, amp);
+        let h_pos = surface_height(&cache, wc.width_tiles - 1, &wc, freq, amp);
         assert_eq!(h_neg, h_pos);
     }
 }

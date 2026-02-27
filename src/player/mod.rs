@@ -11,6 +11,7 @@ use crate::registry::world::WorldConfig;
 use crate::registry::AppState;
 use crate::sets::GameSet;
 use crate::world::terrain_gen;
+use crate::world::terrain_gen::TerrainNoiseCache;
 
 use animation::{AnimationKind, AnimationState, CharacterAnimations};
 
@@ -56,11 +57,12 @@ fn spawn_player(
     player_config: Res<PlayerConfig>,
     world_config: Res<WorldConfig>,
     planet_config: Res<PlanetConfig>,
+    noise_cache: Res<TerrainNoiseCache>,
     animations: Res<CharacterAnimations>,
 ) {
     let spawn_tile_x = 0;
     let surface_y = terrain_gen::surface_height(
-        world_config.seed,
+        &noise_cache,
         spawn_tile_x,
         &world_config,
         planet_config.layers.surface.terrain_frequency,

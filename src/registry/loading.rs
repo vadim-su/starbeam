@@ -19,6 +19,7 @@ use crate::parallax::config::ParallaxConfig;
 use crate::world::atlas::{build_combined_atlas, AtlasParams, TileAtlas};
 use crate::world::autotile::{AutotileEntry, AutotileRegistry};
 use crate::world::biome_map::BiomeMap;
+use crate::world::terrain_gen::TerrainNoiseCache;
 use crate::world::tile_renderer::{SharedTileMaterial, TileMaterial};
 
 /// Handles for assets being loaded.
@@ -91,6 +92,7 @@ pub(crate) fn check_loading(
         seed: world_cfg.seed,
         planet_type: world_cfg.planet_type.clone(),
     });
+    commands.insert_resource(TerrainNoiseCache::new(world_cfg.seed));
 
     // Keep handles alive for hot-reload
     commands.insert_resource(RegistryHandles {

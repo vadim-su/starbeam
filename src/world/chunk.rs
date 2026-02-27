@@ -68,7 +68,7 @@ impl WorldMap {
         ctx: &WorldCtxRef,
     ) -> &ChunkData {
         self.chunks.entry((chunk_x, chunk_y)).or_insert_with(|| {
-            let tiles = terrain_gen::generate_chunk_tiles(ctx.config.seed, chunk_x, chunk_y, ctx);
+            let tiles = terrain_gen::generate_chunk_tiles(chunk_x, chunk_y, ctx);
             let len = tiles.len();
             ChunkData {
                 tiles,
@@ -462,8 +462,8 @@ mod tests {
 
     #[test]
     fn worldmap_get_tile_mut_deterministic() {
-        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
-        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
         let mut map = WorldMap::default();
         let t1 = map.get_tile_mut(100, 500, &ctx);
         let t2 = map.get_tile_mut(100, 500, &ctx);
@@ -472,16 +472,16 @@ mod tests {
 
     #[test]
     fn worldmap_get_tile_returns_none_for_unloaded() {
-        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
-        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
         let map = WorldMap::default();
         assert_eq!(map.get_tile(100, 500, &ctx), None);
     }
 
     #[test]
     fn worldmap_get_tile_returns_some_for_loaded() {
-        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
-        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
         let mut map = WorldMap::default();
         // Pre-generate the chunk via get_tile_mut
         let expected = map.get_tile_mut(100, 500, &ctx);
@@ -491,16 +491,16 @@ mod tests {
 
     #[test]
     fn worldmap_is_solid_returns_false_for_unloaded() {
-        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
-        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
         let map = WorldMap::default();
         assert!(!map.is_solid(100, 500, &ctx));
     }
 
     #[test]
     fn worldmap_set_tile() {
-        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
-        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
         let mut map = WorldMap::default();
         map.set_tile(100, 500, TileId::AIR, &ctx);
         assert_eq!(map.get_tile(100, 500, &ctx), Some(TileId::AIR));
@@ -508,8 +508,8 @@ mod tests {
 
     #[test]
     fn worldmap_y_out_of_bounds() {
-        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
-        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
         let map = WorldMap::default();
         assert_eq!(map.get_tile(0, wc.height_tiles, &ctx), Some(TileId::AIR));
         assert_eq!(map.get_tile(0, -1, &ctx), Some(tr.by_name("stone")));
@@ -517,8 +517,8 @@ mod tests {
 
     #[test]
     fn worldmap_x_wraps() {
-        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
-        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
         let mut map = WorldMap::default();
         // Use get_tile_mut to lazily generate chunks for wrap test
         let t1 = map.get_tile_mut(-1, 500, &ctx);
@@ -532,8 +532,8 @@ mod tests {
 
     #[test]
     fn worldmap_set_tile_wraps() {
-        let (wc, bm, br, tr, pc) = fixtures::test_world_ctx();
-        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc);
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
         let mut map = WorldMap::default();
         map.set_tile(-1, 500, TileId::AIR, &ctx);
         assert_eq!(

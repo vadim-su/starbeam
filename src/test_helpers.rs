@@ -6,6 +6,7 @@ pub mod fixtures {
     use crate::registry::world::WorldConfig;
     use crate::world::biome_map::BiomeMap;
     use crate::world::ctx::WorldCtxRef;
+    use crate::world::terrain_gen::TerrainNoiseCache;
 
     pub fn test_world_config() -> WorldConfig {
         WorldConfig {
@@ -136,6 +137,10 @@ pub mod fixtures {
         }
     }
 
+    pub fn test_noise_cache() -> TerrainNoiseCache {
+        TerrainNoiseCache::new(42)
+    }
+
     /// Returns all resources needed to construct a `WorldCtxRef` for tests.
     pub fn test_world_ctx() -> (
         WorldConfig,
@@ -143,6 +148,7 @@ pub mod fixtures {
         BiomeRegistry,
         TileRegistry,
         PlanetConfig,
+        TerrainNoiseCache,
     ) {
         let br = test_biome_registry();
         let bm = test_biome_map(&br);
@@ -152,6 +158,7 @@ pub mod fixtures {
             br,
             test_tile_registry(),
             test_planet_config(),
+            test_noise_cache(),
         )
     }
 
@@ -162,6 +169,7 @@ pub mod fixtures {
         br: &'a BiomeRegistry,
         tr: &'a TileRegistry,
         pc: &'a PlanetConfig,
+        nc: &'a TerrainNoiseCache,
     ) -> WorldCtxRef<'a> {
         WorldCtxRef {
             config: wc,
@@ -169,6 +177,7 @@ pub mod fixtures {
             biome_registry: br,
             tile_registry: tr,
             planet_config: pc,
+            noise_cache: nc,
         }
     }
 }

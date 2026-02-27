@@ -5,6 +5,7 @@ use crate::registry::biome::{BiomeRegistry, PlanetConfig};
 use crate::registry::tile::TileRegistry;
 use crate::registry::world::WorldConfig;
 use crate::world::biome_map::BiomeMap;
+use crate::world::terrain_gen::TerrainNoiseCache;
 
 /// Bevy SystemParam bundling the 5 read-only world resources that most
 /// world-related systems need. Use `as_ref()` to obtain a lightweight
@@ -16,6 +17,7 @@ pub struct WorldCtx<'w> {
     pub biome_registry: Res<'w, BiomeRegistry>,
     pub tile_registry: Res<'w, TileRegistry>,
     pub planet_config: Res<'w, PlanetConfig>,
+    pub noise_cache: Res<'w, TerrainNoiseCache>,
 }
 
 impl WorldCtx<'_> {
@@ -27,6 +29,7 @@ impl WorldCtx<'_> {
             biome_registry: &self.biome_registry,
             tile_registry: &self.tile_registry,
             planet_config: &self.planet_config,
+            noise_cache: &self.noise_cache,
         }
     }
 }
@@ -39,4 +42,5 @@ pub struct WorldCtxRef<'a> {
     pub biome_registry: &'a BiomeRegistry,
     pub tile_registry: &'a TileRegistry,
     pub planet_config: &'a PlanetConfig,
+    pub noise_cache: &'a TerrainNoiseCache,
 }

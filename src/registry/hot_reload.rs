@@ -16,6 +16,7 @@ use super::{BiomeParallaxConfigs, RegistryHandles};
 
 use crate::parallax::config::ParallaxConfig;
 use crate::world::biome_map::BiomeMap;
+use crate::world::terrain_gen::TerrainNoiseCache;
 
 /// Keeps biome-related asset handles alive for hot-reload detection.
 #[derive(Resource)]
@@ -54,6 +55,7 @@ pub(crate) fn hot_reload_world(
     handles: Res<RegistryHandles>,
     assets: Res<Assets<WorldConfigAsset>>,
     mut config: ResMut<WorldConfig>,
+    mut noise_cache: ResMut<TerrainNoiseCache>,
 ) {
     for event in events.read() {
         if let AssetEvent::Modified { id } = event
@@ -67,7 +69,8 @@ pub(crate) fn hot_reload_world(
             config.chunk_load_radius = asset.chunk_load_radius;
             config.seed = asset.seed;
             config.planet_type = asset.planet_type.clone();
-            info!("Hot-reloaded WorldConfig");
+            *noise_cache = TerrainNoiseCache::new(asset.seed);
+            info!("Hot-reloaded WorldConfig + TerrainNoiseCache");
         }
     }
 }
