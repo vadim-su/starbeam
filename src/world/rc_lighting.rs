@@ -40,7 +40,7 @@ impl Default for RcLightingConfig {
             viewport_offset: UVec2::ZERO,
             tile_size: 32.0,
             cascade_count: 1,
-            bounce_damping: 0.5,
+            bounce_damping: 0.4,
         }
     }
 }

@@ -11,6 +11,7 @@ use crate::registry::tile::TileRegistry;
 use crate::registry::world::WorldConfig;
 use crate::registry::BiomeParallaxConfigs;
 use crate::world::chunk::{tile_to_chunk, tile_to_local, world_to_tile, LoadedChunks, WorldMap};
+use crate::world::rc_lighting::RcLightingConfig;
 
 /// Tracks debug panel visibility.
 #[derive(Resource, Default)]
@@ -43,6 +44,8 @@ pub fn draw_debug_panel(
     // Performance
     diagnostics: Res<DiagnosticsStore>,
     entities: Query<Entity>,
+    // Lighting
+    mut rc_config: ResMut<RcLightingConfig>,
     // Parallax
     biome_registry: Res<BiomeRegistry>,
     biome_parallax: Option<Res<BiomeParallaxConfigs>>,
@@ -255,6 +258,44 @@ pub fn draw_debug_panel(
                             ui.label(format!("{}", loaded_chunks.map.len()));
                             ui.end_row();
                         });
+                });
+
+            // --- Lighting (RC) ---
+            egui::CollapsingHeader::new(egui::RichText::new("Lighting").strong())
+                .default_open(false)
+                .show(ui, |ui| {
+                    egui::Grid::new("lighting_grid")
+                        .num_columns(2)
+                        .spacing([20.0, 4.0])
+                        .show(ui, |ui| {
+                            ui.label("Input size:");
+                            ui.monospace(format!(
+                                "{} × {}",
+                                rc_config.input_size.x, rc_config.input_size.y
+                            ));
+                            ui.end_row();
+
+                            ui.label("Viewport:");
+                            ui.monospace(format!(
+                                "{} × {} tiles",
+                                rc_config.viewport_size.x, rc_config.viewport_size.y
+                            ));
+                            ui.end_row();
+
+                            ui.label("Cascades:");
+                            ui.monospace(format!("{}", rc_config.cascade_count));
+                            ui.end_row();
+
+                            ui.label("Tile size:");
+                            ui.monospace(format!("{}px", rc_config.tile_size));
+                            ui.end_row();
+                        });
+
+                    ui.separator();
+                    ui.label("Bounce damping:");
+                    ui.add(
+                        egui::Slider::new(&mut rc_config.bounce_damping, 0.0..=1.0).step_by(0.05),
+                    );
                 });
 
             // --- Parallax ---
