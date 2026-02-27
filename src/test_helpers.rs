@@ -1,10 +1,14 @@
 pub mod fixtures {
+    use bevy::prelude::*;
+
     use crate::registry::biome::{
         BiomeDef, BiomeRegistry, LayerBoundaries, LayerConfig, LayerConfigs, PlanetConfig,
     };
+    use crate::registry::player::PlayerConfig;
     use crate::registry::tile::{TileDef, TileId, TileRegistry};
     use crate::registry::world::WorldConfig;
     use crate::world::biome_map::BiomeMap;
+    use crate::world::chunk::WorldMap;
     use crate::world::ctx::WorldCtxRef;
     use crate::world::terrain_gen::TerrainNoiseCache;
 
@@ -186,5 +190,33 @@ pub mod fixtures {
             planet_config: pc,
             noise_cache: nc,
         }
+    }
+
+    pub fn test_player_config() -> PlayerConfig {
+        PlayerConfig {
+            speed: 200.0,
+            jump_velocity: 500.0,
+            gravity: 980.0,
+            width: 24.0,
+            height: 40.0,
+        }
+    }
+
+    /// Create a minimal Bevy App with all world resources for system tests.
+    pub fn test_app() -> App {
+        let br = test_biome_registry();
+        let bm = test_biome_map(&br);
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(test_world_config());
+        app.insert_resource(bm);
+        app.insert_resource(br);
+        app.insert_resource(test_tile_registry());
+        app.insert_resource(test_planet_config());
+        app.insert_resource(test_noise_cache());
+        app.insert_resource(test_player_config());
+        app.init_resource::<WorldMap>();
+        app
     }
 }
