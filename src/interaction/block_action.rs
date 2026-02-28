@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
-use crate::item::{calculate_drops, DroppedItem, DroppedItemPhysics, SpawnParams};
+use crate::inventory::{Hotbar, Inventory};
+use crate::item::{calculate_drops, DroppedItem, DroppedItemPhysics, ItemRegistry, SpawnParams};
 use crate::player::Player;
 use crate::registry::tile::TileId;
 use crate::world::chunk::{
@@ -17,10 +18,11 @@ pub fn block_interaction_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
-    player_query: Query<&Transform, With<Player>>,
+    mut player_query: Query<(&Transform, &Hotbar, &mut Inventory), With<Player>>,
     ctx: WorldCtx,
     mut world_map: ResMut<WorldMap>,
     loaded_chunks: Res<LoadedChunks>,
+    item_registry: Res<ItemRegistry>,
 ) {
     let left_click = mouse.just_pressed(MouseButton::Left);
     let right_click = mouse.just_pressed(MouseButton::Right);
@@ -32,7 +34,7 @@ pub fn block_interaction_system(
     let Ok((camera, camera_gt)) = camera_query.single() else {
         return;
     };
-    let Ok(player_tf) = player_query.single() else {
+    let Ok((player_tf, hotbar, mut inventory)) = player_query.single_mut() else {
         return;
     };
 
@@ -88,7 +90,7 @@ pub fn block_interaction_system(
                 ));
             }
         } else {
-            // Place fg tile — must be adjacent to an existing solid tile (fg or bg)
+            // Place fg tile from left hand of active hotbar slot
             let has_neighbor = [(-1, 0), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
                 let nx = tile_x + dx;
                 let ny = tile_y + dy;
@@ -103,9 +105,18 @@ pub fn block_interaction_system(
                 return;
             }
 
-            // TODO: replace with player's selected block type from inventory
-            let place_id = ctx_ref.tile_registry.by_name("dirt");
+            let Some(item_id) = hotbar.slots[hotbar.active_slot].left_hand.as_deref() else {
+                return;
+            };
+            let Some(place_id) = resolve_placeable(item_id, &item_registry, &ctx_ref) else {
+                return;
+            };
+            if inventory.count_item(item_id) == 0 {
+                return;
+            }
+
             world_map.set_tile(tile_x, tile_y, Layer::Fg, place_id, &ctx_ref);
+            inventory.remove_item(item_id, 1);
         }
     } else if right_click {
         // Background layer interaction
@@ -139,7 +150,7 @@ pub fn block_interaction_system(
                 ));
             }
         } else {
-            // Place bg tile — must be adjacent to an existing tile (fg or bg)
+            // Place bg tile from right hand of active hotbar slot
             let has_neighbor = [(-1, 0), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
                 let nx = tile_x + dx;
                 let ny = tile_y + dy;
@@ -154,9 +165,18 @@ pub fn block_interaction_system(
                 return;
             }
 
-            // TODO: replace with player's selected block type from inventory
-            let place_id = ctx_ref.tile_registry.by_name("dirt");
+            let Some(item_id) = hotbar.slots[hotbar.active_slot].right_hand.as_deref() else {
+                return;
+            };
+            let Some(place_id) = resolve_placeable(item_id, &item_registry, &ctx_ref) else {
+                return;
+            };
+            if inventory.count_item(item_id) == 0 {
+                return;
+            }
+
             world_map.set_tile(tile_x, tile_y, Layer::Bg, place_id, &ctx_ref);
+            inventory.remove_item(item_id, 1);
         }
     } else {
         return;
@@ -177,4 +197,16 @@ pub fn block_interaction_system(
             }
         }
     }
+}
+
+/// Look up item_id → placeable tile name → TileId. Returns None if not placeable.
+fn resolve_placeable(
+    item_id: &str,
+    item_registry: &ItemRegistry,
+    ctx: &crate::world::ctx::WorldCtxRef<'_>,
+) -> Option<TileId> {
+    let item_def_id = item_registry.by_name(item_id);
+    let item_def = item_registry.get(item_def_id);
+    let tile_name = item_def.placeable.as_deref()?;
+    Some(ctx.tile_registry.by_name(tile_name))
 }
