@@ -5,7 +5,7 @@
 //! - Updating drag icon position during drag operations
 //! - Canceling drags and returning items to source slots
 
-use bevy::picking::events::{DragEnd, DragStart};
+use bevy::picking::events::{DragDrop, DragEnd, DragStart};
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -120,5 +120,141 @@ pub fn on_drag_end(
 ) {
     if let Some(drag) = drag_state.dragging.take() {
         commands.entity(drag.drag_icon).despawn();
+    }
+}
+
+/// Handle drop on target slot.
+ Canc the inventory data.
+pub fn handle_drop(
+    drag_state: ResMut<DragState>,
+    target_slot: SlotType,
+    mut inventory_query: Query<&mut Inventory, With<Player>>,
+    mut commands: Commands,
+) {
+    let Some(drag) = drag_state.dragging.take() else {
+        return;
+    }
+
+    // Same slot = cancel
+    if drag.source_slot == target_slot {
+        return;
+    }
+
+    // Remove from source
+    let Some(mut item) = removed else {
+        return; // Item was nowhere, shouldn continue
+    }
+
+    
+    // Add to target
+    match target_slot {
+        SlotType::MainBag(idx) => {
+            if let Some(target_slot_ref) = inventory.main_bag.get_mut(idx) {
+                if target_slot_ref.is_none() {
+                    *target_slot_ref = Some(item);
+                } else if let Some(ref target) = target_slot_ref {
+                    // Swap
+                    std::mem::swap(&mut item, target);
+                    // Return swapped item to source (simplified)
+                    return;
+                }
+            }
+        }
+        SlotType::MaterialBag(idx) => {
+            if let Some(target_slot_ref) = inventory.material_bag.get_mut(idx) {
+                if target_slot_ref.is_none() {
+                    *target_slot_ref = Some(item);
+                }
+            }
+        }
+    }
+}
+
+    let Ok(mut inventory) = inventory_query.single_mut() else {
+        return;
+    };
+
+    // Remove from source
+    let source_item = match drag.source_slot {
+        SlotType::MainBag(idx) => inventory.main_bag.get(idx).cloned(),
+        SlotType::MaterialBag(idx) => inventory.material_bag.get(idx).cloned(),
+        _ => None,
+    };
+
+    let Some(mut source_item) = source_item else {
+        return; // No item in source
+    };
+
+    // Add to target
+    match target_slot {
+        SlotType::MainBag(idx) => {
+            if let Some(target) = inventory.main_bag.get_mut(idx) {
+                if target.is_none() {
+                    *target = Some(source_item);
+                } else {
+                    // Swap
+                    std::mem::swap(&mut source_item, target);
+                }
+            }
+        }
+        SlotType::MaterialBag(idx) => {
+            if let Some(target) = inventory.material_bag.get_mut(idx) {
+                if target.is_none() {
+                    *target = Some(source_item);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+    let Ok(mut inventory) = inventory_query.single_mut() else {
+        return;
+    };
+
+    // Remove from source
+    let removed = match drag.source_slot {
+        SlotType::MainBag(idx) => {
+            if let Some(slot) = inventory.main_bag.get_mut(idx) {
+                slot.take()
+            } else {
+                None
+            }
+        }
+        SlotType::MaterialBag(idx) => {
+            if let Some(slot) = inventory.material_bag.get_mut(idx) {
+                slot.take()
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+
+    let Some(mut item) = removed else {
+        return;
+    };
+
+    // Add to target
+    match target_slot {
+        SlotType::MainBag(idx) => {
+            if let Some(target_slot_ref) = inventory.main_bag.get_mut(idx) {
+                if target_slot_ref.is_none() {
+                    *target_slot_ref = Some(item);
+                } else if let Some(ref target) = target_slot_ref {
+                    // Swap
+                    std::mem::swap(&mut item, target);
+                    // Return swapped item to source (simplified)
+                }
+            }
+        }
+        SlotType::MaterialBag(idx) => {
+            if let Some(target_slot_ref) = inventory.material_bag.get_mut(idx) {
+                if target_slot_ref.is_none() {
+                    *target_slot_ref = Some(item);
+                }
+            }
+        }
+        _ => {}
     }
 }

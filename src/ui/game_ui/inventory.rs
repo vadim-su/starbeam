@@ -2,11 +2,17 @@ use bevy::picking::prelude::*;
 use bevy::prelude::*;
 
 use super::components::*;
-use super::drag_drop::{on_bag_slot_drag_start, on_drag_end};
+use super::drag_drop::{handle_drop, on_bag_slot_drag_start, on_drag_end};
+ on_bag_slot_drag_start};
 use super::theme::UiTheme;
+use crate::inventory::Inventory;
+use crate::player::Player;
 
 /// Spawn the inventory screen (hidden by default).
-pub fn spawn_inventory_screen(commands: &mut Commands, theme: &UiTheme) {
+pub fn spawn_inventory_screen(
+    commands: &mut Commands,
+    theme: Res<UiTheme>,
+) {
     let config = &theme.inventory_screen;
     let colors = &theme.colors;
 
@@ -85,7 +91,16 @@ pub fn spawn_inventory_screen(commands: &mut Commands, theme: &UiTheme) {
                                 is_hoverable: true,
                             },
                         ));
-                    }
+                        .observe(|trigger: On<Pointer<Over>>, mut hovered: ResMut<HoveredSlot>, slot_query: Query<&UiSlot>| {
+                            if let Ok(slot) = slot_query.get(trigger.target()) {
+                                hovered.slot = Some(slot.slot_type);
+                            }
+                        }
+                        })
+                        .observe(|_trigger: On<Pointer<Out>>, mut hovered: ResMut<HoveredSlot>| {
+                            hovered.slot = None;
+                        }
+                    );
                 });
 
             // Right column: Bags
@@ -130,112 +145,92 @@ pub fn spawn_inventory_screen(commands: &mut Commands, theme: &UiTheme) {
                             ))
                             .with_children(|grid_parent| {
                                 for i in 0..(columns * rows) {
-                                    grid_parent
-                                        .spawn((
-                                            UiSlot {
-                                                slot_type: SlotType::MainBag(i),
-                                            },
-                                            Node {
-                                                width: Val::Px(slot_size),
-                                                height: Val::Px(slot_size),
-                                                border: UiRect::all(Val::Px(1.0)),
-                                                ..default()
-                                            },
-                                            BackgroundColor(Color::from(bg_medium.clone())),
-                                            BorderColor::all(Color::from(border_color.clone())),
-                                            Pickable {
-                                                should_block_lower: false,
-                                                is_hoverable: true,
-                                            },
-                                        ))
-                                        .observe(
-                                            |trigger: On<Pointer<Over>>,
-                                             mut hovered: ResMut<HoveredSlot>,
-                                             slot_query: Query<&UiSlot>| {
-                                                if let Ok(slot) = slot_query.get(trigger.event_target())
-                                                {
-                                                    hovered.slot = Some(slot.slot_type);
-                                                }
-                                            },
-                                        )
-                                        .observe(
-                                            |_trigger: On<Pointer<Out>>,
-                                             mut hovered: ResMut<HoveredSlot>| {
-                                                hovered.slot = None;
-                                            },
-                                        )
-                                        .observe(on_bag_slot_drag_start)
-                                        .observe(on_drag_end);
-                                }
-                            });
-                    }
+                                    let slot_size = slot_size;
+                                    let bg_medium_inner = bg_medium.clone();
+                                    let border_color = border_color.clone();
 
-                    // Material bag (16 slots)
-                    {
-                        let columns = mat_config.columns;
-                        let rows = mat_config.rows;
-                        let slot_size = mat_config.slot_size;
-                        let gap = mat_config.gap;
-                        let total_width = columns as f32 * slot_size + (columns - 1) as f32 * gap;
-                        let total_height = rows as f32 * slot_size + (rows - 1) as f32 * gap;
-                        let bg_medium = bag_colors.bg_medium.clone();
-                        let border_color = bag_colors.border.clone();
-
-                        bag_parent
-                            .spawn((
-                                Node {
-                                    width: Val::Px(total_width),
-                                    height: Val::Px(total_height),
-                                    display: Display::Grid,
-                                    grid_template_columns: vec![GridTrack::px(slot_size); columns],
-                                    grid_template_rows: vec![GridTrack::px(slot_size); rows],
-                                    column_gap: Val::Px(gap),
-                                    row_gap: Val::Px(gap),
-                                    ..default()
-                                },
-                                Pickable::IGNORE,
-                            ))
-                            .with_children(|grid_parent| {
-                                for i in 0..(columns * rows) {
-                                    grid_parent
-                                        .spawn((
-                                            UiSlot {
-                                                slot_type: SlotType::MaterialBag(i),
-                                            },
-                                            Node {
-                                                width: Val::Px(slot_size),
-                                                height: Val::Px(slot_size),
-                                                border: UiRect::all(Val::Px(1.0)),
-                                                ..default()
-                                            },
-                                            BackgroundColor(Color::from(bg_medium.clone())),
-                                            BorderColor::all(Color::from(border_color.clone())),
-                                            Pickable {
-                                                should_block_lower: false,
-                                                is_hoverable: true,
-                                            },
-                                        ))
-                                        .observe(
-                                            |trigger: On<Pointer<Over>>,
-                                             mut hovered: ResMut<HoveredSlot>,
-                                             slot_query: Query<&UiSlot>| {
-                                                if let Ok(slot) = slot_query.get(trigger.event_target())
-                                                {
-                                                    hovered.slot = Some(slot.slot_type);
-                                                }
-                                            },
-                                        )
-                                        .observe(
-                                            |_trigger: On<Pointer<Out>>,
-                                             mut hovered: ResMut<HoveredSlot>| {
-                                                hovered.slot = None;
-                                            },
-                                        )
-                                        .observe(on_bag_slot_drag_start)
-                                        .observe(on_drag_end);
-                                }
-                            });
+                                    grid_parent.spawn((
+                                        UiSlot {
+                                            slot_type: SlotType::MainBag(i),
+                                        },
+                                        Node {
+                                            width: Val::Px(slot_size),
+                                            height: Val::Px(slot_size),
+                                            border: UiRect::all(Val::Px(1.0)),
+                                            ..default()
+                                        },
+                                        BackgroundColor(Color::from(bg_medium)),
+                                        BorderColor::all(Color::from(border_color)),
+                                        Pickable {
+                                            should_block_lower: false,
+                                            is_hoverable: true,
+                                        },
+                                    ))
+                                    .observe(|trigger: On<Pointer<Over>>, mut hovered: ResMut<HoveredSlot>, slot_query: Query<&UiSlot>| {
+                                        if let Ok(slot) = slot_query.get(trigger.target()) {
+                                            hovered.slot = Some(slot.slot_type);
+                                        }
+                                    })
+                    )
+                    .observe(|_trigger: On<Pointer<Out>>, mut hovered: ResMut<HoveredSlot>| {
+                        hovered.slot = None;
                     }
-                });
-        });
+                );
+
+                // Material bag (16 slots)
+                {
+                    let columns = mat_config.columns;
+                    let rows = mat_config.rows;
+                    let slot_size = mat_config.slot_size;
+                    let gap = mat_config.gap;
+                    let total_width = columns as f32 * slot_size + (columns - 1) as f32 * gap;
+                    let total_height = rows as f32 * slot_size + (rows - 1) as f32 * gap;
+                    let bg_medium = bag_colors.bg_medium.clone();
+                    let border_color = bag_colors.border.clone();
+
+                    bag_parent
+                        .spawn((
+                            Node {
+                                width: Val::Px(total_width),
+                                height: Val::Px(total_height),
+                                display: Display::Grid,
+                                grid_template_columns: vec![GridTrack::px(slot_size); columns],
+                                grid_template_rows: vec![GridTrack::px(slot_size); rows],
+                                column_gap: Val::Px(gap),
+                                row_gap: Val::Px(gap),
+                                ..default()
+                            },
+                            Pickable::IGNORE,
+                        ))
+                        .with_children(|grid_parent| {
+                            for i in 0..(columns * rows) {
+                                let slot_size = slot_size;
+                                let bg_medium_inner = bg_medium.clone();
+                                let border_color = border_color.clone();
+
+                                grid_parent.spawn((
+                                    UiSlot {
+                                        slot_type: SlotType::MaterialBag(i),
+                                    },
+                                    Node {
+                                        width: Val::Px(slot_size),
+                                        height: Val::Px(slot_size),
+                                        border: UiRect::all(Val::Px(1.0)),
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::from(bg_medium)),
+                                    BorderColor::all(Color::from(border_color)),
+                                    Pickable {
+                                        should_block_lower: false,
+                                        is_hoverable: true,
+                                    },
+                                ))
+                                .observe(|trigger: On<Pointer<Over>>, mut hovered: ResMut<HoveredSlot>, slot_query: Query<&UiSlot>| {
+                                    if let Ok(slot) = slot_query.get(trigger.target()) {
+                                        hovered.slot = Some(slot.slot_type);
+                                    }
+                })
+            );
+        }
+    }
 }
