@@ -5,6 +5,7 @@ pub mod wrap;
 
 use bevy::prelude::*;
 
+use crate::inventory::Inventory;
 use crate::registry::biome::PlanetConfig;
 use crate::registry::player::PlayerConfig;
 use crate::registry::world::WorldConfig;
@@ -74,6 +75,7 @@ fn spawn_player(
 
     commands.spawn((
         Player,
+        Inventory::new(),
         Velocity::default(),
         Grounded(false),
         AnimationState {
