@@ -80,6 +80,18 @@ pub struct HoveredSlot {
 #[derive(Component)]
 pub struct SlotLabel;
 
+/// Marker for the item icon image inside a slot.
+#[derive(Component)]
+pub struct ItemIcon;
+
+/// Marker for the slot frame image.
+#[derive(Component)]
+pub struct SlotFrame;
+
+/// Marker for the item count text.
+#[derive(Component)]
+pub struct ItemCount;
+
 /// Inventory screen visibility state.
 #[derive(Resource, Default)]
 pub struct InventoryScreenState {
