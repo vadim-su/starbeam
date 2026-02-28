@@ -3,6 +3,7 @@ use serde::Deserialize;
 
 /// Parsed hex color wrapper for RON deserialization.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(transparent)]
 pub struct HexColor(pub String);
 
 impl From<HexColor> for Color {

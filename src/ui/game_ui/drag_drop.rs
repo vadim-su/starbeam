@@ -4,6 +4,7 @@
 //! - Spawning visual drag icons that follow the cursor
 //! - Updating drag icon position during drag operations
 //! - Canceling drags and returning items to source slots
+//! - Dropping items onto target slots (move/swap)
 
 use bevy::picking::events::{DragDrop, DragEnd, DragStart};
 use bevy::picking::prelude::*;
@@ -123,138 +124,76 @@ pub fn on_drag_end(
     }
 }
 
-/// Handle drop on target slot.
- Canc the inventory data.
+/// Handle drop onto a target slot — move or swap items between inventory slots.
 pub fn handle_drop(
-    drag_state: ResMut<DragState>,
-    target_slot: SlotType,
+    trigger: On<Pointer<DragDrop>>,
+    mut drag_state: ResMut<DragState>,
+    slot_query: Query<&UiSlot>,
     mut inventory_query: Query<&mut Inventory, With<Player>>,
     mut commands: Commands,
 ) {
+    let Ok(target) = slot_query.get(trigger.event_target()) else {
+        return;
+    };
+
     let Some(drag) = drag_state.dragging.take() else {
         return;
-    }
+    };
 
-    // Same slot = cancel
-    if drag.source_slot == target_slot {
+    // Despawn the drag icon
+    commands.entity(drag.drag_icon).despawn();
+
+    let target_type = target.slot_type;
+
+    // Same slot — no-op
+    if drag.source_slot == target_type {
         return;
     }
-
-    // Remove from source
-    let Some(mut item) = removed else {
-        return; // Item was nowhere, shouldn continue
-    }
-
-    
-    // Add to target
-    match target_slot {
-        SlotType::MainBag(idx) => {
-            if let Some(target_slot_ref) = inventory.main_bag.get_mut(idx) {
-                if target_slot_ref.is_none() {
-                    *target_slot_ref = Some(item);
-                } else if let Some(ref target) = target_slot_ref {
-                    // Swap
-                    std::mem::swap(&mut item, target);
-                    // Return swapped item to source (simplified)
-                    return;
-                }
-            }
-        }
-        SlotType::MaterialBag(idx) => {
-            if let Some(target_slot_ref) = inventory.material_bag.get_mut(idx) {
-                if target_slot_ref.is_none() {
-                    *target_slot_ref = Some(item);
-                }
-            }
-        }
-    }
-}
 
     let Ok(mut inventory) = inventory_query.single_mut() else {
         return;
     };
 
-    // Remove from source
+    // Remove item from source slot
     let source_item = match drag.source_slot {
-        SlotType::MainBag(idx) => inventory.main_bag.get(idx).cloned(),
-        SlotType::MaterialBag(idx) => inventory.material_bag.get(idx).cloned(),
+        SlotType::MainBag(idx) => inventory.main_bag.get_mut(idx).and_then(|s| s.take()),
+        SlotType::MaterialBag(idx) => inventory.material_bag.get_mut(idx).and_then(|s| s.take()),
         _ => None,
     };
 
-    let Some(mut source_item) = source_item else {
-        return; // No item in source
-    };
-
-    // Add to target
-    match target_slot {
-        SlotType::MainBag(idx) => {
-            if let Some(target) = inventory.main_bag.get_mut(idx) {
-                if target.is_none() {
-                    *target = Some(source_item);
-                } else {
-                    // Swap
-                    std::mem::swap(&mut source_item, target);
-                }
-            }
-        }
-        SlotType::MaterialBag(idx) => {
-            if let Some(target) = inventory.material_bag.get_mut(idx) {
-                if target.is_none() {
-                    *target = Some(source_item);
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-    let Ok(mut inventory) = inventory_query.single_mut() else {
+    let Some(source_item) = source_item else {
         return;
     };
 
-    // Remove from source
-    let removed = match drag.source_slot {
-        SlotType::MainBag(idx) => {
-            if let Some(slot) = inventory.main_bag.get_mut(idx) {
-                slot.take()
-            } else {
-                None
-            }
-        }
-        SlotType::MaterialBag(idx) => {
-            if let Some(slot) = inventory.material_bag.get_mut(idx) {
-                slot.take()
-            } else {
-                None
-            }
-        }
+    // Place in target, taking any existing item
+    let displaced = match target_type {
+        SlotType::MainBag(idx) => inventory.main_bag.get_mut(idx).and_then(|slot| {
+            let old = slot.take();
+            *slot = Some(source_item);
+            old
+        }),
+        SlotType::MaterialBag(idx) => inventory.material_bag.get_mut(idx).and_then(|slot| {
+            let old = slot.take();
+            *slot = Some(source_item);
+            old
+        }),
         _ => None,
     };
 
-    let Some(mut item) = removed else {
-        return;
-    };
-
-    // Add to target
-    match target_slot {
-        SlotType::MainBag(idx) => {
-            if let Some(target_slot_ref) = inventory.main_bag.get_mut(idx) {
-                if target_slot_ref.is_none() {
-                    *target_slot_ref = Some(item);
-                } else if let Some(ref target) = target_slot_ref {
-                    // Swap
-                    std::mem::swap(&mut item, target);
-                    // Return swapped item to source (simplified)
+    // Put displaced item back in source slot (swap)
+    if let Some(displaced_item) = displaced {
+        match drag.source_slot {
+            SlotType::MainBag(idx) => {
+                if let Some(slot) = inventory.main_bag.get_mut(idx) {
+                    *slot = Some(displaced_item);
                 }
             }
-        }
-        SlotType::MaterialBag(idx) => {
-            if let Some(target_slot_ref) = inventory.material_bag.get_mut(idx) {
-                if target_slot_ref.is_none() {
-                    *target_slot_ref = Some(item);
+            SlotType::MaterialBag(idx) => {
+                if let Some(slot) = inventory.material_bag.get_mut(idx) {
+                    *slot = Some(displaced_item);
                 }
             }
+            _ => {}
         }
-        _ => {}
     }
 }
