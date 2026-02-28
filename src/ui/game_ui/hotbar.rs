@@ -183,9 +183,9 @@ pub fn update_hotbar_slots(
 
         // Get item for THIS slot (not just active slot)
         let item_opt = if hand == Hand::Left {
-            hotbar.slots[index].left_hand.as_deref()
+            hotbar.slots[index].left_hand.as_ref()
         } else {
-            hotbar.slots[index].right_hand.as_deref()
+            hotbar.slots[index].right_hand.as_ref()
         };
 
         // Update visual state based on item presence

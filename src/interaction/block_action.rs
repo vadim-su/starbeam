@@ -105,9 +105,10 @@ pub fn block_interaction_system(
                 return;
             }
 
-            let Some(item_id) = hotbar.slots[hotbar.active_slot].left_hand.as_deref() else {
+            let Some(stack) = hotbar.slots[hotbar.active_slot].left_hand.as_ref() else {
                 return;
             };
+            let item_id = stack.item_id.as_str();
             let Some(place_id) = resolve_placeable(item_id, &item_registry, &ctx_ref) else {
                 return;
             };
@@ -165,9 +166,10 @@ pub fn block_interaction_system(
                 return;
             }
 
-            let Some(item_id) = hotbar.slots[hotbar.active_slot].right_hand.as_deref() else {
+            let Some(stack) = hotbar.slots[hotbar.active_slot].right_hand.as_ref() else {
                 return;
             };
+            let item_id = stack.item_id.as_str();
             let Some(place_id) = resolve_placeable(item_id, &item_registry, &ctx_ref) else {
                 return;
             };

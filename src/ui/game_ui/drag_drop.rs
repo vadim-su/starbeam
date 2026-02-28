@@ -14,6 +14,7 @@ use bevy::window::PrimaryWindow;
 
 use super::components::{DragInfo, DragState, Hand, SlotType, UiSlot};
 use super::theme::UiTheme;
+use crate::inventory::components::Stack;
 use crate::inventory::{Hotbar, Inventory};
 use crate::player::Player;
 
@@ -157,8 +158,18 @@ pub fn handle_drop(
     if let SlotType::Hotbar { index, hand } = target_type {
         if let Ok(mut hotbar) = hotbar_query.single_mut() {
             match hand {
-                Hand::Left => hotbar.slots[index].left_hand = Some(drag.item_id.clone()),
-                Hand::Right => hotbar.slots[index].right_hand = Some(drag.item_id.clone()),
+                Hand::Left => {
+                    hotbar.slots[index].left_hand = Some(Stack {
+                        item_id: drag.item_id.clone(),
+                        count: drag.count,
+                    })
+                }
+                Hand::Right => {
+                    hotbar.slots[index].right_hand = Some(Stack {
+                        item_id: drag.item_id.clone(),
+                        count: drag.count,
+                    })
+                }
             }
         }
         return;

@@ -1,10 +1,12 @@
 use bevy::prelude::*;
 
+use super::components::Stack;
+
 /// A single hotbar slot with left/right hand items.
 #[derive(Clone, Debug, Default)]
 pub struct HotbarSlot {
-    pub left_hand: Option<String>,
-    pub right_hand: Option<String>,
+    pub left_hand: Option<Stack>,
+    pub right_hand: Option<Stack>,
 }
 
 /// Player hotbar component (Starbound-style).
@@ -32,12 +34,12 @@ impl Hotbar {
         &self.slots[self.active_slot]
     }
 
-    pub fn get_item_for_hand(&self, is_left: bool) -> Option<&str> {
+    pub fn get_item_for_hand(&self, is_left: bool) -> Option<&Stack> {
         let slot = self.active_slot();
         if is_left {
-            slot.left_hand.as_deref()
+            slot.left_hand.as_ref()
         } else {
-            slot.right_hand.as_deref()
+            slot.right_hand.as_ref()
         }
     }
 }
