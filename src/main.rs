@@ -1,4 +1,5 @@
 mod camera;
+pub mod crafting;
 mod interaction;
 pub mod inventory;
 pub mod item;
@@ -43,6 +44,7 @@ fn main() {
         .add_plugins(ui::UiPlugin)
         .add_plugins(item::ItemPlugin)
         .add_plugins(inventory::InventoryPlugin)
+        .add_plugins(crafting::CraftingPlugin)
         .configure_sets(
             Update,
             (
