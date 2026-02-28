@@ -438,6 +438,7 @@ fn prepare_rc_bind_groups(
     // Resolve all GPU image views
     let (
         Some(density),
+        Some(density_bg),
         Some(emissive),
         Some(albedo),
         Some(cascade_a),
@@ -446,6 +447,7 @@ fn prepare_rc_bind_groups(
         Some(lightmap_prev),
     ) = (
         gpu_images.get(&handles.density),
+        gpu_images.get(&handles.density_bg),
         gpu_images.get(&handles.emissive),
         gpu_images.get(&handles.albedo),
         gpu_images.get(&handles.cascade_a),
@@ -527,6 +529,7 @@ fn prepare_rc_bind_groups(
                 &lightmap_prev.texture_view,
                 cascade_read_view,
                 write_tex,
+                &density_bg.texture_view,
             )),
         );
 
