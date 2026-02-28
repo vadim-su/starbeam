@@ -145,8 +145,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let lm_size = uniforms.viewport_size;
     let vp_off = uniforms.viewport_offset;
 
+    // Per-probe angular jitter using golden ratio to break directional
+    // banding. Cascade 0 has only 4 directions (all diagonal); without
+    // jitter, point lights produce visible diagonal cross artifacts.
+    // Each probe gets a unique angular offset so neighboring probes
+    // sample complementary angles, producing smoother light spread.
+    let jitter = fract(f32(probe_x * 7u + probe_y * 13u) * 0.6180339887);
+
     for (var dir_idx = 0u; dir_idx < n_dirs; dir_idx++) {
-        let angle = (f32(dir_idx) + 0.5) / f32(n_dirs) * 2.0 * PI;
+        let angle = (f32(dir_idx) + 0.5 + jitter) / f32(n_dirs) * 2.0 * PI;
         let ray_dir = vec2<f32>(cos(angle), sin(angle));
 
         var radiance = vec3<f32>(0.0);
