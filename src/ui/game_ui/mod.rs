@@ -19,7 +19,26 @@ impl Plugin for GameUiPlugin {
             .init_resource::<InventoryScreenState>()
             .insert_resource(UiTheme::load())
             .add_systems(OnEnter(AppState::InGame), spawn_game_ui)
-            .add_systems(Update, hotbar::update_hotbar_slots);
+            .add_systems(Update, (hotbar::update_hotbar_slots, toggle_inventory));
+    }
+}
+
+/// Toggle inventory screen on E or I key press.
+fn toggle_inventory(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<InventoryScreenState>,
+    mut query: Query<&mut Visibility, With<InventoryScreen>>,
+) {
+    if keyboard.just_pressed(KeyCode::KeyE) || keyboard.just_pressed(KeyCode::KeyI) {
+        state.visible = !state.visible;
+
+        for mut vis in &mut query {
+            *vis = if state.visible {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            };
+        }
     }
 }
 
