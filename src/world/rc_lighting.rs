@@ -287,6 +287,7 @@ fn update_tile_lightmap(
     shared_material: Option<Res<SharedTileMaterial>>,
     mut materials: ResMut<Assets<TileMaterial>>,
     camera_query: Query<(&GlobalTransform, &Projection), With<Camera2d>>,
+    mut frame_counter: Local<u32>,
 ) {
     let (Some(gpu_images), Some(config), Some(shared_material)) =
         (gpu_images, config, shared_material)
@@ -294,37 +295,51 @@ fn update_tile_lightmap(
         return;
     };
 
-    let lm_rect = if let Ok((cam_gt, projection)) = camera_query.single() {
+    let lm_rect = if let Ok((cam_gt, _projection)) = camera_query.single() {
         let cam_pos = cam_gt.translation().truncate();
         let ts = config.tile_size;
-        let _ortho_scale = match projection {
-            Projection::Orthographic(o) => o.scale,
-            _ => 1.0,
-        };
 
         let vp_tiles_w = config.viewport_size.x as f32;
         let vp_tiles_h = config.viewport_size.y as f32;
 
-        // The sub-tile fractional camera offset in world units
+        // Sub-tile fractional camera offset (0..tile_size)
         let cam_frac_x = cam_pos.x - (cam_pos.x / ts).floor() * ts;
         let cam_frac_y = cam_pos.y - (cam_pos.y / ts).floor() * ts;
-
-        let half_w = (vp_tiles_w as i32) / 2;
-        let half_h = (vp_tiles_h as i32) / 2;
 
         let lm_world_w = vp_tiles_w * ts;
         let lm_world_h = vp_tiles_h * ts;
 
-        // Scale: ratio of screen world extent to lightmap world extent
-        // For now approximate as 1.0 (revisit if viewport isn't tile-aligned)
+        // Scale: X and Y are both 1:1 (no flip needed).
+        // @builtin(position) in the fragment shader gives framebuffer coords
+        // where Y=0 is the TOP of the screen — same convention as GPU textures
+        // (Y=0 = top row). The CPU extraction already flips world Y-up to
+        // texture Y-down (buf_y = max_ty - ty), so no second flip here.
         let scale_x = 1.0_f32;
         let scale_y = 1.0_f32;
 
-        // Offset: sub-tile camera position normalized to lightmap extent
-        let vp_world_w_actual = vp_tiles_w * ts;
-        let vp_world_h_actual = vp_tiles_h * ts;
-        let offset_x = (cam_frac_x + half_w as f32 * ts - vp_world_w_actual / 2.0) / lm_world_w;
-        let offset_y = (-cam_frac_y + half_h as f32 * ts - vp_world_h_actual / 2.0) / lm_world_h;
+        // Offset: compensate for sub-tile camera movement
+        // X: screen (0,0) should sample lightmap at (cam_frac / lm_world, ...)
+        // Y: camera moving UP (positive cam_frac_y) means the viewport shows
+        //    higher world content, which sits at lower lightmap V (due to the
+        //    Y-flip baked into the texture). So offset is negative.
+        let offset_x = cam_frac_x / lm_world_w;
+        let offset_y = -(cam_frac_y / lm_world_h);
+
+        // Debug log every 60 frames
+        *frame_counter += 1;
+        if *frame_counter % 60 == 0 {
+            debug!(
+                "lm_rect: scale=({}, {}) offset=({}, {}) cam_frac=({}, {}) vp_tiles=({}, {})",
+                scale_x,
+                scale_y,
+                offset_x,
+                offset_y,
+                cam_frac_x,
+                cam_frac_y,
+                vp_tiles_w,
+                vp_tiles_h
+            );
+        }
 
         Vec4::new(scale_x, scale_y, offset_x, offset_y)
     } else {
