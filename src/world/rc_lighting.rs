@@ -58,8 +58,10 @@ impl Default for RcLightingConfig {
 /// extracted each frame for GPU upload.
 #[derive(Resource, Clone, Default, ExtractResource)]
 pub struct RcInputData {
-    /// 0 = air, 255 = solid. One byte per tile.
+    /// 0 = air, 255 = solid. One byte per tile. (FG layer)
     pub density: Vec<u8>,
+    /// 0 = air, 255 = solid. One byte per tile. (BG layer)
+    pub density_bg: Vec<u8>,
     /// RGBA float per tile. Emissive light sources.
     pub emissive: Vec<[f32; 4]>,
     /// RGBA u8 per tile. Surface albedo for bounce light.
