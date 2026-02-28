@@ -317,11 +317,12 @@ fn extract_lighting_data(
 
     // --- Sun emitters: fill sky columns from top down ---
     // For each column, scan from the top of the input texture (buf_y=0 = max_ty)
-    // downward until hitting solid FG (the terrain surface). Within this sky band:
-    // - Tiles where BOTH FG and BG are air: place sun emitter (light enters)
-    // - Tiles where FG is air but BG is solid: mark as opaque (BG wall blocks
-    //   sunlight). This prevents light from leaking through FG-only holes while
-    //   keeping cave air below the FG surface transparent for light scattering.
+    // downward. Stop at the first solid tile in EITHER layer:
+    // - Both FG and BG air: place sun emitter (light enters freely)
+    // - FG air but BG solid: set density=255 (1-tile barrier) and stop.
+    //   This blocks sunlight through FG-only holes without making cave air
+    //   below opaque — cave tiles are never reached by the scan.
+    // - FG solid: stop (terrain surface).
     for tx in min_tx..=max_tx {
         let buf_x = (tx - min_tx) as u32;
         for buf_y in 0..input_h {
@@ -339,8 +340,10 @@ fn extract_lighting_data(
                 // Both layers air: sun emitter
                 input.emissive[idx] = [SUN_COLOR[0], SUN_COLOR[1], SUN_COLOR[2], 1.0];
             } else {
-                // FG air but BG solid: BG wall blocks sunlight at this sky-exposed tile
+                // FG air but BG solid: BG wall blocks sunlight at this tile.
+                // Stop scanning deeper so cave air below keeps density=0 for scattering.
                 input.density[idx] = 255;
+                break;
             }
         }
     }
