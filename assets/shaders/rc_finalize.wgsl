@@ -3,9 +3,9 @@
 // Extracts irradiance from cascade 0 into the final lightmap.
 // Cascade 0 has 1 probe per pixel and 4 directions packed as 2×2 subtexels.
 //
-// A 3×3 spatial blur averages 9 neighboring probes, each with a different
-// angular jitter offset. This yields 9×4 = 36 effective directional samples,
-// producing smooth circular light spread from point sources without
+// A 5×5 Gaussian spatial blur averages 25 neighboring probes, each with a
+// different angular jitter offset. This yields 25×4 = 100 effective
+// directional samples, producing very smooth soft lighting without
 // increasing cascade 0's direction count.
 
 struct FinalizeUniforms {
@@ -19,8 +19,14 @@ struct FinalizeUniforms {
 @group(0) @binding(1) var cascade_0: texture_2d<f32>;
 @group(0) @binding(2) var lightmap_out: texture_storage_2d<rgba16float, write>;
 
-const N_DIRS: u32 = 4u;
-const DIRS_SIDE: u32 = 2u;
+const N_DIRS: u32 = 16u;
+const DIRS_SIDE: u32 = 4u;
+
+/// Blur radius: 2 = 5×5 kernel.
+const BLUR_RADIUS: i32 = 2;
+
+/// HDR brightness multiplier applied after blur.
+const BRIGHTNESS: f32 = 1.5;
 
 /// Read the average radiance of a single probe (all 4 directions).
 fn probe_radiance(ix: i32, iy: i32) -> vec3<f32> {
@@ -50,20 +56,24 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let max_ix = i32(uniforms.input_size.x) - 1;
     let max_iy = i32(uniforms.input_size.y) - 1;
 
-    // 3×3 weighted blur: center=4, cardinal=2, diagonal=1 (total=16).
-    // Each neighbor probe has a different angular jitter, so 9 probes
-    // effectively sample 36 directions — much smoother than 4.
-    var total = probe_radiance(ix, iy) * 4.0;
-    total += probe_radiance(clamp(ix - 1, 0, max_ix), iy) * 2.0;
-    total += probe_radiance(clamp(ix + 1, 0, max_ix), iy) * 2.0;
-    total += probe_radiance(ix, clamp(iy - 1, 0, max_iy)) * 2.0;
-    total += probe_radiance(ix, clamp(iy + 1, 0, max_iy)) * 2.0;
-    total += probe_radiance(clamp(ix - 1, 0, max_ix), clamp(iy - 1, 0, max_iy)) * 1.0;
-    total += probe_radiance(clamp(ix + 1, 0, max_ix), clamp(iy - 1, 0, max_iy)) * 1.0;
-    total += probe_radiance(clamp(ix - 1, 0, max_ix), clamp(iy + 1, 0, max_iy)) * 1.0;
-    total += probe_radiance(clamp(ix + 1, 0, max_ix), clamp(iy + 1, 0, max_iy)) * 1.0;
+    // 5×5 Gaussian spatial blur (σ ≈ 1.0).
+    // Each neighbor probe has a different angular jitter, so 25 probes
+    // effectively sample 100 directions — very smooth soft lighting.
+    var total = vec3<f32>(0.0);
+    var weight_sum = 0.0;
 
-    let irradiance = total / 16.0;
+    for (var dy = -BLUR_RADIUS; dy <= BLUR_RADIUS; dy++) {
+        for (var dx = -BLUR_RADIUS; dx <= BLUR_RADIUS; dx++) {
+            let nx = clamp(ix + dx, 0, max_ix);
+            let ny = clamp(iy + dy, 0, max_iy);
+            let d2 = f32(dx * dx + dy * dy);
+            let w = exp(-d2 * 0.5);
+            total += probe_radiance(nx, ny) * w;
+            weight_sum += w;
+        }
+    }
+
+    let irradiance = total / weight_sum * BRIGHTNESS;
 
     textureStore(lightmap_out, vec2<i32>(i32(px), i32(py)), vec4<f32>(irradiance, 1.0));
 }

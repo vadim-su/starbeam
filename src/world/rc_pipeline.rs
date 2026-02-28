@@ -14,6 +14,7 @@
 use std::borrow::Cow;
 
 use bevy::asset::RenderAssetUsages;
+use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResource;
 use bevy::render::render_asset::RenderAssets;
@@ -702,6 +703,14 @@ fn make_white_gpu_texture(images: &mut Assets<Image>, w: u32, h: u32) -> Handle<
     );
     image.texture_descriptor.usage =
         TextureUsages::COPY_DST | TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING;
+    // Bilinear filtering for smooth lighting gradients between tiles
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        address_mode_u: ImageAddressMode::ClampToEdge,
+        address_mode_v: ImageAddressMode::ClampToEdge,
+        ..default()
+    });
     images.add(image)
 }
 
@@ -713,8 +722,8 @@ pub(crate) fn create_gpu_images(images: &mut Assets<Image>) -> RcGpuImages {
         density: make_gpu_texture(images, s, s, TextureFormat::R8Unorm),
         emissive: make_gpu_texture(images, s, s, TextureFormat::Rgba16Float),
         albedo: make_gpu_texture(images, s, s, TextureFormat::Rgba8Unorm),
-        cascade_a: make_gpu_texture(images, s * 2, s * 2, TextureFormat::Rgba16Float),
-        cascade_b: make_gpu_texture(images, s * 2, s * 2, TextureFormat::Rgba16Float),
+        cascade_a: make_gpu_texture(images, s * 4, s * 4, TextureFormat::Rgba16Float),
+        cascade_b: make_gpu_texture(images, s * 4, s * 4, TextureFormat::Rgba16Float),
         lightmap: make_white_gpu_texture(images, s, s),
         lightmap_prev: make_white_gpu_texture(images, s, s),
     }
@@ -762,9 +771,10 @@ pub(crate) fn resize_gpu_textures(
     gpu_images.albedo = make_gpu_texture(&mut images, input_w, input_h, TextureFormat::Rgba8Unorm);
 
     // Cascade textures: sized for the largest cascade's packed probe×direction grid.
-    // Cascade 0 has 4 directions (2×2 per probe), spacing=1, so texture = input_w*2 × input_h*2.
-    let cascade_w = input_w * 2;
-    let cascade_h = input_h * 2;
+    // Cascade 0 has 16 directions (4×4 per probe), spacing=1, so texture = input_w*4 × input_h*4.
+    // All cascades use the same texture size: (input/spacing) * dirs_side = input * 4.
+    let cascade_w = input_w * 4;
+    let cascade_h = input_h * 4;
     gpu_images.cascade_a = make_gpu_texture(
         &mut images,
         cascade_w,

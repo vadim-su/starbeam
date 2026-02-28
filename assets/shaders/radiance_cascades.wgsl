@@ -40,9 +40,11 @@ fn pow4(exp: u32) -> u32 {
     return 1u << (exp * 2u);
 }
 
-// Number of ray directions for cascade `n`: 4^(n+1).
+// Number of ray directions for cascade `n`: 4^(n+2).
+// Using n+2 instead of n+1 gives 16 directions at cascade 0 (vs 4),
+// dramatically improving point-light sampling in enclosed spaces.
 fn num_directions(cascade: u32) -> u32 {
-    return pow4(cascade + 1u);
+    return pow4(cascade + 2u);
 }
 
 // Probe spacing (pixels between probes) for cascade `n`: 2^n.
@@ -145,20 +147,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let lm_size = uniforms.viewport_size;
     let vp_off = uniforms.viewport_offset;
 
-    // Per-probe angular jitter using golden ratio to break directional
-    // banding. Cascade 0 has only 4 directions (all diagonal); without
-    // jitter, point lights produce visible diagonal cross artifacts.
-    // Each probe gets a unique angular offset so neighboring probes
-    // sample complementary angles, producing smoother light spread.
-    //
-    // Use world-space coordinates (probe + grid_origin) for stable jitter
-    // that doesn't shift when the camera moves or the grid snaps.
-    let world_x = i32(probe_x) * i32(spacing) + uniforms.grid_origin.x;
-    let world_y = i32(probe_y) * i32(spacing) + uniforms.grid_origin.y;
-    let jitter = fract(f32(abs(world_x) * 7 + abs(world_y) * 13) * 0.6180339887);
-
     for (var dir_idx = 0u; dir_idx < n_dirs; dir_idx++) {
-        let angle = (f32(dir_idx) + 0.5 + jitter) / f32(n_dirs) * 2.0 * PI;
+        // With 16+ directions per probe, uniform angular spacing provides
+        // sufficient coverage. No per-probe jitter needed — this keeps
+        // lighting fully deterministic and stable across camera movement.
+        let angle = (f32(dir_idx) + 0.5) / f32(n_dirs) * 2.0 * PI;
         let ray_dir = vec2<f32>(cos(angle), sin(angle));
 
         var radiance = vec3<f32>(0.0);
