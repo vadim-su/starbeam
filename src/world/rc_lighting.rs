@@ -317,10 +317,11 @@ fn extract_lighting_data(
 
     // --- Sun emitters: fill sky columns from top down ---
     // For each column, scan from the top of the input texture (buf_y=0 = max_ty)
-    // downward. Mark every air tile as a sun emitter until we hit the first solid
-    // tile in EITHER layer (FG or BG). This ensures sunlight only enters through
-    // holes where both FG and BG are removed, while still allowing light to
-    // scatter through cave air once inside (raymarching uses FG-only density).
+    // downward until hitting solid FG (the terrain surface). Within this sky band:
+    // - Tiles where BOTH FG and BG are air: place sun emitter (light enters)
+    // - Tiles where FG is air but BG is solid: mark as opaque (BG wall blocks
+    //   sunlight). This prevents light from leaking through FG-only holes while
+    //   keeping cave air below the FG surface transparent for light scattering.
     for tx in min_tx..=max_tx {
         let buf_x = (tx - min_tx) as u32;
         for buf_y in 0..input_h {
@@ -328,13 +329,19 @@ fn extract_lighting_data(
             let ty = max_ty - buf_y as i32;
             let fg_is_air = get_fg_tile(&world_map, tx, ty, &world_config, &tile_registry)
                 .is_none_or(|id| !tile_registry.is_solid(id));
-            let bg_is_air = get_bg_tile(&world_map, tx, ty, &world_config, &tile_registry)
-                .is_none_or(|id| !tile_registry.is_solid(id));
-            if !fg_is_air || !bg_is_air {
-                break; // hit solid in either layer, stop filling this column
+            if !fg_is_air {
+                break; // hit FG terrain surface, stop
             }
             let idx = (buf_y * input_w + buf_x) as usize;
-            input.emissive[idx] = [SUN_COLOR[0], SUN_COLOR[1], SUN_COLOR[2], 1.0];
+            let bg_is_air = get_bg_tile(&world_map, tx, ty, &world_config, &tile_registry)
+                .is_none_or(|id| !tile_registry.is_solid(id));
+            if bg_is_air {
+                // Both layers air: sun emitter
+                input.emissive[idx] = [SUN_COLOR[0], SUN_COLOR[1], SUN_COLOR[2], 1.0];
+            } else {
+                // FG air but BG solid: BG wall blocks sunlight at this sky-exposed tile
+                input.density[idx] = 255;
+            }
         }
     }
 
