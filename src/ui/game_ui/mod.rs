@@ -1,6 +1,7 @@
 pub mod components;
 pub mod hotbar;
 pub mod inventory;
+pub mod slot_sync;
 pub mod theme;
 
 use bevy::prelude::*;
@@ -19,7 +20,14 @@ impl Plugin for GameUiPlugin {
             .init_resource::<InventoryScreenState>()
             .insert_resource(UiTheme::load())
             .add_systems(OnEnter(AppState::InGame), spawn_game_ui)
-            .add_systems(Update, (hotbar::update_hotbar_slots, toggle_inventory));
+            .add_systems(
+                Update,
+                (
+                    hotbar::update_hotbar_slots,
+                    slot_sync::sync_slot_contents,
+                    toggle_inventory,
+                ),
+            );
     }
 }
 
