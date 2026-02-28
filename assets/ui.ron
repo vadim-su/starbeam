@@ -1,0 +1,59 @@
+(
+    base_path: "assets/textures/ui/",
+    font_size: 12.0,
+    
+    colors: (
+        bg_dark: "#1a1410",
+        bg_medium: "#2a2420",
+        border: "#5a4a3a",
+        border_highlight: "#8a7a6a",
+        selected: "#ffcc00",
+        text: "#e0d0c0",
+        text_dim: "#8a7a6a",
+        rarity_common: "#aaaaaa",
+        rarity_uncommon: "#55ff55",
+        rarity_rare: "#5555ff",
+        rarity_legendary: "#ffaa00",
+    ),
+    
+    hotbar: (
+        slots: 6,
+        slot_size: 48.0,
+        gap: 4.0,
+        anchor: "BottomCenter",
+        margin_bottom: 16.0,
+        border_width: 2.0,
+    ),
+    
+    inventory_screen: (
+        anchor: "Center",
+        width: 400.0,
+        height: 320.0,
+        padding: 16.0,
+        
+        equipment: (
+            slot_size: 40.0,
+            gap: 4.0,
+        ),
+        
+        main_bag: (
+            columns: 8,
+            rows: 5,
+            slot_size: 32.0,
+            gap: 2.0,
+        ),
+        
+        material_bag: (
+            columns: 8,
+            rows: 2,
+            slot_size: 32.0,
+            gap: 2.0,
+        ),
+    ),
+    
+    tooltip: (
+        padding: 8.0,
+        max_width: 200.0,
+        border_width: 1.0,
+    ),
+)

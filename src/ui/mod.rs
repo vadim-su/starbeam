@@ -1,4 +1,5 @@
 pub mod debug_panel;
+pub mod game_ui;
 
 use bevy::prelude::*;
 use bevy_egui::EguiPrimaryContextPass;
