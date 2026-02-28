@@ -178,6 +178,7 @@ fn init_rc_pipeline(
                 texture_2d(TextureSampleType::Float { filterable: false }), // @binding(4) lightmap_prev
                 texture_2d(TextureSampleType::Float { filterable: false }), // @binding(5) cascade_read
                 texture_storage_2d(TextureFormat::Rgba16Float, StorageTextureAccess::WriteOnly), // @binding(6)
+                texture_2d(TextureSampleType::Float { filterable: false }), // @binding(7) density_bg
             ),
         ),
     );
