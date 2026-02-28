@@ -1,6 +1,7 @@
 pub mod components;
 pub mod drag_drop;
 pub mod hotbar;
+pub mod icon_registry;
 pub mod inventory;
 pub mod slot_sync;
 pub mod theme;
@@ -13,6 +14,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use crate::registry::AppState;
 
 pub use components::*;
+pub use icon_registry::*;
 pub use theme::*;
 
 /// Handles for slot frame textures.
