@@ -5,15 +5,16 @@
 //! - Updating drag icon position during drag operations
 //! - Canceling drags and returning items to source slots
 //! - Dropping items onto target slots (move/swap)
+//! - Assigning items to hotbar via drag-drop
 
 use bevy::picking::events::{DragDrop, DragEnd, DragStart};
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
-use super::components::{DragInfo, DragState, SlotType, UiSlot};
+use super::components::{DragInfo, DragState, Hand, SlotType, UiSlot};
 use super::theme::UiTheme;
-use crate::inventory::Inventory;
+use crate::inventory::{Hotbar, Inventory};
 use crate::player::Player;
 
 /// Marker component for the visual drag icon entity.
@@ -124,12 +125,14 @@ pub fn on_drag_end(
     }
 }
 
-/// Handle drop onto a target slot — move or swap items between inventory slots.
+/// Handle drop onto a target slot — move/swap items between inventory slots,
+/// or assign an item to a hotbar slot.
 pub fn handle_drop(
     trigger: On<Pointer<DragDrop>>,
     mut drag_state: ResMut<DragState>,
     slot_query: Query<&UiSlot>,
     mut inventory_query: Query<&mut Inventory, With<Player>>,
+    mut hotbar_query: Query<&mut Hotbar, With<Player>>,
     mut commands: Commands,
 ) {
     let Ok(target) = slot_query.get(trigger.event_target()) else {
@@ -147,6 +150,17 @@ pub fn handle_drop(
 
     // Same slot — no-op
     if drag.source_slot == target_type {
+        return;
+    }
+
+    // Hotbar target — assign item reference without moving from inventory
+    if let SlotType::Hotbar { index, hand } = target_type {
+        if let Ok(mut hotbar) = hotbar_query.single_mut() {
+            match hand {
+                Hand::Left => hotbar.slots[index].left_hand = Some(drag.item_id.clone()),
+                Hand::Right => hotbar.slots[index].right_hand = Some(drag.item_id.clone()),
+            }
+        }
         return;
     }
 

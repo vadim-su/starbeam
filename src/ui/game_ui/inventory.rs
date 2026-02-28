@@ -160,6 +160,24 @@ pub fn spawn_inventory_screen(commands: &mut Commands, theme: &UiTheme) {
                                         is_hoverable: true,
                                     },
                                 ))
+                                .with_children(|slot_parent| {
+                                    slot_parent.spawn((
+                                        SlotLabel,
+                                        Text::new(""),
+                                        TextFont {
+                                            font_size: 9.0,
+                                            ..default()
+                                        },
+                                        TextColor(Color::WHITE),
+                                        Node {
+                                            position_type: PositionType::Absolute,
+                                            bottom: Val::Px(1.0),
+                                            right: Val::Px(2.0),
+                                            ..default()
+                                        },
+                                        Pickable::IGNORE,
+                                    ));
+                                })
                                 .observe(
                                     |trigger: On<Pointer<Over>>,
                                      mut hovered: ResMut<HoveredSlot>,
@@ -224,6 +242,24 @@ pub fn spawn_inventory_screen(commands: &mut Commands, theme: &UiTheme) {
                                         is_hoverable: true,
                                     },
                                 ))
+                                .with_children(|slot_parent| {
+                                    slot_parent.spawn((
+                                        SlotLabel,
+                                        Text::new(""),
+                                        TextFont {
+                                            font_size: 9.0,
+                                            ..default()
+                                        },
+                                        TextColor(Color::WHITE),
+                                        Node {
+                                            position_type: PositionType::Absolute,
+                                            bottom: Val::Px(1.0),
+                                            right: Val::Px(2.0),
+                                            ..default()
+                                        },
+                                        Pickable::IGNORE,
+                                    ));
+                                })
                                 .observe(
                                     |trigger: On<Pointer<Over>>,
                                      mut hovered: ResMut<HoveredSlot>,

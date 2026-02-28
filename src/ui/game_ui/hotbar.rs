@@ -2,6 +2,7 @@ use bevy::picking::prelude::*;
 use bevy::prelude::*;
 
 use super::components::*;
+use super::drag_drop::handle_drop;
 use super::theme::UiTheme;
 use crate::inventory::Hotbar;
 use crate::player::Player;
@@ -45,7 +46,7 @@ pub fn spawn_hotbar(commands: &mut Commands, theme: &UiTheme) {
                 let border_color = colors.border.clone();
                 let text_dim = colors.text_dim.clone();
 
-                // Slot container (holds L and R hands)
+                // Slot container
                 parent
                     .spawn((
                         UiSlot {
@@ -68,6 +69,7 @@ pub fn spawn_hotbar(commands: &mut Commands, theme: &UiTheme) {
                             is_hoverable: true,
                         },
                     ))
+                    .observe(handle_drop)
                     .with_children(|slot_parent| {
                         // Left hand half
                         slot_parent
@@ -102,7 +104,8 @@ pub fn spawn_hotbar(commands: &mut Commands, theme: &UiTheme) {
                                 |_trigger: On<Pointer<Out>>, mut hovered: ResMut<HoveredSlot>| {
                                     hovered.slot = None;
                                 },
-                            );
+                            )
+                            .observe(handle_drop);
                         // Right hand half
                         slot_parent
                             .spawn((
@@ -136,7 +139,8 @@ pub fn spawn_hotbar(commands: &mut Commands, theme: &UiTheme) {
                                 |_trigger: On<Pointer<Out>>, mut hovered: ResMut<HoveredSlot>| {
                                     hovered.slot = None;
                                 },
-                            );
+                            )
+                            .observe(handle_drop);
                         // Slot number label
                         slot_parent.spawn((
                             Text::new(format!("{}", i + 1)),
@@ -169,8 +173,7 @@ pub fn update_hotbar_slots(
     };
 
     for (slot, mut bg_color, children) in &mut slot_query {
-        // Only update the inner half-slots, not the container
-        let SlotType::Hotbar { index: _, hand } = slot.slot_type else {
+        let SlotType::Hotbar { index, hand } = slot.slot_type else {
             continue;
         };
 
@@ -178,8 +181,12 @@ pub fn update_hotbar_slots(
             continue;
         };
 
-        // Get item from hotbar data
-        let item_opt = hotbar.get_item_for_hand(hand == Hand::Left);
+        // Get item for THIS slot (not just active slot)
+        let item_opt = if hand == Hand::Left {
+            hotbar.slots[index].left_hand.as_deref()
+        } else {
+            hotbar.slots[index].right_hand.as_deref()
+        };
 
         // Update visual state based on item presence
         if item_opt.is_some() {

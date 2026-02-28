@@ -76,6 +76,10 @@ pub struct HoveredSlot {
     pub slot: Option<SlotType>,
 }
 
+/// Marker for the count/name text label inside a UI slot.
+#[derive(Component)]
+pub struct SlotLabel;
+
 /// Inventory screen visibility state.
 #[derive(Resource, Default)]
 pub struct InventoryScreenState {
