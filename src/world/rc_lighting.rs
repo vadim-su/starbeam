@@ -162,6 +162,31 @@ fn get_bg_tile(
         .map(|chunk| chunk.bg.get(lx, ly, world_config.chunk_size))
 }
 
+/// Count how many of the 4 cardinal neighbors are "open" (both FG and BG air).
+/// Used to scale sun emitter intensity: isolated tiles glow dimly while tiles
+/// in large openings receive full sunlight.
+fn count_open_neighbors(
+    world_map: &WorldMap,
+    tx: i32,
+    ty: i32,
+    world_config: &WorldConfig,
+    tile_registry: &TileRegistry,
+) -> u32 {
+    let mut count = 0u32;
+    for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+        let nx = tx + dx;
+        let ny = ty + dy;
+        let fg_air = get_fg_tile(world_map, nx, ny, world_config, tile_registry)
+            .is_none_or(|id| !tile_registry.is_solid(id));
+        let bg_air = get_bg_tile(world_map, nx, ny, world_config, tile_registry)
+            .is_none_or(|id| !tile_registry.is_solid(id));
+        if fg_air && bg_air {
+            count += 1;
+        }
+    }
+    count
+}
+
 /// Compute cascade count so the highest cascade's interval_end fits within
 /// the padding. Each cascade N has interval_end = 4^(N+1). We keep adding
 /// cascades while 4^(count+1) <= padding, ensuring rays from viewport probes
@@ -304,10 +329,19 @@ fn extract_lighting_data(
                 input.density[idx] = 255;
             } else {
                 // FG is air: place sun emitter only if BG is also air.
+                // Intensity scales with opening size (open neighbor count).
                 let bg_is_air = get_bg_tile(&world_map, tx, ty, &world_config, &tile_registry)
                     .is_none_or(|id| !tile_registry.is_solid(id));
                 if bg_is_air {
-                    input.emissive[idx] = [SUN_COLOR[0], SUN_COLOR[1], SUN_COLOR[2], 1.0];
+                    let open =
+                        count_open_neighbors(&world_map, tx, ty, &world_config, &tile_registry);
+                    let intensity = (1 + open) as f32 / 5.0;
+                    input.emissive[idx] = [
+                        SUN_COLOR[0] * intensity,
+                        SUN_COLOR[1] * intensity,
+                        SUN_COLOR[2] * intensity,
+                        1.0,
+                    ];
                 }
             }
 
