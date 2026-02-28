@@ -31,6 +31,7 @@ struct RcUniforms {
 @group(0) @binding(4) var lightmap_prev: texture_2d<f32>;
 @group(0) @binding(5) var cascade_read: texture_2d<f32>;
 @group(0) @binding(6) var cascade_write: texture_storage_2d<rgba16float, write>;
+@group(0) @binding(7) var density_bg: texture_2d<f32>;
 
 const PI: f32 = 3.14159265359;
 const BRANCHING: u32 = 4u;
