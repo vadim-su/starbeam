@@ -7,6 +7,8 @@ pub mod slot_sync;
 pub mod theme;
 pub mod tooltip;
 
+use std::collections::HashMap;
+
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -94,7 +96,13 @@ impl Plugin for GameUiPlugin {
             .insert_resource(UiTheme::load())
             .add_systems(
                 OnEnter(AppState::InGame),
-                (init_slot_frames, spawn_game_ui, tooltip::spawn_tooltip).chain(),
+                (
+                    init_slot_frames,
+                    load_item_icons,
+                    spawn_game_ui,
+                    tooltip::spawn_tooltip,
+                )
+                    .chain(),
             )
             .add_systems(
                 Update,
@@ -137,4 +145,41 @@ fn spawn_game_ui(mut commands: Commands, theme: Res<UiTheme>) {
 /// Initialize slot frame textures.
 fn init_slot_frames(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     commands.insert_resource(SlotFrames::new(&mut images));
+}
+
+/// Load item icons from terrain textures.
+fn load_item_icons(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    item_registry: Res<crate::item::ItemRegistry>,
+) {
+    let mut icon_registry = ItemIconRegistry::new();
+
+    // Map item IDs to their icon paths
+    // For blocks, use terrain textures
+    let icon_paths: HashMap<&str, &str> = [
+        ("dirt", "world/terrain/dirt.png"),
+        ("stone", "world/terrain/stone.png"),
+        ("grass", "world/terrain/grass.png"),
+        ("torch", "world/terrain/dirt.png"), // Placeholder
+    ]
+    .iter()
+    .cloned()
+    .collect();
+
+    for i in 0..item_registry.len() {
+        let id = crate::item::ItemId(i as u16);
+        let def = item_registry.get(id);
+
+        // Try to load from icon_paths map, fallback to terrain texture
+        let path = icon_paths
+            .get(def.id.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("world/terrain/{}.png", def.id));
+
+        let handle: Handle<Image> = asset_server.load(path);
+        icon_registry.register(&def.id, handle);
+    }
+
+    commands.insert_resource(icon_registry);
 }
