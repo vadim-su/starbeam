@@ -1,4 +1,5 @@
 pub mod components;
+pub mod hotbar;
 pub mod theme;
 
 use bevy::prelude::*;
@@ -21,6 +22,6 @@ impl Plugin for GameUiPlugin {
 }
 
 /// Spawn all game UI elements (hotbar, inventory screen).
-fn spawn_game_ui() {
-    // Placeholder — will be implemented in Phase 2
+fn spawn_game_ui(mut commands: Commands, theme: Res<UiTheme>) {
+    hotbar::spawn_hotbar(&mut commands, &theme);
 }
