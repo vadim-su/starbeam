@@ -10,6 +10,7 @@ struct VertexInput {
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) uv: vec2<f32>,
+    @location(1) world_pos: vec2<f32>,
 }
 
 @vertex
@@ -21,6 +22,9 @@ fn vertex(in: VertexInput) -> VertexOutput {
         vec4<f32>(in.position, 1.0),
     );
     out.uv = in.uv;
+    // Pass world position directly — avoids precision loss from
+    // clip→NDC→world round-trip that causes subpixel shimmer.
+    out.world_pos = (world_from_local * vec4<f32>(in.position, 1.0)).xy;
     return out;
 }
 
@@ -55,15 +59,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     // --- Compute lightmap UV from world position ---
-    // Derive world position from clip_position via inverse view-projection
-    // (guaranteed current-frame camera data, no lag).
-    let screen_uv = (in.clip_position.xy - view.viewport.xy) / view.viewport.zw;
-    let ndc = screen_uv * vec2(2.0, -2.0) + vec2(-1.0, 1.0);
-    let world_h = view.world_from_clip * vec4(ndc, 0.0, 1.0);
-    let world_pos = world_h.xy / world_h.w;
-
-    // Affine transform: world_pos → lightmap UV (pre-computed on CPU)
-    let lightmap_uv = world_pos * lm_xform.scale + lm_xform.offset;
+    // world_pos is interpolated from vertex shader — stable and precise,
+    // no clip→NDC→world round-trip that causes subpixel shimmer.
+    let lightmap_uv = in.world_pos * lm_xform.scale + lm_xform.offset;
 
     let light = textureSample(lightmap_texture, lightmap_sampler, lightmap_uv).rgb;
 

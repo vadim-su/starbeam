@@ -31,6 +31,9 @@ pub fn camera_follow_player(
     let mut target = player_transform.translation;
     target.y = target.y.clamp(half_h, (world_h - half_h).max(half_h));
 
-    camera_transform.translation.x = target.x;
-    camera_transform.translation.y = target.y;
+    // Snap camera to pixel grid to prevent subpixel texture shimmer.
+    // One screen pixel = proj_scale world units.
+    let pixel = proj_scale;
+    camera_transform.translation.x = (target.x / pixel).round() * pixel;
+    camera_transform.translation.y = (target.y / pixel).round() * pixel;
 }
