@@ -36,7 +36,7 @@ use bevy::render::{Render, RenderApp, RenderStartup, RenderSystems};
 use super::rc_lighting::{RcInputData, RcLightingConfig};
 
 // ---------------------------------------------------------------------------
-// GPU uniform structs — must match WGSL layout exactly (48 bytes each)
+// GPU uniform structs — must match WGSL layout exactly (64 bytes each)
 // ---------------------------------------------------------------------------
 
 /// Uniforms for the cascade compute shader (`radiance_cascades.wgsl`).
@@ -113,8 +113,6 @@ struct RcBindGroups {
 struct RcTextureMeta {
     input_w: u32,
     input_h: u32,
-    viewport_w: u32,
-    viewport_h: u32,
     cascade_count: u32,
 }
 
@@ -233,6 +231,8 @@ fn prepare_rc_textures(
     gpu_images: Res<RenderAssets<GpuImage>>,
     render_queue: Res<RenderQueue>,
     mut meta: ResMut<RcTextureMeta>,
+    mut pad_buf: Local<Vec<u8>>,
+    mut emissive_buf: Local<Vec<u8>>,
 ) {
     let (Some(input), Some(config), Some(handles)) = (input, config, gpu_images_res) else {
         return;
@@ -253,8 +253,6 @@ fn prepare_rc_textures(
 
     meta.input_w = w;
     meta.input_h = h;
-    meta.viewport_w = config.viewport_size.x;
-    meta.viewport_h = config.viewport_size.y;
     meta.cascade_count = config.cascade_count;
 
     let extent = Extent3d {
@@ -266,7 +264,7 @@ fn prepare_rc_textures(
     // Upload density (R8Unorm — 1 byte per texel)
     if let Some(gpu_img) = gpu_images.get(&handles.density) {
         let row_bytes = w; // 1 byte per texel
-        let (padded, aligned_bpr) = pad_rows(&input.density, row_bytes, h);
+        let aligned_bpr = pad_rows_into(&mut pad_buf, &input.density, row_bytes, h);
         render_queue.write_texture(
             TexelCopyTextureInfo {
                 texture: &gpu_img.texture,
@@ -274,7 +272,7 @@ fn prepare_rc_textures(
                 origin: Origin3d::ZERO,
                 aspect: TextureAspect::All,
             },
-            &padded,
+            &pad_buf,
             TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(aligned_bpr),
@@ -286,9 +284,9 @@ fn prepare_rc_textures(
 
     // Upload emissive (Rgba16Float — 8 bytes per texel)
     if let Some(gpu_img) = gpu_images.get(&handles.emissive) {
-        let emissive_bytes = emissive_to_f16_bytes(&input.emissive);
+        emissive_to_f16_bytes_into(&mut emissive_buf, &input.emissive);
         let row_bytes = w * 8;
-        let (padded, aligned_bpr) = pad_rows(&emissive_bytes, row_bytes, h);
+        let aligned_bpr = pad_rows_into(&mut pad_buf, &emissive_buf, row_bytes, h);
         render_queue.write_texture(
             TexelCopyTextureInfo {
                 texture: &gpu_img.texture,
@@ -296,7 +294,7 @@ fn prepare_rc_textures(
                 origin: Origin3d::ZERO,
                 aspect: TextureAspect::All,
             },
-            &padded,
+            &pad_buf,
             TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(aligned_bpr),
@@ -310,7 +308,7 @@ fn prepare_rc_textures(
     if let Some(gpu_img) = gpu_images.get(&handles.albedo) {
         let albedo_bytes: &[u8] = input.albedo.as_flattened();
         let row_bytes = w * 4;
-        let (padded, aligned_bpr) = pad_rows(albedo_bytes, row_bytes, h);
+        let aligned_bpr = pad_rows_into(&mut pad_buf, albedo_bytes, row_bytes, h);
         render_queue.write_texture(
             TexelCopyTextureInfo {
                 texture: &gpu_img.texture,
@@ -318,7 +316,7 @@ fn prepare_rc_textures(
                 origin: Origin3d::ZERO,
                 aspect: TextureAspect::All,
             },
-            &padded,
+            &pad_buf,
             TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(aligned_bpr),
@@ -337,33 +335,38 @@ fn align_bytes_per_row(unaligned: u32) -> u32 {
     unaligned.div_ceil(COPY_ROW_ALIGN) * COPY_ROW_ALIGN
 }
 
-/// Build a row-aligned copy of `src` for `write_texture`.
+/// Build a row-aligned copy of `src` for `write_texture` into `dst`.
 /// `row_bytes` is the unpadded byte width of one row.
-/// Returns the padded buffer and the aligned bytes-per-row value.
-fn pad_rows(src: &[u8], row_bytes: u32, h: u32) -> (Vec<u8>, u32) {
+/// Returns the aligned bytes-per-row value. `dst` is resized and filled.
+fn pad_rows_into(dst: &mut Vec<u8>, src: &[u8], row_bytes: u32, h: u32) -> u32 {
     let aligned = align_bytes_per_row(row_bytes);
     if aligned == row_bytes {
-        return (src.to_vec(), aligned);
+        dst.clear();
+        dst.extend_from_slice(src);
+        return aligned;
     }
-    let mut buf = vec![0u8; (aligned * h) as usize];
+    let total = (aligned * h) as usize;
+    dst.clear();
+    dst.resize(total, 0u8);
     for y in 0..h as usize {
         let src_start = y * row_bytes as usize;
         let dst_start = y * aligned as usize;
-        buf[dst_start..dst_start + row_bytes as usize]
+        dst[dst_start..dst_start + row_bytes as usize]
             .copy_from_slice(&src[src_start..src_start + row_bytes as usize]);
     }
-    (buf, aligned)
+    aligned
 }
 
-/// Convert `[f32; 4]` emissive data to half-float bytes for `Rgba16Float`.
-fn emissive_to_f16_bytes(data: &[[f32; 4]]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(data.len() * 8);
+/// Convert `[f32; 4]` emissive data to half-float bytes for `Rgba16Float` into `dst`.
+/// Reuses `dst`'s allocation across frames to avoid per-frame heap allocations.
+fn emissive_to_f16_bytes_into(dst: &mut Vec<u8>, data: &[[f32; 4]]) {
+    dst.clear();
+    dst.reserve(data.len() * 8);
     for pixel in data {
         for &channel in pixel {
-            bytes.extend_from_slice(&f32_to_f16_bits(channel).to_le_bytes());
+            dst.extend_from_slice(&f32_to_f16_bits(channel).to_le_bytes());
         }
     }
-    bytes
 }
 
 /// Minimal f32 → f16 conversion (IEEE 754 half-precision).
@@ -819,24 +822,26 @@ mod tests {
     fn pad_rows_no_padding_needed() {
         // 256 bytes per row — already aligned
         let src = vec![42u8; 256 * 2];
-        let (padded, bpr) = pad_rows(&src, 256, 2);
+        let mut dst = Vec::new();
+        let bpr = pad_rows_into(&mut dst, &src, 256, 2);
         assert_eq!(bpr, 256);
-        assert_eq!(padded, src);
+        assert_eq!(dst, src);
     }
 
     #[test]
     fn pad_rows_adds_padding() {
         // 97 bytes per row, 2 rows → aligned to 256
         let src: Vec<u8> = (0..97 * 2).map(|i| (i % 256) as u8).collect();
-        let (padded, bpr) = pad_rows(&src, 97, 2);
+        let mut dst = Vec::new();
+        let bpr = pad_rows_into(&mut dst, &src, 97, 2);
         assert_eq!(bpr, 256);
-        assert_eq!(padded.len(), 256 * 2);
+        assert_eq!(dst.len(), 256 * 2);
         // First row data preserved
-        assert_eq!(&padded[..97], &src[..97]);
+        assert_eq!(&dst[..97], &src[..97]);
         // Padding is zeroes
-        assert!(padded[97..256].iter().all(|&b| b == 0));
+        assert!(dst[97..256].iter().all(|&b| b == 0));
         // Second row data preserved
-        assert_eq!(&padded[256..256 + 97], &src[97..194]);
+        assert_eq!(&dst[256..256 + 97], &src[97..194]);
     }
 
     #[test]
@@ -871,7 +876,8 @@ mod tests {
     #[test]
     fn emissive_roundtrip_zeros() {
         let data = vec![[0.0f32; 4]; 4];
-        let bytes = emissive_to_f16_bytes(&data);
+        let mut bytes = Vec::new();
+        emissive_to_f16_bytes_into(&mut bytes, &data);
         assert_eq!(bytes.len(), 4 * 8); // 4 pixels × 8 bytes each
         assert!(bytes.iter().all(|&b| b == 0));
     }
@@ -879,7 +885,8 @@ mod tests {
     #[test]
     fn emissive_roundtrip_ones() {
         let data = vec![[1.0, 1.0, 1.0, 1.0]];
-        let bytes = emissive_to_f16_bytes(&data);
+        let mut bytes = Vec::new();
+        emissive_to_f16_bytes_into(&mut bytes, &data);
         assert_eq!(bytes.len(), 8);
         // Each channel should be f16 1.0 = 0x3C00 = [0x00, 0x3C] in little-endian
         for chunk in bytes.chunks(2) {

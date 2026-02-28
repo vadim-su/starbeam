@@ -4,9 +4,6 @@
 // The lightmap covers the entire RC input grid (input_size), not just the
 // viewport. This keeps bounce light and tile sampling in stable world-space
 // coordinates, eliminating viewport-shift flicker.
-//
-// A 5×5 Gaussian spatial blur averages 25 neighboring probes for smooth
-// soft lighting.
 
 struct FinalizeUniforms {
     input_size: vec2<u32>,
@@ -22,10 +19,7 @@ struct FinalizeUniforms {
 const N_DIRS: u32 = 16u;
 const DIRS_SIDE: u32 = 4u;
 
-/// Blur radius: 2 = 5×5 kernel.
-const BLUR_RADIUS: i32 = 2;
-
-/// HDR brightness multiplier applied after blur.
+/// HDR brightness multiplier applied to final irradiance.
 const BRIGHTNESS: f32 = 1.5;
 
 /// Read the average radiance of a single probe (all directions).

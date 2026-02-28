@@ -40,9 +40,6 @@ pub struct RcLightingConfig {
     pub bounce_damping: f32,
     /// Lightmap output size in tiles (set by `resize_gpu_textures`).
     pub lightmap_size: UVec2,
-    /// Viewport size in world units (viewport_pixels * ortho_scale).
-    /// Used for correct lightmap UV mapping when ortho scale ≠ 1.
-    pub vp_world: Vec2,
     /// World-space origin of the input grid (min_tx, min_ty).
     /// Passed to the shader so angular jitter can use stable world coordinates.
     pub grid_origin: IVec2,
@@ -64,7 +61,6 @@ impl Default for RcLightingConfig {
             cascade_count: 1,
             bounce_damping: 0.4,
             lightmap_size: UVec2::ZERO,
-            vp_world: Vec2::ZERO,
             grid_origin: IVec2::ZERO,
             prev_grid_origin: IVec2::ZERO,
             bounce_offset: IVec2::ZERO,
@@ -313,7 +309,6 @@ fn extract_lighting_data(
     config.viewport_size = UVec2::new(vp_tiles_w as u32, vp_tiles_h as u32);
     config.viewport_offset = UVec2::new(vp_offset_x, vp_offset_y);
     config.tile_size = tile_size;
-    config.vp_world = Vec2::new(vp_world_w, vp_world_h);
     config.cascade_count = cascade_count;
     config.grid_origin = new_grid_origin;
 
@@ -421,6 +416,9 @@ fn update_tile_lightmap(
     let ts = config.tile_size;
     let iw = config.input_size.x as f32;
     let ih = config.input_size.y as f32;
+    if iw == 0.0 || ih == 0.0 {
+        return;
+    }
     let gx = config.grid_origin.x as f32;
     let gy = config.grid_origin.y as f32;
 
