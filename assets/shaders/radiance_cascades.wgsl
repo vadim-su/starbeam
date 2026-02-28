@@ -186,7 +186,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 break;
             }
 
-            let density = textureLoad(density_map, sample_px, 0).r;
+            let fg_density = textureLoad(density_map, sample_px, 0).r;
+            let bg_density = textureLoad(density_bg, sample_px, 0).r;
+            let density = max(fg_density, bg_density);
 
             if density > 0.5 {
                 // Hit a solid surface
