@@ -759,6 +759,7 @@ pub(crate) fn resize_gpu_textures(
 
     // Recreate input textures at new size
     gpu_images.density = make_gpu_texture(&mut images, input_w, input_h, TextureFormat::R8Unorm);
+    gpu_images.density_bg = make_gpu_texture(&mut images, input_w, input_h, TextureFormat::R8Unorm);
     gpu_images.emissive =
         make_gpu_texture(&mut images, input_w, input_h, TextureFormat::Rgba16Float);
     gpu_images.albedo = make_gpu_texture(&mut images, input_w, input_h, TextureFormat::Rgba8Unorm);
