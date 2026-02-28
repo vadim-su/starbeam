@@ -1,5 +1,6 @@
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
+use bevy::ui::widget::ImageNode;
 
 use super::components::*;
 use super::drag_drop::handle_drop;
@@ -105,7 +106,51 @@ pub fn spawn_hotbar(commands: &mut Commands, theme: &UiTheme) {
                                     hovered.slot = None;
                                 },
                             )
-                            .observe(handle_drop);
+                            .observe(handle_drop)
+                            .with_children(|hand_parent| {
+                                // Item icon
+                                hand_parent.spawn((
+                                    ItemIcon,
+                                    ImageNode::default(),
+                                    Node {
+                                        width: Val::Percent(100.0),
+                                        height: Val::Percent(100.0),
+                                        ..default()
+                                    },
+                                    Visibility::Hidden,
+                                    Pickable::IGNORE,
+                                ));
+                                // Frame
+                                hand_parent.spawn((
+                                    SlotFrame,
+                                    ImageNode::default(),
+                                    Node {
+                                        width: Val::Percent(100.0),
+                                        height: Val::Percent(100.0),
+                                        position_type: PositionType::Absolute,
+                                        ..default()
+                                    },
+                                    Visibility::Hidden,
+                                    Pickable::IGNORE,
+                                ));
+                                // Count
+                                hand_parent.spawn((
+                                    ItemCount,
+                                    Text::new(""),
+                                    TextFont {
+                                        font_size: 9.0,
+                                        ..default()
+                                    },
+                                    TextColor(Color::WHITE),
+                                    Node {
+                                        position_type: PositionType::Absolute,
+                                        bottom: Val::Px(1.0),
+                                        right: Val::Px(2.0),
+                                        ..default()
+                                    },
+                                    Pickable::IGNORE,
+                                ));
+                            });
                         // Right hand half
                         slot_parent
                             .spawn((
@@ -140,7 +185,51 @@ pub fn spawn_hotbar(commands: &mut Commands, theme: &UiTheme) {
                                     hovered.slot = None;
                                 },
                             )
-                            .observe(handle_drop);
+                            .observe(handle_drop)
+                            .with_children(|hand_parent| {
+                                // Item icon
+                                hand_parent.spawn((
+                                    ItemIcon,
+                                    ImageNode::default(),
+                                    Node {
+                                        width: Val::Percent(100.0),
+                                        height: Val::Percent(100.0),
+                                        ..default()
+                                    },
+                                    Visibility::Hidden,
+                                    Pickable::IGNORE,
+                                ));
+                                // Frame
+                                hand_parent.spawn((
+                                    SlotFrame,
+                                    ImageNode::default(),
+                                    Node {
+                                        width: Val::Percent(100.0),
+                                        height: Val::Percent(100.0),
+                                        position_type: PositionType::Absolute,
+                                        ..default()
+                                    },
+                                    Visibility::Hidden,
+                                    Pickable::IGNORE,
+                                ));
+                                // Count
+                                hand_parent.spawn((
+                                    ItemCount,
+                                    Text::new(""),
+                                    TextFont {
+                                        font_size: 9.0,
+                                        ..default()
+                                    },
+                                    TextColor(Color::WHITE),
+                                    Node {
+                                        position_type: PositionType::Absolute,
+                                        bottom: Val::Px(1.0),
+                                        right: Val::Px(2.0),
+                                        ..default()
+                                    },
+                                    Pickable::IGNORE,
+                                ));
+                            });
                         // Slot number label
                         slot_parent.spawn((
                             Text::new(format!("{}", i + 1)),
