@@ -53,25 +53,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Probe index = pixel index (lightmap is input-sized, 1:1 with probes).
     let ix = i32(px);
     let iy = i32(py);
-    let max_ix = i32(uniforms.input_size.x) - 1;
-    let max_iy = i32(uniforms.input_size.y) - 1;
 
-    // 5×5 Gaussian spatial blur (σ ≈ 1.0).
-    var total = vec3<f32>(0.0);
-    var weight_sum = 0.0;
-
-    for (var dy = -BLUR_RADIUS; dy <= BLUR_RADIUS; dy++) {
-        for (var dx = -BLUR_RADIUS; dx <= BLUR_RADIUS; dx++) {
-            let nx = clamp(ix + dx, 0, max_ix);
-            let ny = clamp(iy + dy, 0, max_iy);
-            let d2 = f32(dx * dx + dy * dy);
-            let w = exp(-d2 * 0.5);
-            total += probe_radiance(nx, ny) * w;
-            weight_sum += w;
-        }
-    }
-
-    let irradiance = total / weight_sum * BRIGHTNESS;
+    // Direct probe readout (no blur).
+    let irradiance = probe_radiance(ix, iy) * BRIGHTNESS;
 
     textureStore(lightmap_out, vec2<i32>(ix, iy), vec4<f32>(irradiance, 1.0));
 }
