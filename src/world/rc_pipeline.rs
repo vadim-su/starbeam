@@ -282,6 +282,27 @@ fn prepare_rc_textures(
         );
     }
 
+    // Upload density_bg (R8Unorm — 1 byte per texel)
+    if let Some(gpu_img) = gpu_images.get(&handles.density_bg) {
+        let row_bytes = w;
+        let (padded, aligned_bpr) = pad_rows(&input.density_bg, row_bytes, h);
+        render_queue.write_texture(
+            TexelCopyTextureInfo {
+                texture: &gpu_img.texture,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
+            },
+            &padded,
+            TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(aligned_bpr),
+                rows_per_image: Some(h),
+            },
+            extent,
+        );
+    }
+
     // Upload emissive (Rgba16Float — 8 bytes per texel)
     if let Some(gpu_img) = gpu_images.get(&handles.emissive) {
         let emissive_bytes = emissive_to_f16_bytes(&input.emissive);
