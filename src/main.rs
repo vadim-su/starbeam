@@ -42,6 +42,7 @@ fn main() {
         .add_plugins(interaction::InteractionPlugin)
         .add_plugins(ui::UiPlugin)
         .add_plugins(item::ItemPlugin)
+        .add_plugins(inventory::InventoryPlugin)
         .configure_sets(
             Update,
             (
