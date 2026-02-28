@@ -291,19 +291,27 @@ fn extract_lighting_data(
             let buf_y = (max_ty - ty) as u32;
             let idx = (buf_y * input_w + buf_x) as usize;
 
-            let Some(tile_id) = get_fg_tile(&world_map, tx, ty, &world_config, &tile_registry)
+            // FG Density
+            let Some(fg_tile_id) = get_fg_tile(&world_map, tx, ty, &world_config, &tile_registry)
             else {
                 // Above world or unloaded chunk — leave as 0 (air)
                 continue;
             };
 
-            // Density
-            if tile_registry.is_solid(tile_id) {
+            if tile_registry.is_solid(fg_tile_id) {
                 input.density[idx] = 255;
             }
 
-            // Emissive
-            let emission = tile_registry.light_emission(tile_id);
+            // BG Density
+            if let Some(bg_tile_id) = get_bg_tile(&world_map, tx, ty, &world_config, &tile_registry)
+            {
+                if tile_registry.is_solid(bg_tile_id) {
+                    input.density_bg[idx] = 255;
+                }
+            }
+
+            // Emissive (FG only)
+            let emission = tile_registry.light_emission(fg_tile_id);
             if emission != [0, 0, 0] {
                 input.emissive[idx] = [
                     emission[0] as f32 / 255.0,
@@ -313,8 +321,8 @@ fn extract_lighting_data(
                 ];
             }
 
-            // Albedo
-            let albedo = tile_registry.albedo(tile_id);
+            // Albedo (FG only)
+            let albedo = tile_registry.albedo(fg_tile_id);
             input.albedo[idx] = [albedo[0], albedo[1], albedo[2], 255];
         }
     }
