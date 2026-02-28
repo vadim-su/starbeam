@@ -41,13 +41,14 @@ impl Inventory {
                 break;
             }
 
-            if let Some(s) = slot {
-                if s.item_id == item_id && s.count < max_stack {
-                    let can_add = max_stack - s.count;
-                    let to_add = remaining.min(can_add);
-                    s.count += to_add;
-                    remaining -= to_add;
-                }
+            if let Some(s) = slot
+                && s.item_id == item_id
+                && s.count < max_stack
+            {
+                let can_add = max_stack - s.count;
+                let to_add = remaining.min(can_add);
+                s.count += to_add;
+                remaining -= to_add;
             }
         }
 
@@ -97,15 +98,15 @@ impl Inventory {
                 break;
             }
 
-            if let Some(s) = slot {
-                if s.item_id == item_id {
-                    let to_remove = remaining.min(s.count);
-                    s.count -= to_remove;
-                    remaining -= to_remove;
+            if let Some(s) = slot
+                && s.item_id == item_id
+            {
+                let to_remove = remaining.min(s.count);
+                s.count -= to_remove;
+                remaining -= to_remove;
 
-                    if s.count == 0 {
-                        *slot = None;
-                    }
+                if s.count == 0 {
+                    *slot = None;
                 }
             }
         }

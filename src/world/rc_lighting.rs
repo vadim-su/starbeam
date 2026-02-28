@@ -327,7 +327,7 @@ fn update_tile_lightmap(
 
         // Debug log every 60 frames
         *frame_counter += 1;
-        if *frame_counter % 60 == 0 {
+        if (*frame_counter).is_multiple_of(60) {
             debug!(
                 "lm_rect: scale=({}, {}) offset=({}, {}) cam_frac=({}, {}) vp_tiles=({}, {})",
                 scale_x,
