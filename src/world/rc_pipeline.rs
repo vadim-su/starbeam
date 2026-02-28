@@ -72,6 +72,7 @@ struct FinalizeUniformsGpu {
 #[derive(Resource, Clone, ExtractResource)]
 pub struct RcGpuImages {
     pub density: Handle<Image>,
+    pub density_bg: Handle<Image>,
     pub emissive: Handle<Image>,
     pub albedo: Handle<Image>,
     /// Double-buffer A for cascade storage.
@@ -711,6 +712,7 @@ pub(crate) fn create_gpu_images(images: &mut Assets<Image>) -> RcGpuImages {
     let s = 64;
     RcGpuImages {
         density: make_gpu_texture(images, s, s, TextureFormat::R8Unorm),
+        density_bg: make_gpu_texture(images, s, s, TextureFormat::R8Unorm),
         emissive: make_gpu_texture(images, s, s, TextureFormat::Rgba16Float),
         albedo: make_gpu_texture(images, s, s, TextureFormat::Rgba8Unorm),
         cascade_a: make_gpu_texture(images, s * 2, s * 2, TextureFormat::Rgba16Float),
