@@ -2,6 +2,8 @@ use bevy::prelude::*;
 
 use super::components::*;
 use super::theme::UiTheme;
+use crate::inventory::Hotbar;
+use crate::player::Player;
 
 /// Spawn the hotbar UI at the bottom of the screen.
 pub fn spawn_hotbar(commands: &mut Commands, theme: &UiTheme) {
@@ -123,4 +125,38 @@ pub fn spawn_hotbar(commands: &mut Commands, theme: &UiTheme) {
                     });
             }
         });
+}
+
+/// Sync hotbar UI slots with Hotbar component data.
+pub fn update_hotbar_slots(
+    hotbar_query: Query<&Hotbar, With<Player>>,
+    mut slot_query: Query<(&UiSlot, &mut BackgroundColor, Option<&Children>)>,
+    _child_slots: Query<&UiSlot>,
+) {
+    let Ok(hotbar) = hotbar_query.single() else {
+        return;
+    };
+
+    for (slot, mut bg_color, children) in &mut slot_query {
+        // Only update the inner half-slots, not the container
+        let SlotType::Hotbar { index: _, hand } = slot.slot_type else {
+            continue;
+        };
+
+        let Some(_children) = children else {
+            continue;
+        };
+
+        // Get item from hotbar data
+        let item_opt = hotbar.get_item_for_hand(hand == Hand::Left);
+
+        // Update visual state based on item presence
+        if item_opt.is_some() {
+            // Has item — show a color (placeholder until icons)
+            *bg_color = BackgroundColor(Color::srgb(0.3, 0.5, 0.3));
+        } else {
+            // Empty slot
+            *bg_color = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0));
+        }
+    }
 }

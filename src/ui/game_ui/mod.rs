@@ -17,7 +17,8 @@ impl Plugin for GameUiPlugin {
             .init_resource::<HoveredSlot>()
             .init_resource::<InventoryScreenState>()
             .insert_resource(UiTheme::load())
-            .add_systems(OnEnter(AppState::InGame), spawn_game_ui);
+            .add_systems(OnEnter(AppState::InGame), spawn_game_ui)
+            .add_systems(Update, hotbar::update_hotbar_slots);
     }
 }
 
