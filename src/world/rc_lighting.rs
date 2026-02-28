@@ -17,6 +17,12 @@ const RC_PADDING_TILES: i32 = 64;
 /// Warm-white sun color used for sky emitters along the top row.
 const SUN_COLOR: [f32; 3] = [1.0, 0.98, 0.90];
 
+/// HDR multiplier for tile-based point lights (torches, lava, etc.).
+/// Point sources occupy a single tile, so RC probe rays hit them from
+/// far fewer directions than area emitters like the sky band. This boost
+/// compensates for the small angular coverage so torches look bright.
+const POINT_LIGHT_BOOST: f32 = 4.0;
+
 /// Configuration for the radiance cascades lighting pipeline.
 #[derive(Resource, Clone, ExtractResource)]
 pub struct RcLightingConfig {
@@ -345,13 +351,16 @@ fn extract_lighting_data(
                 }
             }
 
-            // Tile-specific emissive (torches, lava, etc.) overrides sun
+            // Tile-specific emissive (torches, lava, etc.) overrides sun.
+            // Boosted by POINT_LIGHT_BOOST to compensate for small angular
+            // coverage — a single-tile emitter is hit by far fewer RC rays
+            // than area emitters like the sky band.
             let emission = tile_registry.light_emission(tile_id);
             if emission != [0, 0, 0] {
                 input.emissive[idx] = [
-                    emission[0] as f32 / 255.0,
-                    emission[1] as f32 / 255.0,
-                    emission[2] as f32 / 255.0,
+                    emission[0] as f32 / 255.0 * POINT_LIGHT_BOOST,
+                    emission[1] as f32 / 255.0 * POINT_LIGHT_BOOST,
+                    emission[2] as f32 / 255.0 * POINT_LIGHT_BOOST,
                     1.0,
                 ];
             }
