@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use super::components::Inventory;
+use super::hotbar::Hotbar;
 use crate::item::ItemRegistry;
 use crate::item::{DroppedItem, PickupConfig};
 use crate::player::Player;
@@ -92,6 +93,32 @@ pub fn item_magnetism_system(
 
             item.velocity.x += direction.x * strength * delta;
             item.velocity.y += direction.y * strength * delta;
+        }
+    }
+}
+
+/// Number keys mapped to hotbar slots.
+const HOTBAR_KEYS: [KeyCode; 6] = [
+    KeyCode::Digit1,
+    KeyCode::Digit2,
+    KeyCode::Digit3,
+    KeyCode::Digit4,
+    KeyCode::Digit5,
+    KeyCode::Digit6,
+];
+
+/// System that handles hotbar slot selection via number keys 1-6.
+pub fn hotbar_input_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut hotbar_query: Query<&mut Hotbar>,
+) {
+    let Ok(mut hotbar) = hotbar_query.single_mut() else {
+        return;
+    };
+
+    for (i, key) in HOTBAR_KEYS.iter().enumerate() {
+        if keyboard.just_pressed(*key) {
+            hotbar.select_slot(i);
         }
     }
 }
