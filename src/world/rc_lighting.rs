@@ -141,6 +141,29 @@ fn get_fg_tile(
         .map(|chunk| chunk.fg.get(lx, ly, world_config.chunk_size))
 }
 
+/// Look up a background tile without requiring `WorldCtxRef`.
+/// Returns stone (bedrock) for `tile_y < 0`, `None` for above-world or unloaded chunks.
+fn get_bg_tile(
+    world_map: &WorldMap,
+    tile_x: i32,
+    tile_y: i32,
+    world_config: &WorldConfig,
+    tile_registry: &TileRegistry,
+) -> Option<TileId> {
+    if tile_y < 0 {
+        return Some(tile_registry.by_name("stone")); // bedrock below world
+    }
+    if tile_y >= world_config.height_tiles {
+        return None; // above world, treat as air
+    }
+    let wrapped_x = world_config.wrap_tile_x(tile_x);
+    let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, world_config.chunk_size);
+    let (lx, ly) = tile_to_local(wrapped_x, tile_y, world_config.chunk_size);
+    world_map
+        .chunk(cx, cy)
+        .map(|chunk| chunk.bg.get(lx, ly, world_config.chunk_size))
+}
+
 /// Compute cascade count so the highest cascade's interval_end fits within
 /// the padding. Each cascade N has interval_end = 4^(N+1). We keep adding
 /// cascades while 4^(count+1) <= padding, ensuring rays from viewport probes
