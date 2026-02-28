@@ -75,7 +75,11 @@ fn spawn_player(
 
     commands.spawn((
         Player,
-        Inventory::new(),
+        {
+            let mut inv = Inventory::new();
+            inv.try_add_item("torch", 10, 999);
+            inv
+        },
         Hotbar::new(),
         Velocity::default(),
         Grounded(false),
