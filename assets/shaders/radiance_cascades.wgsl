@@ -169,10 +169,19 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             let sample_pos = probe_center + ray_dir * dist;
             let sample_px = vec2<i32>(sample_pos);
 
-            // Out of bounds — treat as miss (ray escapes)
+            // Out of bounds — ray escaped the input grid.
             if sample_px.x < 0 || sample_px.y < 0 ||
                sample_px.x >= i32(input_size.x) ||
                sample_px.y >= i32(input_size.y) {
+                // For the highest cascade, rays that escape upward (y < 0)
+                // have reached the sky. Return sun color instead of black to
+                // prevent view-dependent shadow artifacts from boundary
+                // truncation. Lower cascades handle this via merge with
+                // upper cascades that already have correct sky values.
+                if cascade == uniforms.cascade_count - 1u && sample_px.y < 0 {
+                    radiance = vec3<f32>(1.0, 0.98, 0.9); // SUN_COLOR
+                    hit = true;
+                }
                 break;
             }
 

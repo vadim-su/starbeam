@@ -4,7 +4,7 @@ use bevy::prelude::*;
 
 use crate::sets::GameSet;
 
-const CAMERA_SCALE: f32 = 0.7;
+const CAMERA_SCALE: f32 = 1.0; // TODO: restore to 0.7 after lighting debug
 
 pub struct CameraPlugin;
 

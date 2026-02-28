@@ -9,8 +9,10 @@ use crate::world::rc_pipeline;
 use crate::world::tile_renderer::{SharedTileMaterial, TileMaterial};
 
 /// Padding in tiles around the visible viewport for the RC input textures.
-/// Ensures cascades have enough data beyond screen edges.
-const RC_PADDING_TILES: i32 = 32;
+/// Must be >= interval_end of the highest useful cascade so that rays from
+/// viewport probes don't escape the grid. With 3 cascades the max ray
+/// distance is 4^3 = 64, so padding = 64 keeps all viewport rays in-bounds.
+const RC_PADDING_TILES: i32 = 64;
 
 /// Warm-white sun color used for sky emitters along the top row.
 const SUN_COLOR: [f32; 3] = [1.0, 0.98, 0.90];
@@ -32,6 +34,9 @@ pub struct RcLightingConfig {
     pub bounce_damping: f32,
     /// Lightmap output size in tiles (set by `resize_gpu_textures`).
     pub lightmap_size: UVec2,
+    /// Viewport size in world units (viewport_pixels * ortho_scale).
+    /// Used for correct lightmap UV mapping when ortho scale ≠ 1.
+    pub vp_world: Vec2,
 }
 
 impl Default for RcLightingConfig {
@@ -44,6 +49,7 @@ impl Default for RcLightingConfig {
             cascade_count: 1,
             bounce_damping: 0.4,
             lightmap_size: UVec2::ZERO,
+            vp_world: Vec2::ZERO,
         }
     }
 }
@@ -89,16 +95,19 @@ impl Plugin for RcLightingPlugin {
             .add_systems(
                 Update,
                 (
-                    extract_lighting_data.in_set(GameSet::WorldUpdate),
+                    // Lighting runs AFTER Camera so it sees the current frame's
+                    // camera position, not the previous frame's. This prevents
+                    // the lightmap from being misaligned with the rendered tiles.
+                    extract_lighting_data.after(GameSet::Camera),
                     rc_pipeline::resize_gpu_textures
                         .after(extract_lighting_data)
-                        .in_set(GameSet::WorldUpdate),
+                        .after(GameSet::Camera),
                     rc_pipeline::swap_lightmap_handles
                         .after(rc_pipeline::resize_gpu_textures)
-                        .in_set(GameSet::WorldUpdate),
+                        .after(GameSet::Camera),
                     update_tile_lightmap
                         .after(rc_pipeline::swap_lightmap_handles)
-                        .in_set(GameSet::WorldUpdate),
+                        .after(GameSet::Camera),
                 ),
             );
 
@@ -130,14 +139,16 @@ fn get_fg_tile(
         .map(|chunk| chunk.fg.get(lx, ly, world_config.chunk_size))
 }
 
-/// Compute how many cascade levels are needed for the given maximum dimension.
-/// Each cascade covers 4× the area of the previous one, starting at size 4.
+/// Compute cascade count so the highest cascade's interval_end fits within
+/// the padding. Each cascade N has interval_end = 4^(N+1). We keep adding
+/// cascades while 4^(count+1) <= padding, ensuring rays from viewport probes
+/// (which are at least `padding` tiles from the grid edge) stay in-bounds.
 /// Capped at 8 cascades.
-fn compute_cascade_count(max_dim: u32) -> u32 {
+fn compute_cascade_count(padding: u32) -> u32 {
     let mut count = 1u32;
-    let mut size = 4u32;
-    while size < max_dim && count < 8 {
-        size = size.saturating_mul(4);
+    // interval_end for cascade `count` would be 4^(count+1).
+    // Keep adding cascades while the NEXT cascade's interval_end still fits.
+    while 4u32.saturating_pow(count + 1) <= padding && count < 8 {
         count += 1;
     }
     count
@@ -147,7 +158,7 @@ fn compute_cascade_count(max_dim: u32) -> u32 {
 /// density/emissive/albedo buffers for the GPU radiance cascades pipeline.
 #[allow(clippy::too_many_arguments)]
 fn extract_lighting_data(
-    camera_query: Query<(&Camera, &GlobalTransform, &Projection), With<Camera2d>>,
+    camera_query: Query<(&Camera, &Transform, &Projection), With<Camera2d>>,
     world_map: Res<WorldMap>,
     tile_registry: Res<TileRegistry>,
     world_config: Res<WorldConfig>,
@@ -157,7 +168,7 @@ fn extract_lighting_data(
     // Reset dirty flag; will be set true if we produce new data
     input.dirty = false;
 
-    let Ok((camera, camera_gt, projection)) = camera_query.single() else {
+    let Ok((camera, camera_tf, projection)) = camera_query.single() else {
         return;
     };
 
@@ -178,28 +189,57 @@ fn extract_lighting_data(
     let vp_tiles_w = (vp_world_w / tile_size).ceil() as i32;
     let vp_tiles_h = (vp_world_h / tile_size).ceil() as i32;
 
-    // Camera center in tile coordinates
-    let camera_pos = camera_gt.translation().truncate();
+    // Camera center in tile coordinates.
+    // Read Transform (not GlobalTransform) because GlobalTransform isn't
+    // propagated until PostUpdate, and this system runs in Update. The
+    // shader reads view.world_position (from propagated GlobalTransform),
+    // so both must agree on the camera position to avoid 1-frame lag.
+    let camera_pos = camera_tf.translation.truncate();
     let (cam_tile_x, cam_tile_y) = world_to_tile(camera_pos.x, camera_pos.y, tile_size);
 
-    // Tile range with padding
+    // Tile range with padding, SNAPPED to the largest cascade probe spacing.
+    // This ensures cascade probes always land on the same world tiles
+    // regardless of camera position, eliminating view-dependent shadows.
+    let cascade_count = compute_cascade_count(RC_PADDING_TILES as u32);
+    let max_spacing = 1i32 << (cascade_count - 1); // 2^(n-1): 4 for 3 cascades
+
     let half_w = vp_tiles_w / 2;
     let half_h = vp_tiles_h / 2;
-    let min_tx = cam_tile_x - half_w - RC_PADDING_TILES;
-    let max_tx = cam_tile_x + half_w + RC_PADDING_TILES;
-    let min_ty = cam_tile_y - half_h - RC_PADDING_TILES;
-    let max_ty = cam_tile_y + half_h + RC_PADDING_TILES;
 
-    let input_w = (max_tx - min_tx + 1) as u32;
-    let input_h = (max_ty - min_ty + 1) as u32;
+    // Snap min down to a multiple of max_spacing, then round the width UP
+    // to a multiple of max_spacing. This guarantees:
+    //   1. Probes land on the same world tiles regardless of camera position.
+    //   2. input_w/input_h are exact multiples of every cascade's probe_spacing.
+    let raw_min_tx = cam_tile_x - half_w - RC_PADDING_TILES;
+    let raw_min_ty = cam_tile_y - half_h - RC_PADDING_TILES;
+    let raw_w = (vp_tiles_w + 2 * RC_PADDING_TILES) as u32;
+    let raw_h = (vp_tiles_h + 2 * RC_PADDING_TILES) as u32;
+
+    // Snap min down to multiple of max_spacing (floor towards -∞)
+    let min_tx = raw_min_tx - raw_min_tx.rem_euclid(max_spacing);
+    let min_ty = raw_min_ty - raw_min_ty.rem_euclid(max_spacing);
+
+    // Round width/height UP to next multiple of max_spacing
+    let ms = max_spacing as u32;
+    let input_w = raw_w.div_ceil(ms) * ms;
+    let input_h = raw_h.div_ceil(ms) * ms;
+
+    let max_tx = min_tx + input_w as i32 - 1;
+    let max_ty = min_ty + input_h as i32 - 1;
     let total = (input_w * input_h) as usize;
+
+    // Viewport offset: distance from input origin to viewport origin.
+    // Dynamic because the snapped grid may extend further than RC_PADDING_TILES.
+    let vp_offset_x = (cam_tile_x - half_w - min_tx) as u32;
+    let vp_offset_y = (max_ty - cam_tile_y - half_h) as u32; // Y-flipped
 
     // --- Update config ---
     config.input_size = UVec2::new(input_w, input_h);
     config.viewport_size = UVec2::new(vp_tiles_w as u32, vp_tiles_h as u32);
-    config.viewport_offset = UVec2::new(RC_PADDING_TILES as u32, RC_PADDING_TILES as u32);
+    config.viewport_offset = UVec2::new(vp_offset_x, vp_offset_y);
     config.tile_size = tile_size;
-    config.cascade_count = compute_cascade_count(input_w.max(input_h));
+    config.vp_world = Vec2::new(vp_world_w, vp_world_h);
+    config.cascade_count = cascade_count;
 
     // --- Resize buffers if needed ---
     if input.width != input_w || input.height != input_h {
@@ -286,8 +326,6 @@ fn update_tile_lightmap(
     config: Option<Res<RcLightingConfig>>,
     shared_material: Option<Res<SharedTileMaterial>>,
     mut materials: ResMut<Assets<TileMaterial>>,
-    camera_query: Query<(&GlobalTransform, &Projection), With<Camera2d>>,
-    mut frame_counter: Local<u32>,
 ) {
     let (Some(gpu_images), Some(config), Some(shared_material)) =
         (gpu_images, config, shared_material)
@@ -295,61 +333,20 @@ fn update_tile_lightmap(
         return;
     };
 
-    let lm_rect = if let Ok((cam_gt, _projection)) = camera_query.single() {
-        let cam_pos = cam_gt.translation().truncate();
-        let ts = config.tile_size;
-
-        let vp_tiles_w = config.viewport_size.x as f32;
-        let vp_tiles_h = config.viewport_size.y as f32;
-
-        // Sub-tile fractional camera offset (0..tile_size)
-        let cam_frac_x = cam_pos.x - (cam_pos.x / ts).floor() * ts;
-        let cam_frac_y = cam_pos.y - (cam_pos.y / ts).floor() * ts;
-
-        let lm_world_w = vp_tiles_w * ts;
-        let lm_world_h = vp_tiles_h * ts;
-
-        // Scale: X and Y are both 1:1 (no flip needed).
-        // @builtin(position) in the fragment shader gives framebuffer coords
-        // where Y=0 is the TOP of the screen — same convention as GPU textures
-        // (Y=0 = top row). The CPU extraction already flips world Y-up to
-        // texture Y-down (buf_y = max_ty - ty), so no second flip here.
-        let scale_x = 1.0_f32;
-        let scale_y = 1.0_f32;
-
-        // Offset: compensate for sub-tile camera movement
-        // X: screen (0,0) should sample lightmap at (cam_frac / lm_world, ...)
-        // Y: camera moving UP (positive cam_frac_y) means the viewport shows
-        //    higher world content, which sits at lower lightmap V (due to the
-        //    Y-flip baked into the texture). So offset is negative.
-        let offset_x = cam_frac_x / lm_world_w;
-        let offset_y = -(cam_frac_y / lm_world_h);
-
-        // Debug log every 60 frames
-        *frame_counter += 1;
-        if (*frame_counter).is_multiple_of(60) {
-            debug!(
-                "lm_rect: scale=({}, {}) offset=({}, {}) cam_frac=({}, {}) vp_tiles=({}, {})",
-                scale_x,
-                scale_y,
-                offset_x,
-                offset_y,
-                cam_frac_x,
-                cam_frac_y,
-                vp_tiles_w,
-                vp_tiles_h
-            );
-        }
-
-        Vec4::new(scale_x, scale_y, offset_x, offset_y)
-    } else {
-        Vec4::new(1.0, 1.0, 0.0, 0.0)
-    };
+    // Pass constant lightmap parameters to the shader.
+    // The shader computes the actual lightmap UV from world position using
+    // view.world_from_clip (guaranteed current-frame camera data) — no lag.
+    let lm_params = Vec4::new(
+        config.viewport_size.x as f32, // vp_tiles_w
+        config.viewport_size.y as f32, // vp_tiles_h
+        config.tile_size,              // tile_size
+        0.0,                           // unused
+    );
 
     for handle in [&shared_material.fg, &shared_material.bg] {
         if let Some(mat) = materials.get_mut(handle) {
             mat.lightmap = gpu_images.lightmap.clone();
-            mat.lightmap_uv_rect = lm_rect;
+            mat.lightmap_uv_rect = lm_params;
         }
     }
 }
@@ -358,51 +355,49 @@ fn update_tile_lightmap(
 mod tests {
     use super::*;
 
+    // compute_cascade_count(padding) returns the number of cascades such that
+    // the highest cascade's interval_end = 4^(count+1) fits within `padding`.
+    // We add cascades while 4^(count+1) <= padding.
+
     #[test]
-    fn cascade_count_small() {
-        // max_dim=4 → size starts at 4, already >= 4, so count=1
-        assert_eq!(compute_cascade_count(4), 1);
+    fn cascade_count_small_padding() {
+        // padding=0..3: 4^2=16 > 0..3 → never enter loop → count=1
+        assert_eq!(compute_cascade_count(0), 1);
+        assert_eq!(compute_cascade_count(1), 1);
+        assert_eq!(compute_cascade_count(3), 1);
     }
 
     #[test]
-    fn cascade_count_medium() {
-        // max_dim=16 → size=4 (count=1), 16 (count=2) → 16 >= 16 → 2
+    fn cascade_count_padding_16() {
+        // padding=16: 4^2=16 <= 16 → count=2, then 4^3=64 > 16 → stop
         assert_eq!(compute_cascade_count(16), 2);
-        // max_dim=17 → size=4,16,64 → count=3
-        assert_eq!(compute_cascade_count(17), 3);
+        // padding=15: 4^2=16 > 15 → count=1
+        assert_eq!(compute_cascade_count(15), 1);
     }
 
     #[test]
-    fn cascade_count_large() {
-        // max_dim=64 → 4,16,64 → count=3
+    fn cascade_count_padding_64() {
+        // padding=64: 4^2=16 <=64 → 2, 4^3=64 <=64 → 3, 4^4=256 >64 → stop
         assert_eq!(compute_cascade_count(64), 3);
-        // max_dim=256 → 4,16,64,256 → count=4
+        // padding=63: 4^3=64 > 63 → count=2
+        assert_eq!(compute_cascade_count(63), 2);
+    }
+
+    #[test]
+    fn cascade_count_padding_256() {
+        // padding=256: 4^2=16, 4^3=64, 4^4=256 all <= 256 → count=4
         assert_eq!(compute_cascade_count(256), 4);
     }
 
     #[test]
     fn cascade_count_capped_at_8() {
-        // Very large dimension should cap at 8
-        assert_eq!(compute_cascade_count(1_000_000), 8);
+        // Very large padding should cap at 8
+        assert_eq!(compute_cascade_count(u32::MAX), 8);
     }
 
     #[test]
-    fn cascade_count_zero_and_one() {
-        // Edge cases: 0 and 1 should return 1 (size=4 already >= them)
-        assert_eq!(compute_cascade_count(0), 1);
-        assert_eq!(compute_cascade_count(1), 1);
-    }
-
-    #[test]
-    fn cascade_count_boundary_values() {
-        // 4^1=4, 4^2=16, 4^3=64, 4^4=256, 4^5=1024, 4^6=4096, 4^7=16384, 4^8=65536
-        assert_eq!(compute_cascade_count(5), 2); // needs > 4
-        assert_eq!(compute_cascade_count(65), 4); // needs > 64
-        assert_eq!(compute_cascade_count(1024), 5);
-        assert_eq!(compute_cascade_count(1025), 6);
-        assert_eq!(compute_cascade_count(4096), 6);
-        assert_eq!(compute_cascade_count(4097), 7);
-        assert_eq!(compute_cascade_count(16384), 7);
-        assert_eq!(compute_cascade_count(16385), 8);
+    fn cascade_count_current_padding() {
+        // RC_PADDING_TILES = 64 → should give 3 cascades
+        assert_eq!(compute_cascade_count(RC_PADDING_TILES as u32), 3);
     }
 }
