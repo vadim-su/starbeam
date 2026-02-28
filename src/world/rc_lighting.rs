@@ -3,8 +3,10 @@ use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 
 use crate::registry::tile::{TileId, TileRegistry};
 use crate::registry::world::WorldConfig;
+use crate::registry::AppState;
 use crate::sets::GameSet;
 use crate::world::chunk::{tile_to_chunk, tile_to_local, world_to_tile, WorldMap};
+use crate::world::ctx::WorldCtx;
 use crate::world::rc_pipeline;
 use crate::world::tile_renderer::{SharedTileMaterial, TileMaterial};
 
@@ -112,7 +114,9 @@ impl Plugin for RcLightingPlugin {
                     // Lighting runs AFTER Camera so it sees the current frame's
                     // camera position, not the previous frame's. This prevents
                     // the lightmap from being misaligned with the rendered tiles.
-                    extract_lighting_data.after(GameSet::Camera),
+                    extract_lighting_data
+                        .after(GameSet::Camera)
+                        .run_if(in_state(AppState::InGame)),
                     rc_pipeline::resize_gpu_textures
                         .after(extract_lighting_data)
                         .after(GameSet::Camera),
@@ -221,12 +225,13 @@ fn compute_cascade_count(padding: u32) -> u32 {
 #[allow(clippy::too_many_arguments)]
 fn extract_lighting_data(
     camera_query: Query<(&Camera, &Transform, &Projection), With<Camera2d>>,
-    world_map: Res<WorldMap>,
-    tile_registry: Res<TileRegistry>,
-    world_config: Res<WorldConfig>,
+    mut world_map: ResMut<WorldMap>,
+    ctx: WorldCtx,
     mut input: ResMut<RcInputData>,
     mut config: ResMut<RcLightingConfig>,
 ) {
+    let world_config = &*ctx.config;
+    let tile_registry = &*ctx.tile_registry;
     // Reset dirty flag; will be set true if we produce new data
     input.dirty = false;
 
@@ -325,6 +330,29 @@ fn extract_lighting_data(
     input.density.fill(0);
     input.emissive.fill([0.0; 4]);
     input.albedo.fill([0, 0, 0, 0]);
+
+    // --- Pre-generate chunk data for the RC grid ---
+    // Ensures tile lookups never return None for in-bounds tiles, so unloaded
+    // chunks at the edge of the lighting radius have correct tile data instead
+    // of being incorrectly treated as sky emitters.
+    {
+        let ctx_ref = ctx.as_ref();
+        let cs = world_config.chunk_size as i32;
+        let clamp_min_ty = min_ty.max(0);
+        let clamp_max_ty = max_ty.min(world_config.height_tiles - 1);
+        if clamp_min_ty <= clamp_max_ty {
+            let gen_min_cy = clamp_min_ty.div_euclid(cs);
+            let gen_max_cy = clamp_max_ty.div_euclid(cs);
+            let gen_min_cx = min_tx.div_euclid(cs);
+            let gen_max_cx = max_tx.div_euclid(cs);
+            for cy in gen_min_cy..=gen_max_cy {
+                for cx in gen_min_cx..=gen_max_cx {
+                    let data_cx = world_config.wrap_chunk_x(cx);
+                    world_map.get_or_generate_chunk(data_cx, cy, &ctx_ref);
+                }
+            }
+        }
+    }
 
     // --- Fill tile data + sun emitters ---
     // Sun emitters are placed at every tile where BOTH FG and BG are air.
