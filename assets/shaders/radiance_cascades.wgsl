@@ -31,7 +31,6 @@ struct RcUniforms {
 @group(0) @binding(4) var lightmap_prev: texture_2d<f32>;
 @group(0) @binding(5) var cascade_read: texture_2d<f32>;
 @group(0) @binding(6) var cascade_write: texture_storage_2d<rgba16float, write>;
-@group(0) @binding(7) var density_bg: texture_2d<f32>;
 
 const PI: f32 = 3.14159265359;
 const BRANCHING: u32 = 4u;
@@ -186,9 +185,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 break;
             }
 
-            let fg_density = textureLoad(density_map, sample_px, 0).r;
-            let bg_density = textureLoad(density_bg, sample_px, 0).r;
-            let density = max(fg_density, bg_density);
+            let density = textureLoad(density_map, sample_px, 0).r;
 
             if density > 0.5 {
                 // Hit a solid surface

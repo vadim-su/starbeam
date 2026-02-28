@@ -58,10 +58,8 @@ impl Default for RcLightingConfig {
 /// extracted each frame for GPU upload.
 #[derive(Resource, Clone, Default, ExtractResource)]
 pub struct RcInputData {
-    /// 0 = air, 255 = solid. One byte per tile. (FG layer)
+    /// 0 = air, 255 = solid. One byte per tile.
     pub density: Vec<u8>,
-    /// 0 = air, 255 = solid. One byte per tile. (BG layer)
-    pub density_bg: Vec<u8>,
     /// RGBA float per tile. Emissive light sources.
     pub emissive: Vec<[f32; 4]>,
     /// RGBA u8 per tile. Surface albedo for bounce light.
@@ -269,7 +267,6 @@ fn extract_lighting_data(
     // --- Resize buffers if needed ---
     if input.width != input_w || input.height != input_h {
         input.density.resize(total, 0);
-        input.density_bg.resize(total, 0);
         input.emissive.resize(total, [0.0; 4]);
         input.albedo.resize(total, [0, 0, 0, 0]);
         input.width = input_w;
@@ -278,7 +275,6 @@ fn extract_lighting_data(
 
     // Clear buffers
     input.density.fill(0);
-    input.density_bg.fill(0);
     input.emissive.fill([0.0; 4]);
     input.albedo.fill([0, 0, 0, 0]);
 
@@ -291,27 +287,19 @@ fn extract_lighting_data(
             let buf_y = (max_ty - ty) as u32;
             let idx = (buf_y * input_w + buf_x) as usize;
 
-            // FG Density
-            let Some(fg_tile_id) = get_fg_tile(&world_map, tx, ty, &world_config, &tile_registry)
+            let Some(tile_id) = get_fg_tile(&world_map, tx, ty, &world_config, &tile_registry)
             else {
                 // Above world or unloaded chunk — leave as 0 (air)
                 continue;
             };
 
-            if tile_registry.is_solid(fg_tile_id) {
+            // Density
+            if tile_registry.is_solid(tile_id) {
                 input.density[idx] = 255;
             }
 
-            // BG Density
-            if let Some(bg_tile_id) = get_bg_tile(&world_map, tx, ty, &world_config, &tile_registry)
-            {
-                if tile_registry.is_solid(bg_tile_id) {
-                    input.density_bg[idx] = 255;
-                }
-            }
-
-            // Emissive (FG only)
-            let emission = tile_registry.light_emission(fg_tile_id);
+            // Emissive
+            let emission = tile_registry.light_emission(tile_id);
             if emission != [0, 0, 0] {
                 input.emissive[idx] = [
                     emission[0] as f32 / 255.0,
@@ -321,8 +309,8 @@ fn extract_lighting_data(
                 ];
             }
 
-            // Albedo (FG only)
-            let albedo = tile_registry.albedo(fg_tile_id);
+            // Albedo
+            let albedo = tile_registry.albedo(tile_id);
             input.albedo[idx] = [albedo[0], albedo[1], albedo[2], 255];
         }
     }
@@ -330,17 +318,20 @@ fn extract_lighting_data(
     // --- Sun emitters: fill sky columns from top down ---
     // For each column, scan from the top of the input texture (buf_y=0 = max_ty)
     // downward. Mark every air tile as a sun emitter until we hit the first solid
-    // tile. This creates a thick emitter band that diagonal rays can reliably hit,
-    // while keeping the emitter boundary at the actual terrain surface.
+    // tile in EITHER layer (FG or BG). This ensures sunlight only enters through
+    // holes where both FG and BG are removed, while still allowing light to
+    // scatter through cave air once inside (raymarching uses FG-only density).
     for tx in min_tx..=max_tx {
         let buf_x = (tx - min_tx) as u32;
         for buf_y in 0..input_h {
             // buf_y=0 is max_ty (top of world view), buf_y increases downward
             let ty = max_ty - buf_y as i32;
-            let is_sky = get_fg_tile(&world_map, tx, ty, &world_config, &tile_registry)
+            let fg_is_air = get_fg_tile(&world_map, tx, ty, &world_config, &tile_registry)
                 .is_none_or(|id| !tile_registry.is_solid(id));
-            if !is_sky {
-                break; // hit terrain surface, stop filling this column
+            let bg_is_air = get_bg_tile(&world_map, tx, ty, &world_config, &tile_registry)
+                .is_none_or(|id| !tile_registry.is_solid(id));
+            if !fg_is_air || !bg_is_air {
+                break; // hit solid in either layer, stop filling this column
             }
             let idx = (buf_y * input_w + buf_x) as usize;
             input.emissive[idx] = [SUN_COLOR[0], SUN_COLOR[1], SUN_COLOR[2], 1.0];

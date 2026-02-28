@@ -72,7 +72,6 @@ struct FinalizeUniformsGpu {
 #[derive(Resource, Clone, ExtractResource)]
 pub struct RcGpuImages {
     pub density: Handle<Image>,
-    pub density_bg: Handle<Image>,
     pub emissive: Handle<Image>,
     pub albedo: Handle<Image>,
     /// Double-buffer A for cascade storage.
@@ -178,7 +177,6 @@ fn init_rc_pipeline(
                 texture_2d(TextureSampleType::Float { filterable: false }), // @binding(4) lightmap_prev
                 texture_2d(TextureSampleType::Float { filterable: false }), // @binding(5) cascade_read
                 texture_storage_2d(TextureFormat::Rgba16Float, StorageTextureAccess::WriteOnly), // @binding(6)
-                texture_2d(TextureSampleType::Float { filterable: false }), // @binding(7) density_bg
             ),
         ),
     );
@@ -266,27 +264,6 @@ fn prepare_rc_textures(
     if let Some(gpu_img) = gpu_images.get(&handles.density) {
         let row_bytes = w; // 1 byte per texel
         let (padded, aligned_bpr) = pad_rows(&input.density, row_bytes, h);
-        render_queue.write_texture(
-            TexelCopyTextureInfo {
-                texture: &gpu_img.texture,
-                mip_level: 0,
-                origin: Origin3d::ZERO,
-                aspect: TextureAspect::All,
-            },
-            &padded,
-            TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(aligned_bpr),
-                rows_per_image: Some(h),
-            },
-            extent,
-        );
-    }
-
-    // Upload density_bg (R8Unorm — 1 byte per texel)
-    if let Some(gpu_img) = gpu_images.get(&handles.density_bg) {
-        let row_bytes = w;
-        let (padded, aligned_bpr) = pad_rows(&input.density_bg, row_bytes, h);
         render_queue.write_texture(
             TexelCopyTextureInfo {
                 texture: &gpu_img.texture,
@@ -438,7 +415,6 @@ fn prepare_rc_bind_groups(
     // Resolve all GPU image views
     let (
         Some(density),
-        Some(density_bg),
         Some(emissive),
         Some(albedo),
         Some(cascade_a),
@@ -447,7 +423,6 @@ fn prepare_rc_bind_groups(
         Some(lightmap_prev),
     ) = (
         gpu_images.get(&handles.density),
-        gpu_images.get(&handles.density_bg),
         gpu_images.get(&handles.emissive),
         gpu_images.get(&handles.albedo),
         gpu_images.get(&handles.cascade_a),
@@ -529,7 +504,6 @@ fn prepare_rc_bind_groups(
                 &lightmap_prev.texture_view,
                 cascade_read_view,
                 write_tex,
-                &density_bg.texture_view,
             )),
         );
 
@@ -737,7 +711,6 @@ pub(crate) fn create_gpu_images(images: &mut Assets<Image>) -> RcGpuImages {
     let s = 64;
     RcGpuImages {
         density: make_gpu_texture(images, s, s, TextureFormat::R8Unorm),
-        density_bg: make_gpu_texture(images, s, s, TextureFormat::R8Unorm),
         emissive: make_gpu_texture(images, s, s, TextureFormat::Rgba16Float),
         albedo: make_gpu_texture(images, s, s, TextureFormat::Rgba8Unorm),
         cascade_a: make_gpu_texture(images, s * 2, s * 2, TextureFormat::Rgba16Float),
@@ -784,7 +757,6 @@ pub(crate) fn resize_gpu_textures(
 
     // Recreate input textures at new size
     gpu_images.density = make_gpu_texture(&mut images, input_w, input_h, TextureFormat::R8Unorm);
-    gpu_images.density_bg = make_gpu_texture(&mut images, input_w, input_h, TextureFormat::R8Unorm);
     gpu_images.emissive =
         make_gpu_texture(&mut images, input_w, input_h, TextureFormat::Rgba16Float);
     gpu_images.albedo = make_gpu_texture(&mut images, input_w, input_h, TextureFormat::Rgba8Unorm);
