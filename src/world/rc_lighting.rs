@@ -269,6 +269,7 @@ fn extract_lighting_data(
     // --- Resize buffers if needed ---
     if input.width != input_w || input.height != input_h {
         input.density.resize(total, 0);
+        input.density_bg.resize(total, 0);
         input.emissive.resize(total, [0.0; 4]);
         input.albedo.resize(total, [0, 0, 0, 0]);
         input.width = input_w;
@@ -277,6 +278,7 @@ fn extract_lighting_data(
 
     // Clear buffers
     input.density.fill(0);
+    input.density_bg.fill(0);
     input.emissive.fill([0.0; 4]);
     input.albedo.fill([0, 0, 0, 0]);
 
