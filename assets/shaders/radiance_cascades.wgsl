@@ -150,7 +150,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // jitter, point lights produce visible diagonal cross artifacts.
     // Each probe gets a unique angular offset so neighboring probes
     // sample complementary angles, producing smoother light spread.
-    let jitter = fract(f32(probe_x * 7u + probe_y * 13u) * 0.6180339887);
+    //
+    // Use (probe % max_spacing) so the jitter seed is stable when the
+    // snapped grid shifts by max_spacing on camera movement.
+    let ms = 1u << (uniforms.cascade_count - 1u);
+    let jitter = fract(f32((probe_x % ms) * 7u + (probe_y % ms) * 13u) * 0.6180339887);
 
     for (var dir_idx = 0u; dir_idx < n_dirs; dir_idx++) {
         let angle = (f32(dir_idx) + 0.5 + jitter) / f32(n_dirs) * 2.0 * PI;
