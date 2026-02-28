@@ -7,6 +7,13 @@ pub struct InventorySlot {
     pub count: u16,
 }
 
+/// A stack of items with ID and count.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Stack {
+    pub item_id: String,
+    pub count: u16,
+}
+
 /// Player inventory component.
 #[derive(Component, Debug)]
 pub struct Inventory {
