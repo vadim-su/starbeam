@@ -6,12 +6,14 @@ use bevy_egui::EguiPrimaryContextPass;
 
 use crate::registry::AppState;
 use crate::sets::GameSet;
+use game_ui::GameUiPlugin;
 
 pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<debug_panel::DebugUiState>()
+            .add_plugins(GameUiPlugin)
             .add_systems(Update, debug_panel::toggle_debug_panel.in_set(GameSet::Ui))
             .add_systems(
                 EguiPrimaryContextPass,
