@@ -319,9 +319,9 @@ fn extract_lighting_data(
     // For each column, scan from the top of the input texture (buf_y=0 = max_ty)
     // downward. Stop at the first solid tile in EITHER layer:
     // - Both FG and BG air: place sun emitter (light enters freely)
-    // - FG air but BG solid: set density=255 (1-tile barrier) and stop.
-    //   This blocks sunlight through FG-only holes without making cave air
-    //   below opaque — cave tiles are never reached by the scan.
+    // - FG air but BG solid: stop without emitter or density change.
+    //   No emitter = no direct sunlight; density stays 0 so cave air
+    //   below can still scatter light that enters through proper openings.
     // - FG solid: stop (terrain surface).
     for tx in min_tx..=max_tx {
         let buf_x = (tx - min_tx) as u32;
@@ -333,18 +333,13 @@ fn extract_lighting_data(
             if !fg_is_air {
                 break; // hit FG terrain surface, stop
             }
-            let idx = (buf_y * input_w + buf_x) as usize;
             let bg_is_air = get_bg_tile(&world_map, tx, ty, &world_config, &tile_registry)
                 .is_none_or(|id| !tile_registry.is_solid(id));
-            if bg_is_air {
-                // Both layers air: sun emitter
-                input.emissive[idx] = [SUN_COLOR[0], SUN_COLOR[1], SUN_COLOR[2], 1.0];
-            } else {
-                // FG air but BG solid: BG wall blocks sunlight at this tile.
-                // Stop scanning deeper so cave air below keeps density=0 for scattering.
-                input.density[idx] = 255;
-                break;
+            if !bg_is_air {
+                break; // BG wall: stop emitter placement, no density override
             }
+            let idx = (buf_y * input_w + buf_x) as usize;
+            input.emissive[idx] = [SUN_COLOR[0], SUN_COLOR[1], SUN_COLOR[2], 1.0];
         }
     }
 
