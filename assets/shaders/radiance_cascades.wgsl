@@ -21,7 +21,7 @@ struct RcUniforms {
     viewport_size: vec2<u32>,    // 24..32
     bounce_damping: f32,         // 32..36
     _pad0: f32,                  // 36..40
-    _pad1: vec2<u32>,            // 40..48  (align struct to 48 = 3×16)
+    grid_origin: vec2<i32>,      // 40..48  world-space origin (min_tx, min_ty)
 }
 
 @group(0) @binding(0) var<uniform> uniforms: RcUniforms;
@@ -151,10 +151,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Each probe gets a unique angular offset so neighboring probes
     // sample complementary angles, producing smoother light spread.
     //
-    // Use (probe % max_spacing) so the jitter seed is stable when the
-    // snapped grid shifts by max_spacing on camera movement.
-    let ms = 1u << (uniforms.cascade_count - 1u);
-    let jitter = fract(f32((probe_x % ms) * 7u + (probe_y % ms) * 13u) * 0.6180339887);
+    // Use world-space coordinates (probe + grid_origin) for stable jitter
+    // that doesn't shift when the camera moves or the grid snaps.
+    let world_x = i32(probe_x) * i32(spacing) + uniforms.grid_origin.x;
+    let world_y = i32(probe_y) * i32(spacing) + uniforms.grid_origin.y;
+    let jitter = fract(f32(abs(world_x) * 7 + abs(world_y) * 13) * 0.6180339887);
 
     for (var dir_idx = 0u; dir_idx < n_dirs; dir_idx++) {
         let angle = (f32(dir_idx) + 0.5 + jitter) / f32(n_dirs) * 2.0 * PI;

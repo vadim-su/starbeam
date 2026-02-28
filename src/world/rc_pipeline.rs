@@ -48,7 +48,7 @@ struct RcUniformsGpu {
     viewport_size: UVec2,
     bounce_damping: f32,
     _pad0: f32,
-    _pad1: UVec2,
+    grid_origin: IVec2,
 }
 
 /// Uniforms for the finalize compute shader (`rc_finalize.wgsl`).
@@ -477,7 +477,7 @@ fn prepare_rc_bind_groups(
             viewport_size: config.viewport_size,
             bounce_damping: config.bounce_damping,
             _pad0: 0.0,
-            _pad1: UVec2::ZERO,
+            grid_origin: config.grid_origin,
         };
 
         let mut uniform_buf = encase::UniformBuffer::new(Vec::<u8>::new());

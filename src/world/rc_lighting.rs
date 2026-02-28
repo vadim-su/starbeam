@@ -43,6 +43,9 @@ pub struct RcLightingConfig {
     /// Viewport size in world units (viewport_pixels * ortho_scale).
     /// Used for correct lightmap UV mapping when ortho scale ≠ 1.
     pub vp_world: Vec2,
+    /// World-space origin of the input grid (min_tx, min_ty).
+    /// Passed to the shader so angular jitter can use stable world coordinates.
+    pub grid_origin: IVec2,
 }
 
 impl Default for RcLightingConfig {
@@ -56,6 +59,7 @@ impl Default for RcLightingConfig {
             bounce_damping: 0.4,
             lightmap_size: UVec2::ZERO,
             vp_world: Vec2::ZERO,
+            grid_origin: IVec2::ZERO,
         }
     }
 }
@@ -294,6 +298,7 @@ fn extract_lighting_data(
     config.tile_size = tile_size;
     config.vp_world = Vec2::new(vp_world_w, vp_world_h);
     config.cascade_count = cascade_count;
+    config.grid_origin = IVec2::new(min_tx, min_ty);
 
     // --- Resize buffers if needed ---
     if input.width != input_w || input.height != input_h {
