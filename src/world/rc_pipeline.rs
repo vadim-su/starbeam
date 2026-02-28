@@ -50,6 +50,8 @@ struct RcUniformsGpu {
     bounce_damping: f32,
     _pad0: f32,
     grid_origin: IVec2,
+    bounce_offset: IVec2,
+    _pad1: UVec2,
 }
 
 /// Uniforms for the finalize compute shader (`rc_finalize.wgsl`).
@@ -479,6 +481,8 @@ fn prepare_rc_bind_groups(
             bounce_damping: config.bounce_damping,
             _pad0: 0.0,
             grid_origin: config.grid_origin,
+            bounce_offset: config.bounce_offset,
+            _pad1: UVec2::ZERO,
         };
 
         let mut uniform_buf = encase::UniformBuffer::new(Vec::<u8>::new());
@@ -639,8 +643,8 @@ impl Node for RcComputeNode {
             pass.set_pipeline(finalize_pipeline);
             pass.set_bind_group(0, bind_groups.finalize_bind_group.as_ref().unwrap(), &[]);
 
-            let workgroups_x = meta.viewport_w.div_ceil(8);
-            let workgroups_y = meta.viewport_h.div_ceil(8);
+            let workgroups_x = meta.input_w.div_ceil(8);
+            let workgroups_y = meta.input_h.div_ceil(8);
             pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
         }
 
@@ -747,8 +751,6 @@ pub(crate) fn resize_gpu_textures(
 ) {
     let input_w = config.input_size.x;
     let input_h = config.input_size.y;
-    let vp_w = config.viewport_size.x;
-    let vp_h = config.viewport_size.y;
 
     if input_w == 0 || input_h == 0 {
         return;
@@ -788,11 +790,12 @@ pub(crate) fn resize_gpu_textures(
         TextureFormat::Rgba16Float,
     );
 
-    // Lightmap textures: viewport-sized, initialized to white to avoid dark flash
-    gpu_images.lightmap = make_white_gpu_texture(&mut images, vp_w.max(1), vp_h.max(1));
-    gpu_images.lightmap_prev = make_white_gpu_texture(&mut images, vp_w.max(1), vp_h.max(1));
+    // Lightmap textures: input-sized (covers entire RC grid) so bounce light
+    // and tile sampling use stable world-space coordinates without viewport offsets.
+    gpu_images.lightmap = make_white_gpu_texture(&mut images, input_w, input_h);
+    gpu_images.lightmap_prev = make_white_gpu_texture(&mut images, input_w, input_h);
 
-    config.lightmap_size = UVec2::new(vp_w.max(1), vp_h.max(1));
+    config.lightmap_size = UVec2::new(input_w, input_h);
 }
 
 #[cfg(test)]

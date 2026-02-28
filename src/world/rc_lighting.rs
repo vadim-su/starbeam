@@ -46,6 +46,12 @@ pub struct RcLightingConfig {
     /// World-space origin of the input grid (min_tx, min_ty).
     /// Passed to the shader so angular jitter can use stable world coordinates.
     pub grid_origin: IVec2,
+    /// Previous frame's grid origin, for computing bounce light offset.
+    pub prev_grid_origin: IVec2,
+    /// Bounce offset in buffer space: how to shift sample_px when reading
+    /// lightmap_prev (which was written with prev_grid_origin).
+    /// Computed as (dx, -dy) where d = grid_origin - prev_grid_origin.
+    pub bounce_offset: IVec2,
 }
 
 impl Default for RcLightingConfig {
@@ -60,6 +66,8 @@ impl Default for RcLightingConfig {
             lightmap_size: UVec2::ZERO,
             vp_world: Vec2::ZERO,
             grid_origin: IVec2::ZERO,
+            prev_grid_origin: IVec2::ZERO,
+            bounce_offset: IVec2::ZERO,
         }
     }
 }
@@ -292,13 +300,22 @@ fn extract_lighting_data(
     let vp_offset_y = (max_ty - cam_tile_y - half_h) as u32; // Y-flipped
 
     // --- Update config ---
+    let new_grid_origin = IVec2::new(min_tx, min_ty);
+
+    // Bounce offset: correct lightmap_prev reads when grid origin changes.
+    // In buffer X: old_buf_x = new_buf_x + dx (buf_x = tx - min_tx)
+    // In buffer Y: old_buf_y = new_buf_y - dy (buf_y = max_ty - ty, Y-flipped)
+    let d = new_grid_origin - config.prev_grid_origin;
+    config.bounce_offset = IVec2::new(d.x, -d.y);
+    config.prev_grid_origin = new_grid_origin;
+
     config.input_size = UVec2::new(input_w, input_h);
     config.viewport_size = UVec2::new(vp_tiles_w as u32, vp_tiles_h as u32);
     config.viewport_offset = UVec2::new(vp_offset_x, vp_offset_y);
     config.tile_size = tile_size;
     config.vp_world = Vec2::new(vp_world_w, vp_world_h);
     config.cascade_count = cascade_count;
-    config.grid_origin = IVec2::new(min_tx, min_ty);
+    config.grid_origin = new_grid_origin;
 
     // --- Resize buffers if needed ---
     if input.width != input_w || input.height != input_h {
@@ -397,14 +414,21 @@ fn update_tile_lightmap(
         return;
     };
 
-    // Pass constant lightmap parameters to the shader.
-    // The shader computes the actual lightmap UV from world position using
-    // view.world_from_clip (guaranteed current-frame camera data) — no lag.
+    // Pre-compute affine transform: world_pos → lightmap UV.
+    // lightmap_uv = world_pos * scale + offset
+    // Lightmap is input-sized, covering the full RC grid in world-space.
+    // This transform is stable (changes only on grid snap, not every frame).
+    let ts = config.tile_size;
+    let iw = config.input_size.x as f32;
+    let ih = config.input_size.y as f32;
+    let gx = config.grid_origin.x as f32;
+    let gy = config.grid_origin.y as f32;
+
     let lm_params = Vec4::new(
-        config.viewport_size.x as f32, // vp_tiles_w
-        config.viewport_size.y as f32, // vp_tiles_h
-        config.tile_size,              // tile_size
-        0.0,                           // unused
+        1.0 / (ts * iw),  // scale_x
+        -1.0 / (ts * ih), // scale_y (negated: world Y up, texel Y down)
+        -gx / iw,         // offset_x
+        1.0 + gy / ih,    // offset_y
     );
 
     for handle in [&shared_material.fg, &shared_material.bg] {

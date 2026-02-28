@@ -22,6 +22,8 @@ struct RcUniforms {
     bounce_damping: f32,         // 32..36
     _pad0: f32,                  // 36..40
     grid_origin: vec2<i32>,      // 40..48  world-space origin (min_tx, min_ty)
+    bounce_offset: vec2<i32>,    // 48..56  offset for lightmap_prev reads on grid snap
+    _pad1: vec2<u32>,            // 56..64
 }
 
 @group(0) @binding(0) var<uniform> uniforms: RcUniforms;
@@ -143,10 +145,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let dirs_side = u32(sqrt(f32(n_dirs)));
     let input_size = uniforms.input_size;
 
-    // Lightmap dimensions (viewport-sized)
-    let lm_size = uniforms.viewport_size;
-    let vp_off = uniforms.viewport_offset;
-
     for (var dir_idx = 0u; dir_idx < n_dirs; dir_idx++) {
         // With 16+ directions per probe, uniform angular spacing provides
         // sufficient coverage. No per-probe jitter needed — this keeps
@@ -198,13 +196,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let albedo = textureLoad(albedo_map, sample_px, 0).rgb;
 
                 // Bounce light: read previous frame's lightmap at hit position.
-                // Lightmap is viewport-sized, so convert from input-space to viewport-space.
-                let lm_x = sample_px.x - i32(vp_off.x);
-                let lm_y = sample_px.y - i32(vp_off.y);
+                // Lightmap is input-sized. When the grid origin shifts (snap),
+                // bounce_offset corrects the lookup into lightmap_prev which
+                // was written with the previous frame's grid origin.
+                let bounce_px = sample_px + uniforms.bounce_offset;
                 var reflected = vec3<f32>(0.0);
-                if lm_x >= 0 && lm_y >= 0 &&
-                   lm_x < i32(lm_size.x) && lm_y < i32(lm_size.y) {
-                    let prev_light = textureLoad(lightmap_prev, vec2<i32>(lm_x, lm_y), 0).rgb;
+                if bounce_px.x >= 0 && bounce_px.y >= 0 &&
+                   bounce_px.x < i32(input_size.x) && bounce_px.y < i32(input_size.y) {
+                    let prev_light = textureLoad(lightmap_prev, bounce_px, 0).rgb;
                     reflected = prev_light * albedo * uniforms.bounce_damping;
                 }
 
