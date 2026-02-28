@@ -278,7 +278,12 @@ fn extract_lighting_data(
     input.emissive.fill([0.0; 4]);
     input.albedo.fill([0, 0, 0, 0]);
 
-    // --- Fill tile data ---
+    // --- Fill tile data + sun emitters ---
+    // Sun emitters are placed at every tile where BOTH FG and BG are air.
+    // Worldgen guarantees cave air always has BG=solid (fill_block below
+    // surface), so only sky tiles and player-dug openings (both layers
+    // removed) become emitters. This handles side windows, vertical shafts,
+    // and any shape of opening — no top-down scan limitation.
     for ty in min_ty..=max_ty {
         for tx in min_tx..=max_tx {
             let buf_x = (tx - min_tx) as u32;
@@ -289,16 +294,24 @@ fn extract_lighting_data(
 
             let Some(tile_id) = get_fg_tile(&world_map, tx, ty, &world_config, &tile_registry)
             else {
-                // Above world or unloaded chunk — leave as 0 (air)
+                // Above world or unloaded chunk — sky emitter
+                input.emissive[idx] = [SUN_COLOR[0], SUN_COLOR[1], SUN_COLOR[2], 1.0];
                 continue;
             };
 
-            // Density
+            // Density (FG only — BG handled via emitter gating below)
             if tile_registry.is_solid(tile_id) {
                 input.density[idx] = 255;
+            } else {
+                // FG is air: place sun emitter only if BG is also air.
+                let bg_is_air = get_bg_tile(&world_map, tx, ty, &world_config, &tile_registry)
+                    .is_none_or(|id| !tile_registry.is_solid(id));
+                if bg_is_air {
+                    input.emissive[idx] = [SUN_COLOR[0], SUN_COLOR[1], SUN_COLOR[2], 1.0];
+                }
             }
 
-            // Emissive
+            // Tile-specific emissive (torches, lava, etc.) overrides sun
             let emission = tile_registry.light_emission(tile_id);
             if emission != [0, 0, 0] {
                 input.emissive[idx] = [
@@ -312,34 +325,6 @@ fn extract_lighting_data(
             // Albedo
             let albedo = tile_registry.albedo(tile_id);
             input.albedo[idx] = [albedo[0], albedo[1], albedo[2], 255];
-        }
-    }
-
-    // --- Sun emitters: fill sky columns from top down ---
-    // For each column, scan from the top of the input texture (buf_y=0 = max_ty)
-    // downward. Stop at the first solid tile in EITHER layer:
-    // - Both FG and BG air: place sun emitter (light enters freely)
-    // - FG air but BG solid: stop without emitter or density change.
-    //   No emitter = no direct sunlight; density stays 0 so cave air
-    //   below can still scatter light that enters through proper openings.
-    // - FG solid: stop (terrain surface).
-    for tx in min_tx..=max_tx {
-        let buf_x = (tx - min_tx) as u32;
-        for buf_y in 0..input_h {
-            // buf_y=0 is max_ty (top of world view), buf_y increases downward
-            let ty = max_ty - buf_y as i32;
-            let fg_is_air = get_fg_tile(&world_map, tx, ty, &world_config, &tile_registry)
-                .is_none_or(|id| !tile_registry.is_solid(id));
-            if !fg_is_air {
-                break; // hit FG terrain surface, stop
-            }
-            let bg_is_air = get_bg_tile(&world_map, tx, ty, &world_config, &tile_registry)
-                .is_none_or(|id| !tile_registry.is_solid(id));
-            if !bg_is_air {
-                break; // BG wall: stop emitter placement, no density override
-            }
-            let idx = (buf_y * input_w + buf_x) as usize;
-            input.emissive[idx] = [SUN_COLOR[0], SUN_COLOR[1], SUN_COLOR[2], 1.0];
         }
     }
 
