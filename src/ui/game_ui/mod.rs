@@ -1,8 +1,10 @@
 pub mod components;
+pub mod drag_drop;
 pub mod hotbar;
 pub mod inventory;
 pub mod slot_sync;
 pub mod theme;
+pub mod tooltip;
 
 use bevy::prelude::*;
 
@@ -19,13 +21,18 @@ impl Plugin for GameUiPlugin {
             .init_resource::<HoveredSlot>()
             .init_resource::<InventoryScreenState>()
             .insert_resource(UiTheme::load())
-            .add_systems(OnEnter(AppState::InGame), spawn_game_ui)
+            .add_systems(
+                OnEnter(AppState::InGame),
+                (spawn_game_ui, tooltip::spawn_tooltip).chain(),
+            )
             .add_systems(
                 Update,
                 (
                     hotbar::update_hotbar_slots,
                     slot_sync::sync_slot_contents,
                     toggle_inventory,
+                    drag_drop::update_drag_position,
+                    tooltip::update_tooltip,
                 ),
             );
     }

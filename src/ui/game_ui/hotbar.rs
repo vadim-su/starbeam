@@ -1,3 +1,4 @@
+use bevy::picking::prelude::*;
 use bevy::prelude::*;
 
 use super::components::*;
@@ -69,43 +70,73 @@ pub fn spawn_hotbar(commands: &mut Commands, theme: &UiTheme) {
                     ))
                     .with_children(|slot_parent| {
                         // Left hand half
-                        slot_parent.spawn((
-                            UiSlot {
-                                slot_type: SlotType::Hotbar {
-                                    index: i,
-                                    hand: Hand::Left,
+                        slot_parent
+                            .spawn((
+                                UiSlot {
+                                    slot_type: SlotType::Hotbar {
+                                        index: i,
+                                        hand: Hand::Left,
+                                    },
                                 },
-                            },
-                            Node {
-                                width: Val::Percent(50.0),
-                                height: Val::Percent(100.0),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
-                            Pickable {
-                                should_block_lower: false,
-                                is_hoverable: true,
-                            },
-                        ));
+                                Node {
+                                    width: Val::Percent(50.0),
+                                    height: Val::Percent(100.0),
+                                    ..default()
+                                },
+                                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
+                                Pickable {
+                                    should_block_lower: false,
+                                    is_hoverable: true,
+                                },
+                            ))
+                            .observe(
+                                |trigger: On<Pointer<Over>>,
+                                 mut hovered: ResMut<HoveredSlot>,
+                                 slot_query: Query<&UiSlot>| {
+                                    if let Ok(slot) = slot_query.get(trigger.event_target()) {
+                                        hovered.slot = Some(slot.slot_type);
+                                    }
+                                },
+                            )
+                            .observe(
+                                |_trigger: On<Pointer<Out>>, mut hovered: ResMut<HoveredSlot>| {
+                                    hovered.slot = None;
+                                },
+                            );
                         // Right hand half
-                        slot_parent.spawn((
-                            UiSlot {
-                                slot_type: SlotType::Hotbar {
-                                    index: i,
-                                    hand: Hand::Right,
+                        slot_parent
+                            .spawn((
+                                UiSlot {
+                                    slot_type: SlotType::Hotbar {
+                                        index: i,
+                                        hand: Hand::Right,
+                                    },
                                 },
-                            },
-                            Node {
-                                width: Val::Percent(50.0),
-                                height: Val::Percent(100.0),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
-                            Pickable {
-                                should_block_lower: false,
-                                is_hoverable: true,
-                            },
-                        ));
+                                Node {
+                                    width: Val::Percent(50.0),
+                                    height: Val::Percent(100.0),
+                                    ..default()
+                                },
+                                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)),
+                                Pickable {
+                                    should_block_lower: false,
+                                    is_hoverable: true,
+                                },
+                            ))
+                            .observe(
+                                |trigger: On<Pointer<Over>>,
+                                 mut hovered: ResMut<HoveredSlot>,
+                                 slot_query: Query<&UiSlot>| {
+                                    if let Ok(slot) = slot_query.get(trigger.event_target()) {
+                                        hovered.slot = Some(slot.slot_type);
+                                    }
+                                },
+                            )
+                            .observe(
+                                |_trigger: On<Pointer<Out>>, mut hovered: ResMut<HoveredSlot>| {
+                                    hovered.slot = None;
+                                },
+                            );
                         // Slot number label
                         slot_parent.spawn((
                             Text::new(format!("{}", i + 1)),
