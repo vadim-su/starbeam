@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
+use crate::item::{calculate_drops, DroppedItem, DroppedItemPhysics, SpawnParams};
 use crate::player::Player;
 use crate::registry::tile::TileId;
 use crate::world::chunk::{
@@ -63,7 +64,29 @@ pub fn block_interaction_system(
 
         if ctx_ref.tile_registry.is_solid(current) {
             // Break fg tile
+            let tile_def = ctx_ref.tile_registry.get(current);
+            let drops = calculate_drops(&tile_def.drops);
             world_map.set_tile(tile_x, tile_y, Layer::Fg, TileId::AIR, &ctx_ref);
+
+            // Spawn drops
+            let tile_center = Vec2::new(
+                tile_x as f32 * ctx_ref.config.tile_size + ctx_ref.config.tile_size / 2.0,
+                tile_y as f32 * ctx_ref.config.tile_size + ctx_ref.config.tile_size / 2.0,
+            );
+            for (item_id, count) in drops {
+                let params = SpawnParams::random(tile_center);
+                commands.spawn((
+                    DroppedItem {
+                        item_id,
+                        count,
+                        velocity: params.velocity(),
+                        lifetime: Timer::from_seconds(300.0, TimerMode::Once),
+                        magnetized: false,
+                    },
+                    DroppedItemPhysics::default(),
+                    Transform::from_translation(tile_center.extend(1.0)),
+                ));
+            }
         } else {
             // Place fg tile — must be adjacent to an existing solid tile (fg or bg)
             let has_neighbor = [(-1, 0), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
@@ -92,7 +115,29 @@ pub fn block_interaction_system(
 
         if current_bg != TileId::AIR {
             // Break bg tile
+            let tile_def = ctx_ref.tile_registry.get(current_bg);
+            let drops = calculate_drops(&tile_def.drops);
             world_map.set_tile(tile_x, tile_y, Layer::Bg, TileId::AIR, &ctx_ref);
+
+            // Spawn drops
+            let tile_center = Vec2::new(
+                tile_x as f32 * ctx_ref.config.tile_size + ctx_ref.config.tile_size / 2.0,
+                tile_y as f32 * ctx_ref.config.tile_size + ctx_ref.config.tile_size / 2.0,
+            );
+            for (item_id, count) in drops {
+                let params = SpawnParams::random(tile_center);
+                commands.spawn((
+                    DroppedItem {
+                        item_id,
+                        count,
+                        velocity: params.velocity(),
+                        lifetime: Timer::from_seconds(300.0, TimerMode::Once),
+                        magnetized: false,
+                    },
+                    DroppedItemPhysics::default(),
+                    Transform::from_translation(tile_center.extend(1.0)),
+                ));
+            }
         } else {
             // Place bg tile — must be adjacent to an existing tile (fg or bg)
             let has_neighbor = [(-1, 0), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
