@@ -22,11 +22,11 @@ pub struct TileMaterial {
 
 impl Material2d for TileMaterial {
     fn vertex_shader() -> ShaderRef {
-        "shaders/tile.wgsl".into()
+        "engine/shaders/tile.wgsl".into()
     }
 
     fn fragment_shader() -> ShaderRef {
-        "shaders/tile.wgsl".into()
+        "engine/shaders/tile.wgsl".into()
     }
 
     fn specialize(

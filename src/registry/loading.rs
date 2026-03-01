@@ -7,8 +7,9 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use super::assets::{
-    AutotileAsset, BiomeAsset, ObjectRegistryAsset, ParallaxConfigAsset, PlanetTypeAsset,
-    PlayerDefAsset, TileRegistryAsset, WorldConfigAsset,
+    AnimationDef, AutotileAsset, BiomeAsset, CharacterDefAsset, ItemDefAsset,
+    ObjectRegistryAsset, ParallaxConfigAsset, PlanetTypeAsset, TileRegistryAsset,
+    WorldConfigAsset,
 };
 use super::biome::{
     BiomeDef, BiomeId, BiomeRegistry, LayerBoundaries, LayerConfig, LayerConfigs, PlanetConfig,
@@ -18,6 +19,8 @@ use super::player::PlayerConfig;
 use super::tile::TileRegistry;
 use super::world::WorldConfig;
 use super::{AppState, BiomeParallaxConfigs, RegistryHandles};
+use crate::item::definition::ItemDef;
+use crate::item::registry::ItemRegistry;
 use crate::object::registry::ObjectRegistry;
 
 use crate::parallax::config::ParallaxConfig;
@@ -32,8 +35,9 @@ use crate::world::tile_renderer::{SharedTileMaterial, TileMaterial};
 pub(crate) struct LoadingAssets {
     tiles: Handle<TileRegistryAsset>,
     objects: Handle<ObjectRegistryAsset>,
-    player: Handle<PlayerDefAsset>,
+    character: Handle<CharacterDefAsset>,
     world_config: Handle<WorldConfigAsset>,
+    items: Vec<(String, Handle<ItemDefAsset>)>,
 }
 
 /// Intermediate resource holding autotile asset handles during loading.
@@ -51,16 +55,48 @@ pub(crate) struct LoadingBiomeAssets {
     parallax_configs: Vec<(String, Handle<ParallaxConfigAsset>)>,
 }
 
+/// Character animation configuration built from CharacterDefAsset.
+/// Stored as a resource so the animation system can load frames data-driven.
+#[derive(Resource, Debug, Clone)]
+pub struct CharacterAnimConfig {
+    pub sprite_size: (u32, u32),
+    pub animations: std::collections::HashMap<String, AnimationDef>,
+    pub base_path: String,
+}
+
 pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServer>) {
     let tiles = asset_server.load::<TileRegistryAsset>("world/tiles.registry.ron");
     let objects = asset_server.load::<ObjectRegistryAsset>("world/objects.objects.ron");
-    let player = asset_server.load::<PlayerDefAsset>("characters/adventurer/adventurer.def.ron");
+    let character = asset_server
+        .load::<CharacterDefAsset>("content/characters/adventurer/adventurer.character.ron");
     let world_config = asset_server.load::<WorldConfigAsset>("world/world.config.ron");
+
+    // Load item definitions from individual *.item.ron files
+    let items = vec![
+        (
+            "content/tiles/dirt/".to_string(),
+            asset_server.load::<ItemDefAsset>("content/tiles/dirt/dirt.item.ron"),
+        ),
+        (
+            "content/tiles/stone/".to_string(),
+            asset_server.load::<ItemDefAsset>("content/tiles/stone/stone.item.ron"),
+        ),
+        (
+            "content/tiles/grass/".to_string(),
+            asset_server.load::<ItemDefAsset>("content/tiles/grass/grass.item.ron"),
+        ),
+        (
+            "content/objects/torch/".to_string(),
+            asset_server.load::<ItemDefAsset>("content/objects/torch/torch.item.ron"),
+        ),
+    ];
+
     commands.insert_resource(LoadingAssets {
         tiles,
         objects,
-        player,
+        character,
         world_config,
+        items,
     });
 }
 
@@ -70,33 +106,63 @@ pub(crate) fn check_loading(
     asset_server: Res<AssetServer>,
     tile_assets: Res<Assets<TileRegistryAsset>>,
     object_assets: Res<Assets<ObjectRegistryAsset>>,
-    player_assets: Res<Assets<PlayerDefAsset>>,
+    character_assets: Res<Assets<CharacterDefAsset>>,
     world_assets: Res<Assets<WorldConfigAsset>>,
+    item_assets: Res<Assets<ItemDefAsset>>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
-    let (Some(tiles), Some(objects), Some(player), Some(world_cfg)) = (
+    let (Some(tiles), Some(objects), Some(character), Some(world_cfg)) = (
         tile_assets.get(&loading.tiles),
         object_assets.get(&loading.objects),
-        player_assets.get(&loading.player),
+        character_assets.get(&loading.character),
         world_assets.get(&loading.world_config),
     ) else {
         return; // not loaded yet
     };
+
+    // Wait for all item assets to load
+    let all_items_loaded = loading
+        .items
+        .iter()
+        .all(|(_, h)| item_assets.contains(h));
+    if !all_items_loaded {
+        return;
+    }
+
+    // Build ItemRegistry from loaded item.ron files
+    let item_defs: Vec<ItemDef> = loading
+        .items
+        .iter()
+        .filter_map(|(base_path, handle)| {
+            item_assets
+                .get(handle)
+                .map(|asset| asset.to_item_def(base_path))
+        })
+        .collect();
+    commands.insert_resource(ItemRegistry::from_defs(item_defs));
 
     // Build resources from loaded assets
     let registry_ref = TileRegistry::from_defs(tiles.tiles.clone());
     commands.insert_resource(registry_ref);
     commands.insert_resource(ObjectRegistry::from_defs(objects.objects.clone()));
     commands.insert_resource(PlayerConfig {
-        speed: player.speed,
-        jump_velocity: player.jump_velocity,
-        gravity: player.gravity,
-        width: player.width,
-        height: player.height,
-        magnet_radius: player.magnet_radius,
-        magnet_strength: player.magnet_strength,
-        pickup_radius: player.pickup_radius,
+        speed: character.speed,
+        jump_velocity: character.jump_velocity,
+        gravity: character.gravity,
+        width: character.width,
+        height: character.height,
+        magnet_radius: character.magnet_radius,
+        magnet_strength: character.magnet_strength,
+        pickup_radius: character.pickup_radius,
     });
+
+    // Store character animation data for the animation system
+    commands.insert_resource(CharacterAnimConfig {
+        sprite_size: character.sprite_size,
+        animations: character.animations.clone(),
+        base_path: "content/characters/adventurer/".to_string(),
+    });
+
     commands.insert_resource(WorldConfig {
         width_tiles: world_cfg.width_tiles,
         height_tiles: world_cfg.height_tiles,
@@ -112,7 +178,7 @@ pub(crate) fn check_loading(
     commands.insert_resource(RegistryHandles {
         tiles: loading.tiles.clone(),
         objects: loading.objects.clone(),
-        player: loading.player.clone(),
+        character: loading.character.clone(),
         world_config: loading.world_config.clone(),
     });
 
@@ -387,10 +453,10 @@ pub(crate) fn start_autotile_loading(
         if let Some(ref name) = def.autotile
             && seen.insert(name.clone())
         {
-            let ron_handle =
-                asset_server.load::<AutotileAsset>(format!("world/terrain/{name}.autotile.ron"));
+            let ron_handle = asset_server
+                .load::<AutotileAsset>(format!("content/tiles/{name}/{name}.autotile.ron"));
             let img_handle =
-                asset_server.load::<Image>(format!("world/terrain/{name}.png"));
+                asset_server.load::<Image>(format!("content/tiles/{name}/{name}.png"));
             rons.push((name.clone(), ron_handle));
             imgs.push((name.clone(), img_handle));
         }

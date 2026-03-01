@@ -32,11 +32,11 @@ pub struct LitSpriteMaterial {
 
 impl Material2d for LitSpriteMaterial {
     fn vertex_shader() -> ShaderRef {
-        "shaders/lit_sprite.wgsl".into()
+        "engine/shaders/lit_sprite.wgsl".into()
     }
 
     fn fragment_shader() -> ShaderRef {
-        "shaders/lit_sprite.wgsl".into()
+        "engine/shaders/lit_sprite.wgsl".into()
     }
 
     fn specialize(

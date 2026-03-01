@@ -162,8 +162,8 @@ fn init_rc_pipeline(
     pipeline_cache: Res<PipelineCache>,
     asset_server: Res<AssetServer>,
 ) {
-    let cascade_shader = asset_server.load("shaders/radiance_cascades.wgsl");
-    let finalize_shader = asset_server.load("shaders/rc_finalize.wgsl");
+    let cascade_shader = asset_server.load("engine/shaders/radiance_cascades.wgsl");
+    let finalize_shader = asset_server.load("engine/shaders/rc_finalize.wgsl");
 
     // --- Cascade bind group layout (matches radiance_cascades.wgsl @group(0)) ---
     let cascade_layout = BindGroupLayoutDescriptor::new(

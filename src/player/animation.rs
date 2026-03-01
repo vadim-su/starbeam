@@ -3,12 +3,13 @@ use bevy::sprite_render::MeshMaterial2d;
 
 use crate::physics::{Grounded, Velocity};
 use crate::player::{Player, PLAYER_SPRITE_SIZE};
+use crate::registry::loading::CharacterAnimConfig;
 use crate::registry::player::PlayerConfig;
 use crate::world::lit_sprite::LitSpriteMaterial;
 
 const VELOCITY_DEADZONE: f32 = 0.1;
 
-/// Loaded animation frame handles.
+/// Loaded animation frame handles, built from CharacterAnimConfig data.
 #[derive(Resource)]
 pub struct CharacterAnimations {
     pub idle: Vec<Handle<Image>>,
@@ -32,25 +33,33 @@ pub enum AnimationKind {
     Jumping,
 }
 
-/// Load character animation frames (runs once on InGame enter, before spawn_player).
-pub fn load_character_animations(mut commands: Commands, asset_server: Res<AssetServer>) {
+/// Load character animation frames from CharacterAnimConfig (data-driven).
+/// Runs once on InGame enter, before spawn_player.
+pub fn load_character_animations(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    anim_config: Res<CharacterAnimConfig>,
+) {
+    let base = &anim_config.base_path;
+
+    // Helper: resolve frame paths relative to the character's base directory
+    let load_frames = |anim_name: &str| -> Vec<Handle<Image>> {
+        anim_config
+            .animations
+            .get(anim_name)
+            .map(|def| {
+                def.frames
+                    .iter()
+                    .map(|frame| asset_server.load(format!("{base}{frame}")))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
     commands.insert_resource(CharacterAnimations {
-        idle: vec![asset_server.load("characters/adventurer/sprites/staying/frame_000.png")],
-        running: vec![
-            asset_server.load("characters/adventurer/sprites/running/frame_000.png"),
-            asset_server.load("characters/adventurer/sprites/running/frame_001.png"),
-            asset_server.load("characters/adventurer/sprites/running/frame_002.png"),
-            asset_server.load("characters/adventurer/sprites/running/frame_003.png"),
-        ],
-        jumping: vec![
-            asset_server.load("characters/adventurer/sprites/jumping/frame_000.png"),
-            asset_server.load("characters/adventurer/sprites/jumping/frame_001.png"),
-            asset_server.load("characters/adventurer/sprites/jumping/frame_002.png"),
-            asset_server.load("characters/adventurer/sprites/jumping/frame_003.png"),
-            asset_server.load("characters/adventurer/sprites/jumping/frame_004.png"),
-            asset_server.load("characters/adventurer/sprites/jumping/frame_005.png"),
-            asset_server.load("characters/adventurer/sprites/jumping/frame_006.png"),
-        ],
+        idle: load_frames("staying"),
+        running: load_frames("running"),
+        jumping: load_frames("jumping"),
     });
 }
 

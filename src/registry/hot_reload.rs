@@ -5,7 +5,7 @@ use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
 
 use super::assets::{
-    BiomeAsset, ObjectRegistryAsset, ParallaxConfigAsset, PlanetTypeAsset, PlayerDefAsset,
+    BiomeAsset, CharacterDefAsset, ObjectRegistryAsset, ParallaxConfigAsset, PlanetTypeAsset,
     TileRegistryAsset, WorldConfigAsset,
 };
 use super::biome::{
@@ -29,16 +29,16 @@ pub(crate) struct BiomeHandles {
     pub(crate) parallax_configs: Vec<(BiomeId, Handle<ParallaxConfigAsset>)>,
 }
 
-pub(crate) fn hot_reload_player(
-    mut events: MessageReader<AssetEvent<PlayerDefAsset>>,
+pub(crate) fn hot_reload_character(
+    mut events: MessageReader<AssetEvent<CharacterDefAsset>>,
     handles: Res<RegistryHandles>,
-    assets: Res<Assets<PlayerDefAsset>>,
+    assets: Res<Assets<CharacterDefAsset>>,
     mut config: ResMut<PlayerConfig>,
 ) {
     for event in events.read() {
         if let AssetEvent::Modified { id } = event
-            && *id == handles.player.id()
-            && let Some(asset) = assets.get(&handles.player)
+            && *id == handles.character.id()
+            && let Some(asset) = assets.get(&handles.character)
         {
             config.speed = asset.speed;
             config.jump_velocity = asset.jump_velocity;

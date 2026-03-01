@@ -1,0 +1,10 @@
+(
+  id: "stone",
+  display_name: "Stone Block",
+  description: "A solid block of stone.",
+  max_stack: 999,
+  rarity: Common,
+  item_type: Block,
+  icon: "item.png",
+  placeable: Some("stone"),
+)

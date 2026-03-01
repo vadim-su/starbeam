@@ -5,24 +5,26 @@ use bevy::reflect::TypePath;
 use serde::Deserialize;
 
 use super::tile::TileDef;
+use crate::item::definition::ItemDef;
 use crate::object::definition::ObjectDef;
 use crate::parallax::config::ParallaxLayerDef;
 
-/// Asset loaded from tiles.registry.ron
+/// Asset loaded from *.registry.ron (monolithic tile list)
 #[derive(Asset, TypePath, Debug, Deserialize)]
 pub struct TileRegistryAsset {
     pub tiles: Vec<TileDef>,
 }
 
-/// Asset loaded from objects.registry.ron
+/// Asset loaded from *.objects.ron (monolithic object list)
 #[derive(Asset, TypePath, Debug, Deserialize)]
 pub struct ObjectRegistryAsset {
     pub objects: Vec<ObjectDef>,
 }
 
-/// Asset loaded from player.def.ron
+/// Asset loaded from *.character.ron — replaces PlayerDefAsset.
+/// Contains physics parameters, sprite info, and animation definitions.
 #[derive(Asset, TypePath, Debug, Deserialize)]
-pub struct PlayerDefAsset {
+pub struct CharacterDefAsset {
     pub speed: f32,
     pub jump_velocity: f32,
     pub gravity: f32,
@@ -34,6 +36,62 @@ pub struct PlayerDefAsset {
     pub magnet_strength: f32,
     #[serde(default = "default_pickup_radius")]
     pub pickup_radius: f32,
+    pub sprite_size: (u32, u32),
+    pub animations: HashMap<String, AnimationDef>,
+}
+
+/// A single animation within a CharacterDefAsset.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AnimationDef {
+    pub frames: Vec<String>,
+    pub fps: f32,
+}
+
+/// Asset loaded from item.ron — a single item definition.
+#[derive(Asset, TypePath, Debug, Deserialize)]
+pub struct ItemDefAsset {
+    pub id: String,
+    pub display_name: String,
+    pub description: String,
+    #[serde(default = "default_max_stack")]
+    pub max_stack: u16,
+    #[serde(default)]
+    pub rarity: crate::item::definition::Rarity,
+    #[serde(default)]
+    pub item_type: crate::item::definition::ItemType,
+    pub icon: String,
+    #[serde(default)]
+    pub placeable: Option<String>,
+    #[serde(default)]
+    pub placeable_object: Option<String>,
+    #[serde(default)]
+    pub equipment_slot: Option<crate::item::definition::EquipmentSlot>,
+    #[serde(default)]
+    pub stats: Option<crate::item::definition::ItemStats>,
+}
+
+impl ItemDefAsset {
+    /// Convert to an `ItemDef`, resolving the icon path relative to the
+    /// item.ron file's directory.
+    pub fn to_item_def(&self, base_path: &str) -> ItemDef {
+        ItemDef {
+            id: self.id.clone(),
+            display_name: self.display_name.clone(),
+            description: self.description.clone(),
+            max_stack: self.max_stack,
+            rarity: self.rarity,
+            item_type: self.item_type,
+            icon: format!("{}{}", base_path, self.icon),
+            placeable: self.placeable.clone(),
+            placeable_object: self.placeable_object.clone(),
+            equipment_slot: self.equipment_slot,
+            stats: self.stats.clone(),
+        }
+    }
+}
+
+fn default_max_stack() -> u16 {
+    99
 }
 
 fn default_magnet_radius() -> f32 {
@@ -59,7 +117,7 @@ pub struct WorldConfigAsset {
     pub planet_type: String,
 }
 
-/// Asset loaded from bg.parallax.ron
+/// Asset loaded from *.parallax.ron
 #[derive(Asset, TypePath, Debug, Deserialize)]
 pub struct ParallaxConfigAsset {
     pub layers: Vec<ParallaxLayerDef>,
@@ -178,5 +236,30 @@ mod tests {
         assert_eq!(asset.objects[1].light_emission, [255, 170, 40]);
         assert_eq!(asset.objects[1].sprite_columns, 4);
         assert_eq!(asset.objects[1].sprite_rows, 4);
+    }
+
+    #[test]
+    fn ron_roundtrip_character() {
+        let ron_str = std::fs::read_to_string(
+            "assets/content/characters/adventurer/adventurer.character.ron",
+        )
+        .expect("adventurer.character.ron should exist");
+        let asset: CharacterDefAsset =
+            ron::from_str(&ron_str).expect("adventurer.character.ron should parse");
+        assert!(asset.speed > 0.0);
+        assert!(asset.animations.contains_key("staying"));
+        assert!(asset.animations.contains_key("running"));
+        assert!(asset.animations.contains_key("jumping"));
+        assert_eq!(asset.sprite_size, (44, 44));
+    }
+
+    #[test]
+    fn ron_roundtrip_item() {
+        let ron_str = std::fs::read_to_string("assets/content/tiles/dirt/dirt.item.ron")
+            .expect("dirt.item.ron should exist");
+        let asset: ItemDefAsset = ron::from_str(&ron_str).expect("dirt.item.ron should parse");
+        assert_eq!(asset.id, "dirt");
+        assert_eq!(asset.max_stack, 999);
+        assert!(asset.placeable.is_some());
     }
 }
