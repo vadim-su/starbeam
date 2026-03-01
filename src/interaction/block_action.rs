@@ -5,6 +5,7 @@ use bevy::window::PrimaryWindow;
 use crate::inventory::{Hotbar, Inventory};
 use crate::item::{calculate_drops, DropDef, DroppedItem, ItemRegistry, SpawnParams};
 use crate::object::placement::{can_place_object, get_object_at, place_object, remove_object};
+use crate::object::plugin::ObjectSpriteMaterials;
 use crate::object::registry::ObjectRegistry;
 use crate::object::spawn::{ObjectDisplayChunk, PlacedObjectEntity};
 use crate::physics::{Bounce, Friction, Gravity, Grounded, TileCollider, Velocity};
@@ -95,12 +96,13 @@ pub fn block_interaction_system(
     item_registry: Res<ItemRegistry>,
     icon_registry: Res<ItemIconRegistry>,
     quad: Res<SharedLitQuad>,
-    fallback_lm: Res<FallbackLightmap>,
-    fallback_img: Res<FallbackItemImage>,
+    fallbacks: (Res<FallbackLightmap>, Res<FallbackItemImage>),
     mut lit_materials: ResMut<Assets<LitSpriteMaterial>>,
     object_registry: Option<Res<ObjectRegistry>>,
+    object_sprites: Option<Res<ObjectSpriteMaterials>>,
     object_entities: Query<(Entity, &PlacedObjectEntity)>,
 ) {
+    let (fallback_lm, fallback_img) = fallbacks;
     let left_click = mouse.just_pressed(MouseButton::Left);
     let right_click = mouse.just_pressed(MouseButton::Right);
     if !left_click && !right_click {
@@ -245,22 +247,38 @@ pub fn block_interaction_system(
                                 if ctx_ref.config.wrap_chunk_x(display_cx) == data_cx
                                     && display_cy == data_cy
                                 {
-                                    commands.spawn((
-                                        PlacedObjectEntity {
-                                            data_chunk: (data_cx, data_cy),
-                                            object_index: new_idx,
-                                            object_id: obj_id,
-                                        },
-                                        ObjectDisplayChunk {
-                                            display_chunk: (display_cx, data_cy),
-                                        },
-                                        Transform::from_translation(Vec3::new(
-                                            world_x + offset_x,
-                                            world_y + offset_y,
-                                            0.5,
-                                        )),
-                                        Visibility::default(),
-                                    ));
+                                    let mut entity_cmd =
+                                        commands.spawn((
+                                            PlacedObjectEntity {
+                                                data_chunk: (data_cx, data_cy),
+                                                object_index: new_idx,
+                                                object_id: obj_id,
+                                            },
+                                            ObjectDisplayChunk {
+                                                display_chunk: (display_cx, data_cy),
+                                            },
+                                            Transform::from_translation(Vec3::new(
+                                                world_x + offset_x,
+                                                world_y + offset_y,
+                                                0.5,
+                                            ))
+                                            .with_scale(Vec3::new(
+                                                def.size.0 as f32 * ctx_ref.config.tile_size,
+                                                def.size.1 as f32 * ctx_ref.config.tile_size,
+                                                1.0,
+                                            )),
+                                            Visibility::default(),
+                                        ));
+
+                                    if let Some(ref sprites) = object_sprites {
+                                        if let Some(mat_handle) = sprites.materials.get(&obj_id) {
+                                            entity_cmd.insert((
+                                                LitSprite,
+                                                Mesh2d(quad.0.clone()),
+                                                MeshMaterial2d(mat_handle.clone()),
+                                            ));
+                                        }
+                                    }
                                     break;
                                 }
                             }

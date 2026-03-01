@@ -8,4 +8,5 @@ pub mod spawn;
 pub use definition::*;
 pub use placed::*;
 pub use plugin::ObjectPlugin;
+pub use plugin::ObjectSpriteMaterials;
 pub use registry::*;
