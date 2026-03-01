@@ -3,6 +3,7 @@ pub mod autotile;
 pub mod biome_map;
 pub mod chunk;
 pub mod ctx;
+pub mod day_night;
 pub mod lit_sprite;
 pub mod mesh_builder;
 pub mod rc_lighting;
