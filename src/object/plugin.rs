@@ -28,13 +28,24 @@ pub struct AnimatedObjectType {
 
 pub struct ObjectPlugin;
 
+/// Deferred init: runs each Update frame until FallbackLightmap is available,
+/// then builds all object sprite materials and removes itself.
 fn load_object_sprites(
     mut commands: Commands,
     object_registry: Res<ObjectRegistry>,
     asset_server: Res<AssetServer>,
-    fallback_lm: Res<FallbackLightmap>,
+    fallback_lm: Option<Res<FallbackLightmap>>,
     mut lit_materials: ResMut<Assets<LitSpriteMaterial>>,
+    existing: Option<Res<ObjectSpriteMaterials>>,
 ) {
+    // Already initialized — skip.
+    if existing.is_some() {
+        return;
+    }
+    // Wait until FallbackLightmap is inserted by init_lit_sprite_resources.
+    let Some(fallback_lm) = fallback_lm else {
+        return;
+    };
     let mut materials = HashMap::new();
     let mut animated = Vec::new();
 
@@ -112,8 +123,15 @@ fn object_animation_system(
 impl Plugin for ObjectPlugin {
     fn build(&self, app: &mut App) {
         // ObjectRegistry is loaded from objects.objects.ron by RegistryPlugin.
-        app.add_systems(OnEnter(AppState::InGame), load_object_sprites);
-        app.add_systems(Update, object_animation_system.in_set(GameSet::WorldUpdate));
+        // load_object_sprites runs each frame until FallbackLightmap is ready,
+        // then self-disables via the ObjectSpriteMaterials existence check.
+        app.add_systems(
+            Update,
+            (
+                load_object_sprites.run_if(in_state(AppState::InGame)),
+                object_animation_system.in_set(GameSet::WorldUpdate),
+            ),
+        );
     }
 }
 
