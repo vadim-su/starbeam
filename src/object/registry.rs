@@ -12,6 +12,9 @@ pub struct ObjectRegistry {
 
 impl ObjectRegistry {
     pub fn from_defs(defs: Vec<ObjectDef>) -> Self {
+        for def in &defs {
+            def.validate();
+        }
         let name_to_id = defs
             .iter()
             .enumerate()
@@ -22,6 +25,10 @@ impl ObjectRegistry {
 
     pub fn get(&self, id: ObjectId) -> &ObjectDef {
         &self.defs[id.0 as usize]
+    }
+
+    pub fn try_get(&self, id: ObjectId) -> Option<&ObjectDef> {
+        self.defs.get(id.0 as usize)
     }
 
     pub fn by_name(&self, name: &str) -> Option<ObjectId> {

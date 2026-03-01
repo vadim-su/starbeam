@@ -235,13 +235,23 @@ impl WorldMap {
         if let Some(chunk) = self.chunks.get(&(cx, cy)) {
             let idx = (ly * ctx.config.chunk_size + lx) as usize;
             if let Some(occ) = &chunk.occupancy[idx] {
-                if let Some(obj) = chunk.objects.get(occ.object_index as usize) {
+                // Read object from the chunk where it was stored (may differ for multi-tile objects)
+                let (dcx, dcy) = occ.data_chunk;
+                let data_chunk = match self.chunks.get(&(dcx, dcy)) {
+                    Some(c) => c,
+                    None => return false,
+                };
+                if let Some(obj) = data_chunk.objects.get(occ.object_index as usize) {
                     if obj.object_id == ObjectId::NONE {
                         return false;
                     }
                     let def = object_registry.get(obj.object_id);
-                    let obj_base_x = cx * ctx.config.chunk_size as i32 + obj.local_x as i32;
-                    let obj_base_y = cy * ctx.config.chunk_size as i32 + obj.local_y as i32;
+                    let obj_base_x = dcx * ctx.config.chunk_size as i32 + obj.local_x as i32;
+                    let obj_base_y = dcy * ctx.config.chunk_size as i32 + obj.local_y as i32;
+                    // Guard against underflow (stale occupancy or cross-chunk edge case)
+                    if wrapped_x < obj_base_x || tile_y < obj_base_y {
+                        return false;
+                    }
                     let rel_x = (wrapped_x - obj_base_x) as u32;
                     let rel_y = (tile_y - obj_base_y) as u32;
                     return def.is_tile_solid(rel_x, rel_y);
@@ -621,6 +631,8 @@ pub fn rebuild_dirty_chunks(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::object::definition::{ObjectDef, ObjectType, PlacementRule};
+    use crate::object::registry::ObjectRegistry;
     use crate::test_helpers::fixtures;
 
     #[test]
@@ -769,5 +781,113 @@ mod tests {
         let stone = tr.by_name("stone");
         map.set_tile(100, 500, Layer::Bg, stone, &ctx);
         assert_eq!(map.get_tile(100, 500, Layer::Bg, &ctx), Some(stone));
+    }
+
+    fn test_object_registry() -> ObjectRegistry {
+        ObjectRegistry::from_defs(vec![
+            ObjectDef {
+                id: "none".into(),
+                display_name: "None".into(),
+                size: (1, 1),
+                sprite: "".into(),
+                solid_mask: vec![false],
+                placement: PlacementRule::Any,
+                light_emission: [0, 0, 0],
+                object_type: ObjectType::Decoration,
+                drops: vec![],
+            },
+            ObjectDef {
+                id: "barrel".into(),
+                display_name: "Barrel".into(),
+                size: (1, 1),
+                sprite: "objects/barrel.png".into(),
+                solid_mask: vec![true],
+                placement: PlacementRule::Floor,
+                light_emission: [0, 0, 0],
+                object_type: ObjectType::Decoration,
+                drops: vec![],
+            },
+            ObjectDef {
+                id: "torch".into(),
+                display_name: "Torch".into(),
+                size: (1, 1),
+                sprite: "objects/torch.png".into(),
+                solid_mask: vec![false],
+                placement: PlacementRule::Wall,
+                light_emission: [240, 180, 80],
+                object_type: ObjectType::LightSource,
+                drops: vec![],
+            },
+        ])
+    }
+
+    #[test]
+    fn is_solid_or_object_detects_solid_object_tile() {
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
+        let obj_reg = test_object_registry();
+        let mut map = WorldMap::default();
+        map.get_or_generate_chunk(0, 0, &ctx);
+
+        let test_x = 5;
+        let test_y = 5;
+        // Place a barrel (solid_mask=[true]) via direct chunk manipulation
+        map.set_tile(test_x, test_y, Layer::Fg, TileId::AIR, &ctx);
+        let wrapped_x = ctx.config.wrap_tile_x(test_x);
+        let (cx, cy) = tile_to_chunk(wrapped_x, test_y, ctx.config.chunk_size);
+        let (lx, ly) = tile_to_local(wrapped_x, test_y, ctx.config.chunk_size);
+        let chunk = map.chunks.get_mut(&(cx, cy)).unwrap();
+        let obj_index = chunk.objects.len() as u16;
+        chunk.objects.push(PlacedObject {
+            object_id: crate::object::definition::ObjectId(1), // barrel
+            local_x: lx,
+            local_y: ly,
+            state: crate::object::placed::ObjectState::Default,
+        });
+        let idx = (ly * ctx.config.chunk_size + lx) as usize;
+        chunk.occupancy[idx] = Some(OccupancyRef {
+            object_index: obj_index,
+            is_anchor: true,
+            data_chunk: (cx, cy),
+        });
+
+        // Tile is air but barrel is solid → should report solid
+        assert!(!map.is_solid(test_x, test_y, &ctx));
+        assert!(map.is_solid_or_object(test_x, test_y, &ctx, &obj_reg));
+    }
+
+    #[test]
+    fn is_solid_or_object_ignores_non_solid_object_tile() {
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
+        let obj_reg = test_object_registry();
+        let mut map = WorldMap::default();
+        map.get_or_generate_chunk(0, 0, &ctx);
+
+        let test_x = 5;
+        let test_y = 5;
+        // Place a torch (solid_mask=[false]) via direct chunk manipulation
+        map.set_tile(test_x, test_y, Layer::Fg, TileId::AIR, &ctx);
+        let wrapped_x = ctx.config.wrap_tile_x(test_x);
+        let (cx, cy) = tile_to_chunk(wrapped_x, test_y, ctx.config.chunk_size);
+        let (lx, ly) = tile_to_local(wrapped_x, test_y, ctx.config.chunk_size);
+        let chunk = map.chunks.get_mut(&(cx, cy)).unwrap();
+        let obj_index = chunk.objects.len() as u16;
+        chunk.objects.push(PlacedObject {
+            object_id: crate::object::definition::ObjectId(2), // torch
+            local_x: lx,
+            local_y: ly,
+            state: crate::object::placed::ObjectState::Default,
+        });
+        let idx = (ly * ctx.config.chunk_size + lx) as usize;
+        chunk.occupancy[idx] = Some(OccupancyRef {
+            object_index: obj_index,
+            is_anchor: true,
+            data_chunk: (cx, cy),
+        });
+
+        // Tile is air and torch is non-solid → should not report solid
+        assert!(!map.is_solid(test_x, test_y, &ctx));
+        assert!(!map.is_solid_or_object(test_x, test_y, &ctx, &obj_reg));
     }
 }

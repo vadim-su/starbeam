@@ -122,6 +122,7 @@ pub fn place_object(
                 c.occupancy[idx] = Some(OccupancyRef {
                     object_index,
                     is_anchor: dx == 0 && dy == 0,
+                    data_chunk: (anchor_cx, anchor_cy),
                 });
             }
         }
@@ -175,6 +176,7 @@ pub fn remove_object(
     }
 
     // Mark object as removed (don't delete from Vec — would invalidate indices)
+    // TODO: compact tombstones on chunk save/unload to prevent unbounded growth
     if let Some(chunk) = world_map.chunks.get_mut(&(anchor_cx, anchor_cy)) {
         if let Some(slot) = chunk.objects.get_mut(object_index as usize) {
             *slot = PlacedObject {
@@ -204,14 +206,18 @@ pub fn get_object_at(
 
     let chunk = world_map.chunk(cx, cy)?;
     let occ = chunk.occupancy.get(idx)?.as_ref()?;
-    let obj = chunk.objects.get(occ.object_index as usize)?;
+
+    // Read the PlacedObject from the chunk where it was stored (may differ for multi-tile objects)
+    let (dcx, dcy) = occ.data_chunk;
+    let data_chunk = world_map.chunk(dcx, dcy)?;
+    let obj = data_chunk.objects.get(occ.object_index as usize)?;
 
     if obj.object_id == ObjectId::NONE {
         return None;
     }
 
-    let base_x = cx * ctx.config.chunk_size as i32;
-    let base_y = cy * ctx.config.chunk_size as i32;
+    let base_x = dcx * ctx.config.chunk_size as i32;
+    let base_y = dcy * ctx.config.chunk_size as i32;
     let anchor_world_x = base_x + obj.local_x as i32;
     let anchor_world_y = base_y + obj.local_y as i32;
 

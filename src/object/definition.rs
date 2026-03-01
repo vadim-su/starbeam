@@ -57,6 +57,21 @@ impl ObjectDef {
         let idx = (rel_y * self.size.0 + rel_x) as usize;
         self.solid_mask.get(idx).copied().unwrap_or(false)
     }
+
+    /// Validate that solid_mask length matches size. Panics on mismatch.
+    pub fn validate(&self) {
+        let expected = (self.size.0 * self.size.1) as usize;
+        assert_eq!(
+            self.solid_mask.len(),
+            expected,
+            "ObjectDef '{}': solid_mask len {} != size {}x{} = {}",
+            self.id,
+            self.solid_mask.len(),
+            self.size.0,
+            self.size.1,
+            expected
+        );
+    }
 }
 
 #[cfg(test)]

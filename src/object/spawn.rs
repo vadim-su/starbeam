@@ -56,6 +56,8 @@ pub fn spawn_objects_for_chunk(
         // Z = 0.5 (between fg tiles at 0.0 and dropped items at 1.0)
         let z = 0.5;
 
+        // TODO: Add sprite/material when object sprite loading is implemented.
+        // Currently spawns invisible marker entities for collision/interaction only.
         commands.spawn((
             PlacedObjectEntity {
                 data_chunk: (data_chunk_x, chunk_y),

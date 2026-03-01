@@ -12,7 +12,7 @@ use crate::player::Player;
 use crate::registry::tile::TileId;
 use crate::ui::game_ui::icon_registry::ItemIconRegistry;
 use crate::world::chunk::{
-    update_bitmasks_around, world_to_tile, ChunkDirty, Layer, LoadedChunks, WorldMap,
+    tile_to_chunk, update_bitmasks_around, world_to_tile, ChunkDirty, Layer, LoadedChunks, WorldMap,
 };
 use crate::world::ctx::WorldCtx;
 use crate::world::lit_sprite::{
@@ -160,8 +160,8 @@ pub fn block_interaction_system(
 
                 // Despawn the object entity
                 let wrapped_ax = ctx_ref.config.wrap_tile_x(anchor_x);
-                let data_cx = wrapped_ax / ctx_ref.config.chunk_size as i32;
-                let data_cy = anchor_y / ctx_ref.config.chunk_size as i32;
+                let (data_cx, data_cy) =
+                    tile_to_chunk(wrapped_ax, anchor_y, ctx_ref.config.chunk_size);
                 for (entity, placed) in object_entities.iter() {
                     if placed.data_chunk == (data_cx, data_cy) && placed.object_index == obj_idx {
                         commands.entity(entity).despawn();
@@ -205,7 +205,8 @@ pub fn block_interaction_system(
             );
             world_map.set_tile(tile_x, tile_y, Layer::Fg, TileId::AIR, &ctx_ref);
         } else {
-            // Try to place object first, then fall back to tile placement
+            // Left-click on air = place from left hand (objects then tiles).
+            // This is intentional: left-hand items use left-click, right-hand items use right-click.
             let Some(item_id) = hotbar.slots[hotbar.active_slot].left_hand.as_deref() else {
                 return;
             };
@@ -224,8 +225,8 @@ pub fn block_interaction_system(
                             // Spawn entity for the new object
                             let def = obj_reg.get(obj_id);
                             let wrapped_x = ctx_ref.config.wrap_tile_x(tile_x);
-                            let data_cx = wrapped_x / ctx_ref.config.chunk_size as i32;
-                            let data_cy = tile_y / ctx_ref.config.chunk_size as i32;
+                            let (data_cx, data_cy) =
+                                tile_to_chunk(wrapped_x, tile_y, ctx_ref.config.chunk_size);
                             let chunk = world_map.chunk(data_cx, data_cy).unwrap();
                             let new_idx = (chunk.objects.len() - 1) as u16;
 

@@ -3,10 +3,13 @@ use crate::inventory::InventorySlot;
 use super::definition::ObjectId;
 
 /// Reference from an occupancy grid cell to the object that occupies it.
+/// `data_chunk` stores the chunk coordinates where the PlacedObject lives,
+/// which may differ from the chunk this occupancy cell is in (for multi-tile objects).
 #[derive(Debug, Clone, Copy)]
 pub struct OccupancyRef {
     pub object_index: u16,
     pub is_anchor: bool,
+    pub data_chunk: (i32, i32),
 }
 
 /// State of a placed object (varies by ObjectType).
@@ -66,8 +69,10 @@ mod tests {
         let occ = OccupancyRef {
             object_index: 0,
             is_anchor: true,
+            data_chunk: (1, 2),
         };
         assert!(occ.is_anchor);
         assert_eq!(occ.object_index, 0);
+        assert_eq!(occ.data_chunk, (1, 2));
     }
 }
