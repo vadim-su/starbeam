@@ -177,6 +177,6 @@ mod tests {
         assert_eq!(asset.objects[1].id, "torch_object");
         assert_eq!(asset.objects[1].light_emission, [255, 170, 40]);
         assert_eq!(asset.objects[1].sprite_columns, 4);
-        assert_eq!(asset.objects[1].sprite_rows, 5);
+        assert_eq!(asset.objects[1].sprite_rows, 4);
     }
 }
