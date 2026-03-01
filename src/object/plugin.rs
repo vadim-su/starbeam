@@ -106,8 +106,9 @@ fn object_animation_system(
         anim.timer.tick(time.delta());
         if anim.timer.just_finished() {
             anim.current_frame = (anim.current_frame + 1) % anim.total_frames;
-            let col = anim.current_frame % anim.columns;
-            let row = anim.current_frame / anim.columns;
+            // Column-major order: read top-to-bottom, then next column.
+            let col = anim.current_frame / anim.rows;
+            let row = anim.current_frame % anim.rows;
             let scale_x = 1.0 / anim.columns as f32;
             let scale_y = 1.0 / anim.rows as f32;
             let offset_x = col as f32 * scale_x;
