@@ -3,6 +3,7 @@ pub mod movement;
 pub mod wrap;
 
 use bevy::prelude::*;
+use bevy::sprite_render::MeshMaterial2d;
 
 use crate::inventory::{Hotbar, Inventory};
 use crate::physics::{Gravity, TileCollider};
@@ -11,6 +12,7 @@ use crate::registry::player::PlayerConfig;
 use crate::registry::world::WorldConfig;
 use crate::registry::AppState;
 use crate::sets::GameSet;
+use crate::world::lit_sprite::{FallbackLightmap, LitSprite, LitSpriteMaterial, SharedLitQuad};
 use crate::world::terrain_gen;
 use crate::world::terrain_gen::TerrainNoiseCache;
 
@@ -20,6 +22,9 @@ use animation::{AnimationKind, AnimationState, CharacterAnimations};
 
 #[derive(Component)]
 pub struct Player;
+
+/// Player sprite pixel dimensions (44×44 adventurer frames).
+const PLAYER_SPRITE_SIZE: f32 = 44.0;
 
 pub struct PlayerPlugin;
 
@@ -49,6 +54,9 @@ fn spawn_player(
     planet_config: Res<PlanetConfig>,
     noise_cache: Res<TerrainNoiseCache>,
     animations: Res<CharacterAnimations>,
+    quad: Res<SharedLitQuad>,
+    fallback_lm: Res<FallbackLightmap>,
+    mut lit_materials: ResMut<Assets<LitSpriteMaterial>>,
 ) {
     let spawn_tile_x = 0;
     let surface_y = terrain_gen::surface_height(
@@ -62,8 +70,15 @@ fn spawn_player(
     let spawn_pixel_y =
         (surface_y + 5) as f32 * world_config.tile_size + player_config.height / 2.0;
 
+    let material = lit_materials.add(LitSpriteMaterial {
+        sprite: animations.idle[0].clone(),
+        lightmap: fallback_lm.0.clone(),
+        lightmap_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
+    });
+
     commands.spawn((
         Player,
+        LitSprite,
         {
             let mut inv = Inventory::new();
             inv.try_add_item("torch", 10, 999, crate::inventory::BagTarget::Main);
@@ -83,7 +98,12 @@ fn spawn_player(
             timer: Timer::from_seconds(0.15, TimerMode::Repeating),
             facing_right: true,
         },
-        Sprite::from_image(animations.idle[0].clone()),
-        Transform::from_xyz(spawn_pixel_x, spawn_pixel_y, 1.0),
+        Mesh2d(quad.0.clone()),
+        MeshMaterial2d(material),
+        Transform::from_xyz(spawn_pixel_x, spawn_pixel_y, 1.0).with_scale(Vec3::new(
+            PLAYER_SPRITE_SIZE,
+            PLAYER_SPRITE_SIZE,
+            1.0,
+        )),
     ));
 }

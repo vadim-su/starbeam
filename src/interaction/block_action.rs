@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::sprite_render::MeshMaterial2d;
 use bevy::window::PrimaryWindow;
 
 use crate::inventory::{Hotbar, Inventory};
@@ -11,32 +12,43 @@ use crate::world::chunk::{
     update_bitmasks_around, world_to_tile, ChunkDirty, Layer, LoadedChunks, WorldMap,
 };
 use crate::world::ctx::WorldCtx;
+use crate::world::lit_sprite::{
+    FallbackItemImage, FallbackLightmap, LitSprite, LitSpriteMaterial, SharedLitQuad,
+};
 
-/// Spawn dropped items at a tile position with random trajectories and sprites.
+/// Dropped item display size in pixels (icons are 16×16).
+const DROPPED_ITEM_SIZE: f32 = 16.0;
+/// Fallback size for items without an icon.
+const DROPPED_ITEM_FALLBACK_SIZE: f32 = 8.0;
+
+/// Spawn dropped items at a tile position with random trajectories and lit-sprite materials.
 fn spawn_tile_drops(
     commands: &mut Commands,
     tile_drops: &[DropDef],
     tile_center: Vec2,
     item_registry: &ItemRegistry,
     icon_registry: &ItemIconRegistry,
+    quad: &SharedLitQuad,
+    fallback_lm: &FallbackLightmap,
+    lit_materials: &mut Assets<LitSpriteMaterial>,
+    fallback_image: &Handle<Image>,
 ) {
     let drops = calculate_drops(tile_drops);
     for (item_id, count) in drops {
         let params = SpawnParams::random(tile_center);
 
-        // Resolve sprite from icon registry
-        let sprite = item_registry
+        // Resolve sprite texture from icon registry
+        let (sprite_image, size) = item_registry
             .by_name(&item_id)
             .and_then(|id| icon_registry.get(id).cloned())
-            .map(Sprite::from_image)
-            .unwrap_or_else(|| {
-                // Fallback: small colored square for items without icons
-                Sprite {
-                    color: Color::srgb(0.8, 0.6, 0.2),
-                    custom_size: Some(Vec2::splat(8.0)),
-                    ..default()
-                }
-            });
+            .map(|img| (img, DROPPED_ITEM_SIZE))
+            .unwrap_or_else(|| (fallback_image.clone(), DROPPED_ITEM_FALLBACK_SIZE));
+
+        let material = lit_materials.add(LitSpriteMaterial {
+            sprite: sprite_image,
+            lightmap: fallback_lm.0.clone(),
+            lightmap_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
+        });
 
         let vel = params.velocity();
 
@@ -46,6 +58,7 @@ fn spawn_tile_drops(
                 count,
                 lifetime: Timer::from_seconds(300.0, TimerMode::Once),
             },
+            LitSprite,
             Velocity { x: vel.x, y: vel.y },
             Gravity(400.0),
             Grounded(false),
@@ -55,8 +68,10 @@ fn spawn_tile_drops(
             },
             Friction(0.9),
             Bounce(0.3),
-            sprite,
-            Transform::from_translation(tile_center.extend(1.0)),
+            Mesh2d(quad.0.clone()),
+            MeshMaterial2d(material),
+            Transform::from_translation(tile_center.extend(1.0))
+                .with_scale(Vec3::new(size, size, 1.0)),
         ));
     }
 }
@@ -75,6 +90,10 @@ pub fn block_interaction_system(
     loaded_chunks: Res<LoadedChunks>,
     item_registry: Res<ItemRegistry>,
     icon_registry: Res<ItemIconRegistry>,
+    quad: Res<SharedLitQuad>,
+    fallback_lm: Res<FallbackLightmap>,
+    fallback_img: Res<FallbackItemImage>,
+    mut lit_materials: ResMut<Assets<LitSpriteMaterial>>,
 ) {
     let left_click = mouse.just_pressed(MouseButton::Left);
     let right_click = mouse.just_pressed(MouseButton::Right);
@@ -129,6 +148,10 @@ pub fn block_interaction_system(
                 tile_center,
                 &item_registry,
                 &icon_registry,
+                &quad,
+                &fallback_lm,
+                &mut lit_materials,
+                &fallback_img.0,
             );
             world_map.set_tile(tile_x, tile_y, Layer::Fg, TileId::AIR, &ctx_ref);
         } else {
@@ -179,6 +202,10 @@ pub fn block_interaction_system(
                 tile_center,
                 &item_registry,
                 &icon_registry,
+                &quad,
+                &fallback_lm,
+                &mut lit_materials,
+                &fallback_img.0,
             );
             world_map.set_tile(tile_x, tile_y, Layer::Bg, TileId::AIR, &ctx_ref);
         } else {

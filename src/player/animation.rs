@@ -1,8 +1,10 @@
 use bevy::prelude::*;
+use bevy::sprite_render::MeshMaterial2d;
 
 use crate::physics::{Grounded, Velocity};
-use crate::player::Player;
+use crate::player::{Player, PLAYER_SPRITE_SIZE};
 use crate::registry::player::PlayerConfig;
+use crate::world::lit_sprite::LitSpriteMaterial;
 
 const VELOCITY_DEADZONE: f32 = 0.1;
 
@@ -53,13 +55,27 @@ pub fn load_character_animations(mut commands: Commands, asset_server: Res<Asset
 }
 
 /// Advance animation frames and switch states based on velocity.
+///
+/// Uses `MeshMaterial2d<LitSpriteMaterial>` instead of `Sprite`: the animation
+/// swaps the sprite texture inside the material, and facing direction is
+/// controlled via `Transform.scale.x` (negative = flip horizontally).
 pub fn animate_player(
     time: Res<Time>,
     animations: Res<CharacterAnimations>,
     player_config: Res<PlayerConfig>,
-    mut query: Query<(&mut AnimationState, &mut Sprite, &Velocity, &Grounded), With<Player>>,
+    mut materials: ResMut<Assets<LitSpriteMaterial>>,
+    mut query: Query<
+        (
+            &mut AnimationState,
+            &MeshMaterial2d<LitSpriteMaterial>,
+            &mut Transform,
+            &Velocity,
+            &Grounded,
+        ),
+        With<Player>,
+    >,
 ) {
-    for (mut anim, mut sprite, velocity, grounded) in &mut query {
+    for (mut anim, mat_handle, mut transform, velocity, grounded) in &mut query {
         // Determine animation kind
         let new_kind = if !grounded.0 {
             AnimationKind::Jumping
@@ -76,7 +92,9 @@ pub fn animate_player(
             anim.timer.reset();
             let frames = frames_for_kind(&animations, anim.kind);
             if !frames.is_empty() {
-                sprite.image = frames[0].clone();
+                if let Some(mat) = materials.get_mut(&mat_handle.0) {
+                    mat.sprite = frames[0].clone();
+                }
             }
         }
 
@@ -87,7 +105,12 @@ pub fn animate_player(
         if velocity.x < -VELOCITY_DEADZONE {
             anim.facing_right = false;
         }
-        sprite.flip_x = !anim.facing_right;
+        // Flip via Transform.scale.x: positive = right, negative = left
+        transform.scale.x = if anim.facing_right {
+            PLAYER_SPRITE_SIZE
+        } else {
+            -PLAYER_SPRITE_SIZE
+        };
 
         // Frame advancement depends on animation kind
         match anim.kind {
@@ -109,7 +132,9 @@ pub fn animate_player(
                     let new_frame = new_frame.min(frames.len() - 1);
                     if anim.frame != new_frame {
                         anim.frame = new_frame;
-                        sprite.image = frames[new_frame].clone();
+                        if let Some(mat) = materials.get_mut(&mat_handle.0) {
+                            mat.sprite = frames[new_frame].clone();
+                        }
                     }
                 }
             }
@@ -120,7 +145,9 @@ pub fn animate_player(
                     let frames = frames_for_kind(&animations, anim.kind);
                     if !frames.is_empty() {
                         anim.frame = (anim.frame + 1) % frames.len();
-                        sprite.image = frames[anim.frame].clone();
+                        if let Some(mat) = materials.get_mut(&mat_handle.0) {
+                            mat.sprite = frames[anim.frame].clone();
+                        }
                     }
                 }
             }

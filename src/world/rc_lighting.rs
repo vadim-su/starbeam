@@ -7,6 +7,7 @@ use crate::registry::AppState;
 use crate::sets::GameSet;
 use crate::world::chunk::{tile_to_chunk, tile_to_local, world_to_tile, WorldMap};
 use crate::world::ctx::WorldCtx;
+use crate::world::lit_sprite::LitSpriteMaterial;
 use crate::world::rc_pipeline;
 use crate::world::tile_renderer::{SharedTileMaterial, TileMaterial};
 
@@ -429,7 +430,8 @@ fn update_tile_lightmap(
     gpu_images: Option<Res<rc_pipeline::RcGpuImages>>,
     config: Option<Res<RcLightingConfig>>,
     shared_material: Option<Res<SharedTileMaterial>>,
-    mut materials: ResMut<Assets<TileMaterial>>,
+    mut tile_materials: ResMut<Assets<TileMaterial>>,
+    mut lit_sprite_materials: ResMut<Assets<LitSpriteMaterial>>,
 ) {
     let (Some(gpu_images), Some(config), Some(shared_material)) =
         (gpu_images, config, shared_material)
@@ -457,11 +459,19 @@ fn update_tile_lightmap(
         1.0 + gy / ih,    // offset_y
     );
 
+    // Update tile materials (shared FG/BG handles)
     for handle in [&shared_material.fg, &shared_material.bg] {
-        if let Some(mat) = materials.get_mut(handle) {
+        if let Some(mat) = tile_materials.get_mut(handle) {
             mat.lightmap = gpu_images.lightmap.clone();
             mat.lightmap_uv_rect = lm_params;
         }
+    }
+
+    // Update ALL lit sprite materials (player, dropped items, etc.)
+    // with the current lightmap and UV transform.
+    for (_id, mat) in lit_sprite_materials.iter_mut() {
+        mat.lightmap = gpu_images.lightmap.clone();
+        mat.lightmap_uv_rect = lm_params;
     }
 }
 
