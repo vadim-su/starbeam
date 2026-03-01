@@ -55,6 +55,7 @@ impl Plugin for WorldPlugin {
                 Update,
                 day_night::tint_parallax_layers
                     .in_set(GameSet::Parallax)
+                    .after(crate::parallax::transition::parallax_transition_system)
                     .run_if(resource_exists::<day_night::WorldTime>),
             );
     }

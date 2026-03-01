@@ -47,10 +47,10 @@ pub struct DayNightConfig {
     pub day_ratio: f32,
     pub sunset_ratio: f32,
     pub night_ratio: f32,
-    pub sun_colors: [(f32, f32, f32); 4],
+    pub sun_colors: [[f32; 3]; 4],
     pub sun_intensities: [f32; 4],
     pub ambient_mins: [f32; 4],
-    pub sky_colors: [(f32, f32, f32, f32); 4],
+    pub sky_colors: [[f32; 4]; 4],
     pub danger_multipliers: [f32; 4],
     pub temperature_modifiers: [f32; 4],
 }
@@ -138,22 +138,20 @@ fn lerp_phase_value(values: &[f32; 4], phase: DayPhase, progress: f32) -> f32 {
     a + (b - a) * progress
 }
 
-fn lerp_phase_color(colors: &[(f32, f32, f32); 4], phase: DayPhase, progress: f32) -> Vec3 {
-    let (ar, ag, ab) = colors[phase.index()];
-    let (br, bg, bb) = colors[phase.next().index()];
-    let a = Vec3::new(ar, ag, ab);
-    let b = Vec3::new(br, bg, bb);
+fn lerp_phase_color(colors: &[[f32; 3]; 4], phase: DayPhase, progress: f32) -> Vec3 {
+    let a = Vec3::from_array(colors[phase.index()]);
+    let b = Vec3::from_array(colors[phase.next().index()]);
     a + (b - a) * progress
 }
 
-fn lerp_phase_color4(colors: &[(f32, f32, f32, f32); 4], phase: DayPhase, progress: f32) -> Color {
-    let (ar, ag, ab, aa) = colors[phase.index()];
-    let (br, bg, bb, ba) = colors[phase.next().index()];
+fn lerp_phase_color4(colors: &[[f32; 4]; 4], phase: DayPhase, progress: f32) -> Color {
+    let a = colors[phase.index()];
+    let b = colors[phase.next().index()];
     Color::srgba(
-        ar + (br - ar) * progress,
-        ag + (bg - ag) * progress,
-        ab + (bb - ab) * progress,
-        aa + (ba - aa) * progress,
+        a[0] + (b[0] - a[0]) * progress,
+        a[1] + (b[1] - a[1]) * progress,
+        a[2] + (b[2] - a[2]) * progress,
+        a[3] + (b[3] - a[3]) * progress,
     )
 }
 
@@ -224,6 +222,14 @@ pub fn load_day_night_config(mut commands: Commands) {
     let ron_str = include_str!("../../assets/world/day_night.config.ron");
     let config: DayNightConfig =
         ron::from_str(ron_str).expect("Failed to parse day_night.config.ron");
+
+    // Validate phase ratios sum to 1.0
+    let sum: f32 = config.phase_ratios().iter().sum();
+    assert!(
+        (sum - 1.0).abs() < 0.01,
+        "Day/night phase ratios must sum to 1.0, got {sum}"
+    );
+
     info!(
         "Loaded DayNightConfig: cycle={}s, phases={:.0}/{:.0}/{:.0}/{:.0}%",
         config.cycle_duration_secs,
@@ -232,8 +238,21 @@ pub fn load_day_night_config(mut commands: Commands) {
         config.sunset_ratio * 100.0,
         config.night_ratio * 100.0,
     );
+
+    // Initialize WorldTime with correct values from config (avoid first-frame flash)
+    let mut wt = WorldTime::default();
+    let (phase, progress) = compute_phase_and_progress(wt.time_of_day, &config);
+    wt.phase = phase;
+    wt.phase_progress = progress;
+    wt.sun_color = lerp_phase_color(&config.sun_colors, phase, progress);
+    wt.sun_intensity = lerp_phase_value(&config.sun_intensities, phase, progress);
+    wt.ambient_min = lerp_phase_value(&config.ambient_mins, phase, progress);
+    wt.sky_color = lerp_phase_color4(&config.sky_colors, phase, progress);
+    wt.danger_multiplier = lerp_phase_value(&config.danger_multipliers, phase, progress);
+    wt.temperature_modifier = lerp_phase_value(&config.temperature_modifiers, phase, progress);
+
     commands.insert_resource(config);
-    commands.insert_resource(WorldTime::default());
+    commands.insert_resource(wt);
 }
 
 // ---------------------------------------------------------------------------
@@ -252,18 +271,18 @@ mod tests {
             sunset_ratio: 0.10,
             night_ratio: 0.40,
             sun_colors: [
-                (1.0, 0.65, 0.35),
-                (1.0, 0.98, 0.90),
-                (1.0, 0.50, 0.25),
-                (0.15, 0.15, 0.35),
+                [1.0, 0.65, 0.35],
+                [1.0, 0.98, 0.90],
+                [1.0, 0.50, 0.25],
+                [0.15, 0.15, 0.35],
             ],
             sun_intensities: [0.6, 1.0, 0.5, 0.0],
             ambient_mins: [0.08, 0.0, 0.06, 0.04],
             sky_colors: [
-                (0.95, 0.55, 0.35, 1.0),
-                (1.0, 1.0, 1.0, 1.0),
-                (0.90, 0.40, 0.30, 1.0),
-                (0.08, 0.08, 0.18, 1.0),
+                [0.95, 0.55, 0.35, 1.0],
+                [1.0, 1.0, 1.0, 1.0],
+                [0.90, 0.40, 0.30, 1.0],
+                [0.08, 0.08, 0.18, 1.0],
             ],
             danger_multipliers: [0.5, 0.0, 0.5, 1.0],
             temperature_modifiers: [-0.1, 0.0, -0.05, -0.2],
