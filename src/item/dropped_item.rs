@@ -6,7 +6,6 @@ pub struct DroppedItem {
     pub item_id: String,
     pub count: u16,
     pub lifetime: Timer,
-    pub magnetized: bool,
 }
 
 /// Parameters for spawning a dropped item.
@@ -78,12 +77,10 @@ mod tests {
             item_id: "dirt".into(),
             count: 5,
             lifetime: Timer::from_seconds(300.0, TimerMode::Once),
-            magnetized: false,
         };
 
         assert_eq!(item.item_id, "dirt");
         assert_eq!(item.count, 5);
-        assert!(!item.magnetized);
     }
 
     #[test]

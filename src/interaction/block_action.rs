@@ -45,7 +45,6 @@ fn spawn_tile_drops(
                 item_id,
                 count,
                 lifetime: Timer::from_seconds(300.0, TimerMode::Once),
-                magnetized: false,
             },
             Velocity { x: vel.x, y: vel.y },
             Gravity(400.0),
