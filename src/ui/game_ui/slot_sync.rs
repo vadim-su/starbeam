@@ -39,8 +39,8 @@ pub fn sync_slot_contents(
 /// Update slot icons, frames, and counts from inventory/hotbar data.
 /// Only runs when Inventory or Hotbar components have changed.
 pub fn update_slot_icons(
-    inventory_query: Query<&Inventory, (With<Player>, Changed<Inventory>)>,
-    hotbar_query: Query<&Hotbar, (With<Player>, Changed<Hotbar>)>,
+    inventory_query: Query<Ref<Inventory>, With<Player>>,
+    hotbar_query: Query<Ref<Hotbar>, With<Player>>,
     item_registry: Res<ItemRegistry>,
     icon_registry: Res<ItemIconRegistry>,
     slot_frames: Res<SlotFrames>,
@@ -53,51 +53,40 @@ pub fn update_slot_icons(
     mut visibility_query: Query<&mut Visibility, Or<(With<ItemIcon>, With<SlotFrame>)>>,
     children_query: Query<&Children>,
 ) {
-    let inventory = inventory_query.single();
-    let hotbar = hotbar_query.single();
+    let Ok(inventory) = inventory_query.single() else {
+        return;
+    };
+    let Ok(hotbar) = hotbar_query.single() else {
+        return;
+    };
 
     // Skip if neither changed
-    if inventory.is_err() && hotbar.is_err() {
+    if !inventory.is_changed() && !hotbar.is_changed() {
         return;
     }
-
-    // We need the actual data even if only one changed, so fall back to non-filtered queries
-    // won't work — use Option-based approach instead. For simplicity, query without Changed
-    // filter below when we need the data.
-    // Actually, since Changed filters mean the query returns nothing when unchanged,
-    // we need separate non-filtered queries for reading. Let's restructure:
-    // The Changed filter already gives us the component when it matches.
-    // When one changes, we still need the other's data. So we use the changed result
-    // if available, otherwise skip that half.
 
     for (entity, slot) in &slot_query {
         // Get item data for this slot
         let item_data: Option<(&str, u16)> = match slot.slot_type {
-            SlotType::MainBag(idx) => {
-                let Ok(inv) = &inventory else { continue };
-                inv.main_bag
-                    .get(idx)
-                    .and_then(|s| s.as_ref())
-                    .map(|s| (s.item_id.as_str(), s.count))
-            }
-            SlotType::MaterialBag(idx) => {
-                let Ok(inv) = &inventory else { continue };
-                inv.material_bag
-                    .get(idx)
-                    .and_then(|s| s.as_ref())
-                    .map(|s| (s.item_id.as_str(), s.count))
-            }
+            SlotType::MainBag(idx) => inventory
+                .main_bag
+                .get(idx)
+                .and_then(|s| s.as_ref())
+                .map(|s| (s.item_id.as_str(), s.count)),
+            SlotType::MaterialBag(idx) => inventory
+                .material_bag
+                .get(idx)
+                .and_then(|s| s.as_ref())
+                .map(|s| (s.item_id.as_str(), s.count)),
             SlotType::Hotbar { index, hand } => {
-                let Ok(hb) = &hotbar else { continue };
-                let slot_data = &hb.slots[index];
+                let slot_data = &hotbar.slots[index];
                 let item_id_opt = match hand {
                     Hand::Left => slot_data.left_hand.as_deref(),
                     Hand::Right => slot_data.right_hand.as_deref(),
                 };
                 // Resolve count from inventory for hotbar references
                 item_id_opt.and_then(|id| {
-                    let Ok(inv) = &inventory else { return None };
-                    let count = inv.count_item(id);
+                    let count = inventory.count_item(id);
                     if count > 0 {
                         Some((id, count.min(u16::MAX as u32) as u16))
                     } else {

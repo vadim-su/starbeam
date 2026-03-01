@@ -1,11 +1,11 @@
 pub mod animation;
-pub mod collision;
 pub mod movement;
 pub mod wrap;
 
 use bevy::prelude::*;
 
 use crate::inventory::{Hotbar, Inventory};
+use crate::physics::{Gravity, TileCollider};
 use crate::registry::biome::PlanetConfig;
 use crate::registry::player::PlayerConfig;
 use crate::registry::world::WorldConfig;
@@ -14,21 +14,12 @@ use crate::sets::GameSet;
 use crate::world::terrain_gen;
 use crate::world::terrain_gen::TerrainNoiseCache;
 
-use animation::{AnimationKind, AnimationState, CharacterAnimations};
+pub use crate::physics::{Grounded, Velocity};
 
-pub const MAX_DELTA_SECS: f32 = 1.0 / 20.0;
+use animation::{AnimationKind, AnimationState, CharacterAnimations};
 
 #[derive(Component)]
 pub struct Player;
-
-#[derive(Component, Default)]
-pub struct Velocity {
-    pub x: f32,
-    pub y: f32,
-}
-
-#[derive(Component)]
-pub struct Grounded(pub bool);
 
 pub struct PlayerPlugin;
 
@@ -42,8 +33,6 @@ impl Plugin for PlayerPlugin {
             Update,
             (
                 movement::player_input,
-                movement::apply_gravity,
-                collision::collision_system,
                 wrap::player_wrap_system,
                 animation::animate_player,
             )
@@ -82,7 +71,12 @@ fn spawn_player(
         },
         Hotbar::new(),
         Velocity::default(),
+        Gravity(player_config.gravity),
         Grounded(false),
+        TileCollider {
+            width: player_config.width,
+            height: player_config.height,
+        },
         AnimationState {
             kind: AnimationKind::Idle,
             frame: 0,

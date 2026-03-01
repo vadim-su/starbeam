@@ -52,7 +52,7 @@ impl Equipment {
 
     /// Equip item from inventory: removes 1 from inventory, places in slot.
     /// If a different item is already equipped, it is returned to inventory.
-    /// Returns false if the item is not in inventory.
+    /// Returns false if the item is not in inventory or inventory is full for swap.
     pub fn equip_from_inventory(
         &mut self,
         slot: EquipmentSlot,
@@ -63,12 +63,18 @@ impl Equipment {
             return false;
         }
 
-        // Return currently equipped item to inventory (if any and different)
+        // Already equipped — nothing to do
+        if self.get(slot).is_some_and(|id| id == item_id) {
+            return true;
+        }
+
+        // Return currently equipped item to inventory (if any)
         if let Some(old_id) = self.get(slot) {
-            if old_id != item_id {
-                let old_id = old_id.clone();
-                // Put old item back (non-stackable equipment → max_stack 1, main bag)
-                inventory.try_add_item(&old_id, 1, 1, BagTarget::Main);
+            let old_id = old_id.clone();
+            // Put old item back (non-stackable equipment → max_stack 1, main bag)
+            let remaining = inventory.try_add_item(&old_id, 1, 1, BagTarget::Main);
+            if remaining > 0 {
+                return false; // Inventory full — can't swap
             }
         }
 

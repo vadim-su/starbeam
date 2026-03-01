@@ -4,6 +4,7 @@ mod interaction;
 pub mod inventory;
 pub mod item;
 pub mod math;
+pub mod physics;
 mod parallax;
 mod player;
 mod registry;
@@ -38,6 +39,7 @@ fn main() {
         .add_plugins(registry::RegistryPlugin)
         .add_plugins(world::WorldPlugin)
         .add_plugins(player::PlayerPlugin)
+        .add_plugins(physics::PhysicsPlugin)
         .add_plugins(camera::CameraPlugin)
         .add_plugins(parallax::ParallaxPlugin)
         .add_plugins(interaction::InteractionPlugin)

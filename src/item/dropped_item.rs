@@ -1,37 +1,12 @@
 use bevy::prelude::*;
 
-/// Horizontal velocity damping factor applied on bounce.
-const BOUNCE_HORIZONTAL_DAMPING: f32 = 0.9;
-
-/// Velocity threshold below which friction is applied to slow items.
-const FRICTION_THRESHOLD: f32 = 10.0;
-
 /// A dropped item entity in the world.
 #[derive(Component, Debug)]
 pub struct DroppedItem {
     pub item_id: String,
     pub count: u16,
-    pub velocity: Vec2,
     pub lifetime: Timer,
     pub magnetized: bool,
-}
-
-/// Physics parameters for dropped items.
-#[derive(Component, Debug, Clone, Copy)]
-pub struct DroppedItemPhysics {
-    pub gravity: f32,
-    pub friction: f32,
-    pub bounce: f32,
-}
-
-impl Default for DroppedItemPhysics {
-    fn default() -> Self {
-        Self {
-            gravity: 400.0,
-            friction: 0.9,
-            bounce: 0.3,
-        }
-    }
 }
 
 /// Configuration for item pickup behavior.
@@ -79,57 +54,16 @@ impl SpawnParams {
     }
 }
 
-/// Apply gravity to velocity (pure function for testing).
-pub fn apply_gravity(velocity: Vec2, gravity: f32, delta: f32) -> Vec2 {
-    Vec2::new(velocity.x, velocity.y - gravity * delta)
-}
-
-/// Apply friction to velocity (pure function for testing).
-pub fn apply_friction(velocity: Vec2, friction: f32) -> Vec2 {
-    Vec2::new(velocity.x * friction, velocity.y * friction)
-}
-
-/// Apply bounce on collision (pure function for testing).
-// TODO: Integrate bounce when ground collision is implemented (Task 5.x)
-pub fn apply_bounce(velocity: Vec2, bounce: f32, hit_ground: bool) -> Vec2 {
-    if hit_ground && velocity.y < 0.0 {
-        Vec2::new(velocity.x * BOUNCE_HORIZONTAL_DAMPING, -velocity.y * bounce)
-    } else {
-        velocity
-    }
-}
-
-/// System that updates dropped item physics and despawns expired items.
-pub fn dropped_item_physics_system(
+/// Despawn dropped items whose lifetime has expired.
+pub fn despawn_expired_drops(
     time: Res<Time>,
     mut commands: Commands,
-    mut query: Query<(
-        Entity,
-        &mut DroppedItem,
-        &DroppedItemPhysics,
-        &mut Transform,
-    )>,
+    mut query: Query<(Entity, &mut DroppedItem)>,
 ) {
-    let delta = time.delta_secs();
-
-    for (entity, mut item, physics, mut transform) in &mut query {
-        // Update lifetime and despawn expired items
+    for (entity, mut item) in &mut query {
         item.lifetime.tick(time.delta());
         if item.lifetime.just_finished() {
             commands.entity(entity).despawn();
-            continue;
-        }
-
-        // Apply gravity
-        item.velocity = apply_gravity(item.velocity, physics.gravity, delta);
-
-        // Update position
-        transform.translation.x += item.velocity.x * delta;
-        transform.translation.y += item.velocity.y * delta;
-
-        // Apply friction when moving slowly
-        if item.velocity.length() < FRICTION_THRESHOLD {
-            item.velocity = apply_friction(item.velocity, physics.friction);
         }
     }
 }
@@ -142,7 +76,7 @@ pub fn calculate_drops(tile_drops: &[crate::item::DropDef]) -> Vec<(String, u16)
     tile_drops
         .iter()
         .filter_map(|drop| {
-            if rng.gen_range(0.0f32..=1.0) < drop.chance {
+            if rng.gen_range(0.0f32..1.0) < drop.chance {
                 let count = rng.gen_range(drop.min..=drop.max);
                 Some((drop.item_id.clone(), count))
             } else {
@@ -161,7 +95,6 @@ mod tests {
         let item = DroppedItem {
             item_id: "dirt".into(),
             count: 5,
-            velocity: Vec2::ZERO,
             lifetime: Timer::from_seconds(300.0, TimerMode::Once),
             magnetized: false,
         };
@@ -169,14 +102,6 @@ mod tests {
         assert_eq!(item.item_id, "dirt");
         assert_eq!(item.count, 5);
         assert!(!item.magnetized);
-    }
-
-    #[test]
-    fn dropped_item_physics_defaults() {
-        let physics = DroppedItemPhysics::default();
-        assert_eq!(physics.gravity, 400.0);
-        assert_eq!(physics.friction, 0.9);
-        assert_eq!(physics.bounce, 0.3);
     }
 
     #[test]
@@ -190,47 +115,5 @@ mod tests {
         // At 90 degrees: cos = 0, sin = 1
         assert!(params.velocity().x.abs() < 0.1);
         assert!((params.velocity().y - 100.0).abs() < 0.1);
-    }
-
-    #[test]
-    fn physics_system_applies_gravity() {
-        // This tests the pure calculation logic
-        let velocity = Vec2::new(50.0, 100.0);
-        let gravity = 400.0;
-        let delta = 0.016; // ~60fps
-
-        let new_velocity = apply_gravity(velocity, gravity, delta);
-
-        assert_eq!(new_velocity.x, 50.0);
-        assert!((new_velocity.y - (100.0 - gravity * delta)).abs() < 0.1);
-    }
-
-    #[test]
-    fn physics_system_applies_friction_when_grounded() {
-        let velocity = Vec2::new(100.0, 0.0);
-        let friction = 0.9;
-
-        let new_velocity = apply_friction(velocity, friction);
-
-        assert!((new_velocity.x - 90.0).abs() < 0.1);
-        assert_eq!(new_velocity.y, 0.0);
-    }
-
-    #[test]
-    fn physics_system_applies_bounce_on_ground_hit() {
-        let velocity = Vec2::new(50.0, -100.0);
-        let bounce = 0.3;
-
-        let new_velocity = apply_bounce(velocity, bounce, true);
-
-        assert!((new_velocity.x - 45.0).abs() < 0.1); // 50 * 0.9
-        assert!((new_velocity.y - 30.0).abs() < 0.1); // 100 * 0.3
-    }
-
-    #[test]
-    fn physics_system_no_bounce_when_rising() {
-        let velocity = Vec2::new(50.0, 100.0);
-        let new_velocity = apply_bounce(velocity, 0.3, true);
-        assert_eq!(new_velocity, velocity);
     }
 }

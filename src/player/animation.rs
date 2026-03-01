@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
-use crate::player::{Grounded, Player, Velocity};
+use crate::physics::{Grounded, Velocity};
+use crate::player::Player;
 use crate::registry::player::PlayerConfig;
 
 const VELOCITY_DEADZONE: f32 = 0.1;

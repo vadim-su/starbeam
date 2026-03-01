@@ -4,6 +4,7 @@ use super::components::{BagTarget, Inventory};
 use super::hotbar::Hotbar;
 use crate::item::ItemRegistry;
 use crate::item::{DroppedItem, ItemType, PickupConfig};
+use crate::physics::Velocity;
 use crate::player::Player;
 
 /// Calculate magnet strength based on distance (pure function for testing).
@@ -87,7 +88,7 @@ pub fn item_magnetism_system(
     config: Res<PickupConfig>,
     time: Res<Time>,
     player_query: Query<&Transform, With<Player>>,
-    mut item_query: Query<(&Transform, &mut DroppedItem)>,
+    mut item_query: Query<(&Transform, &mut DroppedItem, &mut Velocity)>,
 ) {
     let Ok(player_tf) = player_query.single() else {
         return;
@@ -95,7 +96,7 @@ pub fn item_magnetism_system(
     let player_pos = player_tf.translation.truncate();
     let delta = time.delta_secs();
 
-    for (item_tf, mut item) in &mut item_query {
+    for (item_tf, mut item, mut vel) in &mut item_query {
         let item_pos = item_tf.translation.truncate();
         let distance = player_pos.distance(item_pos);
 
@@ -109,8 +110,8 @@ pub fn item_magnetism_system(
             let direction = (player_pos - item_pos).normalize();
             let strength = calculate_magnet_strength(distance, &config);
 
-            item.velocity.x += direction.x * strength * delta;
-            item.velocity.y += direction.y * strength * delta;
+            vel.x += direction.x * strength * delta;
+            vel.y += direction.y * strength * delta;
         }
     }
 }

@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use super::definition::{ItemDef, ItemType, Rarity};
-use super::dropped_item::dropped_item_physics_system;
+use super::dropped_item::despawn_expired_drops;
 use super::registry::ItemRegistry;
 
 pub struct ItemPlugin;
@@ -58,6 +58,6 @@ impl Plugin for ItemPlugin {
                 stats: None,
             },
         ]))
-        .add_systems(Update, dropped_item_physics_system);
+        .add_systems(Update, despawn_expired_drops);
     }
 }

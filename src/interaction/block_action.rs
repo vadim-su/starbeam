@@ -2,31 +2,67 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
 use crate::inventory::{Hotbar, Inventory};
-use crate::item::{
-    calculate_drops, DropDef, DroppedItem, DroppedItemPhysics, ItemRegistry, SpawnParams,
-};
+use crate::item::{calculate_drops, DropDef, DroppedItem, ItemRegistry, SpawnParams};
+use crate::physics::{BobEffect, Bounce, Friction, Gravity, Grounded, TileCollider, Velocity};
 use crate::player::Player;
 use crate::registry::tile::TileId;
+use crate::ui::game_ui::icon_registry::ItemIconRegistry;
 use crate::world::chunk::{
     update_bitmasks_around, world_to_tile, ChunkDirty, Layer, LoadedChunks, WorldMap,
 };
 use crate::world::ctx::WorldCtx;
 
 /// Spawn dropped items at a tile position with random trajectories and sprites.
-fn spawn_tile_drops(commands: &mut Commands, tile_drops: &[DropDef], tile_center: Vec2) {
+fn spawn_tile_drops(
+    commands: &mut Commands,
+    tile_drops: &[DropDef],
+    tile_center: Vec2,
+    item_registry: &ItemRegistry,
+    icon_registry: &ItemIconRegistry,
+) {
     let drops = calculate_drops(tile_drops);
     for (item_id, count) in drops {
         let params = SpawnParams::random(tile_center);
+
+        // Resolve sprite from icon registry
+        let sprite = item_registry
+            .by_name(&item_id)
+            .and_then(|id| icon_registry.get(id).cloned())
+            .map(Sprite::from_image)
+            .unwrap_or_else(|| {
+                // Fallback: small colored square for items without icons
+                Sprite {
+                    color: Color::srgb(0.8, 0.6, 0.2),
+                    custom_size: Some(Vec2::splat(8.0)),
+                    ..default()
+                }
+            });
+
+        let vel = params.velocity();
+
         commands.spawn((
             DroppedItem {
                 item_id,
                 count,
-                velocity: params.velocity(),
                 lifetime: Timer::from_seconds(300.0, TimerMode::Once),
                 magnetized: false,
             },
-            DroppedItemPhysics::default(),
-            // TODO: add Sprite from ItemIconRegistry once asset loading is available here
+            Velocity { x: vel.x, y: vel.y },
+            Gravity(400.0),
+            Grounded(false),
+            TileCollider {
+                width: 4.0,
+                height: 4.0,
+            },
+            Friction(0.9),
+            Bounce(0.3),
+            BobEffect {
+                amplitude: 3.0,
+                speed: 2.0,
+                phase: 0.0,
+                rest_y: 0.0,
+            },
+            sprite,
             Transform::from_translation(tile_center.extend(1.0)),
         ));
     }
@@ -45,6 +81,7 @@ pub fn block_interaction_system(
     mut world_map: ResMut<WorldMap>,
     loaded_chunks: Res<LoadedChunks>,
     item_registry: Res<ItemRegistry>,
+    icon_registry: Res<ItemIconRegistry>,
 ) {
     let left_click = mouse.just_pressed(MouseButton::Left);
     let right_click = mouse.just_pressed(MouseButton::Right);
@@ -93,7 +130,13 @@ pub fn block_interaction_system(
                 tile_x as f32 * ctx_ref.config.tile_size + ctx_ref.config.tile_size / 2.0,
                 tile_y as f32 * ctx_ref.config.tile_size + ctx_ref.config.tile_size / 2.0,
             );
-            spawn_tile_drops(&mut commands, &tile_def.drops, tile_center);
+            spawn_tile_drops(
+                &mut commands,
+                &tile_def.drops,
+                tile_center,
+                &item_registry,
+                &icon_registry,
+            );
             world_map.set_tile(tile_x, tile_y, Layer::Fg, TileId::AIR, &ctx_ref);
         } else {
             // Place fg tile from left hand of active hotbar slot
@@ -137,7 +180,13 @@ pub fn block_interaction_system(
                 tile_x as f32 * ctx_ref.config.tile_size + ctx_ref.config.tile_size / 2.0,
                 tile_y as f32 * ctx_ref.config.tile_size + ctx_ref.config.tile_size / 2.0,
             );
-            spawn_tile_drops(&mut commands, &tile_def.drops, tile_center);
+            spawn_tile_drops(
+                &mut commands,
+                &tile_def.drops,
+                tile_center,
+                &item_registry,
+                &icon_registry,
+            );
             world_map.set_tile(tile_x, tile_y, Layer::Bg, TileId::AIR, &ctx_ref);
         } else {
             // Place bg tile from right hand of active hotbar slot
