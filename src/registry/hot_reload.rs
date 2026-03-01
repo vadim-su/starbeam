@@ -44,15 +44,9 @@ pub(crate) fn hot_reload_player(
             config.gravity = asset.gravity;
             config.width = asset.width;
             config.height = asset.height;
-            if let Some(v) = asset.magnet_radius {
-                config.magnet_radius = v;
-            }
-            if let Some(v) = asset.magnet_strength {
-                config.magnet_strength = v;
-            }
-            if let Some(v) = asset.pickup_radius {
-                config.pickup_radius = v;
-            }
+            config.magnet_radius = asset.magnet_radius;
+            config.magnet_strength = asset.magnet_strength;
+            config.pickup_radius = asset.pickup_radius;
             info!(
                 "Hot-reloaded PlayerConfig: speed={}, jump={}, gravity={}, magnet_r={}, magnet_s={}",
                 asset.speed, asset.jump_velocity, asset.gravity,
