@@ -4,6 +4,7 @@ mod interaction;
 pub mod inventory;
 pub mod item;
 pub mod math;
+pub mod object;
 pub mod physics;
 mod parallax;
 mod player;
