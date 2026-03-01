@@ -345,4 +345,14 @@ mod tests {
         assert_eq!(DayPhase::Sunset.next(), DayPhase::Night);
         assert_eq!(DayPhase::Night.next(), DayPhase::Dawn);
     }
+
+    #[test]
+    fn ron_parse_config() {
+        let ron_str = include_str!("../../assets/world/day_night.config.ron");
+        let config: DayNightConfig =
+            ron::from_str(ron_str).expect("Failed to parse day_night.config.ron");
+        assert!((config.cycle_duration_secs - 900.0).abs() < 0.01);
+        assert_eq!(config.sun_colors.len(), 4);
+        assert_eq!(config.sky_colors.len(), 4);
+    }
 }
