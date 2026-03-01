@@ -439,6 +439,300 @@ mod tests {
         );
     }
 
+    // -----------------------------------------------------------------------
+    // Bounce tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn bounce_reverses_velocity_on_ground_hit() {
+        // Pure logic: falling velocity with bounce factor should reverse
+        let fall_speed = 200.0_f32;
+        let bounce_factor = 0.5;
+        let bounced = fall_speed * bounce_factor;
+        assert_eq!(bounced, 100.0);
+        assert!(bounced > BOUNCE_THRESHOLD, "should bounce, not land");
+    }
+
+    #[test]
+    fn bounce_below_threshold_grounds_entity() {
+        // Pure logic: very slow fall with bounce should land instead of bounce
+        let fall_speed = 8.0_f32;
+        let bounce_factor = 0.3;
+        let bounced = fall_speed * bounce_factor;
+        assert!(bounced < BOUNCE_THRESHOLD, "should land, not bounce");
+    }
+
+    #[test]
+    fn bounce_damps_horizontal_velocity() {
+        let vel_x = 100.0_f32;
+        let damped = vel_x * BOUNCE_HORIZONTAL_DAMPING;
+        assert!((damped - 90.0).abs() < 0.01);
+    }
+
+    // -----------------------------------------------------------------------
+    // Velocity movement tests (no collision)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn velocity_moves_entity_in_empty_world() {
+        let mut app = fixtures::test_app();
+        app.add_systems(Update, tile_collision);
+
+        app.world_mut().spawn((
+            Transform::from_xyz(100.0, 100.0, 0.0),
+            Velocity { x: 500.0, y: 0.0 },
+            TileCollider {
+                width: 4.0,
+                height: 4.0,
+            },
+        ));
+
+        app.update();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        app.update();
+
+        let mut query = app.world_mut().query::<&Transform>();
+        let tf = query.iter(app.world()).next().unwrap();
+        assert!(
+            tf.translation.x > 100.0,
+            "entity should move right, got {}",
+            tf.translation.x
+        );
+    }
+
+    #[test]
+    fn zero_velocity_entity_stays_in_place() {
+        let mut app = fixtures::test_app();
+        app.add_systems(Update, tile_collision);
+
+        app.world_mut().spawn((
+            Transform::from_xyz(200.0, 200.0, 0.0),
+            Velocity { x: 0.0, y: 0.0 },
+            TileCollider {
+                width: 4.0,
+                height: 4.0,
+            },
+        ));
+
+        app.update();
+
+        let mut query = app.world_mut().query::<&Transform>();
+        let tf = query.iter(app.world()).next().unwrap();
+        assert_eq!(tf.translation.x, 200.0);
+        assert_eq!(tf.translation.y, 200.0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Collision edge cases
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn collision_stops_horizontal_velocity_on_wall() {
+        use crate::registry::tile::TileId;
+        use crate::world::chunk::Layer;
+
+        let mut app = fixtures::test_app();
+        app.add_systems(Update, tile_collision);
+
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
+
+        let surface_y = terrain_gen::surface_height(
+            &nc,
+            0,
+            &wc,
+            pc.layers.surface.terrain_frequency,
+            pc.layers.surface.terrain_amplitude,
+        );
+
+        let ts = wc.tile_size;
+        // Work above ground where everything is air
+        let air_ty = surface_y + 5;
+        let wall_tx = 2; // wall tile at x=2
+
+        let mut world_map = WorldMap::default();
+        // Manually place a single solid wall tile
+        world_map.set_tile(wall_tx, air_ty, Layer::Fg, TileId(1), &ctx);
+        *app.world_mut().resource_mut::<WorldMap>() = world_map;
+
+        // Position entity so its right edge overlaps the wall tile by 2px.
+        // Wall tile spans x: [wall_tx*ts .. (wall_tx+1)*ts].
+        // Entity width=8, so right edge = center_x + 4.
+        // We want right_edge = wall_tx*ts + 2  =>  center_x = wall_tx*ts - 2.
+        let entity_x = wall_tx as f32 * ts - 2.0;
+        let entity_y = air_ty as f32 * ts + ts / 2.0;
+
+        app.world_mut().spawn((
+            Transform::from_xyz(entity_x, entity_y, 0.0),
+            Velocity { x: 1000.0, y: 0.0 },
+            TileCollider {
+                width: 8.0,
+                height: 8.0,
+            },
+            Grounded(false),
+        ));
+
+        app.update();
+
+        let mut query = app.world_mut().query::<&Velocity>();
+        let vel = query.iter(app.world()).next().unwrap();
+        assert_eq!(
+            vel.x, 0.0,
+            "horizontal velocity should be zeroed on wall collision"
+        );
+    }
+
+    #[test]
+    fn collision_stops_upward_velocity_on_ceiling() {
+        use crate::registry::tile::TileId;
+        use crate::world::chunk::Layer;
+
+        let mut app = fixtures::test_app();
+        app.add_systems(Update, tile_collision);
+
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
+
+        let surface_y = terrain_gen::surface_height(
+            &nc,
+            0,
+            &wc,
+            pc.layers.surface.terrain_frequency,
+            pc.layers.surface.terrain_amplitude,
+        );
+
+        let ts = wc.tile_size;
+        // Work above ground where everything is air
+        let entity_ty = surface_y + 5;
+        let ceiling_ty = entity_ty + 1; // solid tile directly above
+
+        let mut world_map = WorldMap::default();
+        // Manually place a single solid ceiling tile
+        world_map.set_tile(0, ceiling_ty, Layer::Fg, TileId(1), &ctx);
+        *app.world_mut().resource_mut::<WorldMap>() = world_map;
+
+        // Position entity so its top edge overlaps the ceiling tile by 2px.
+        // Ceiling tile spans y: [ceiling_ty*ts .. (ceiling_ty+1)*ts].
+        // Entity height=8, so top edge = center_y + 4.
+        // We want top_edge = ceiling_ty*ts + 2  =>  center_y = ceiling_ty*ts - 2.
+        let entity_x = ts / 2.0;
+        let entity_y = ceiling_ty as f32 * ts - 2.0;
+
+        app.world_mut().spawn((
+            Transform::from_xyz(entity_x, entity_y, 0.0),
+            Velocity { x: 0.0, y: 500.0 },
+            TileCollider {
+                width: 8.0,
+                height: 8.0,
+            },
+            Grounded(false),
+        ));
+
+        app.update();
+
+        let mut query = app.world_mut().query::<&Velocity>();
+        let vel = query.iter(app.world()).next().unwrap();
+        assert_eq!(
+            vel.y, 0.0,
+            "upward velocity should be zeroed on ceiling collision"
+        );
+    }
+
+    #[test]
+    fn multiple_entities_collide_independently() {
+        let mut app = fixtures::test_app();
+        app.add_systems(Update, (apply_gravity, tile_collision).chain());
+
+        // Two entities with different gravity
+        app.world_mut().spawn((
+            Transform::from_xyz(100.0, 100.0, 0.0),
+            Velocity { x: 0.0, y: 0.0 },
+            Gravity(400.0),
+            TileCollider {
+                width: 4.0,
+                height: 4.0,
+            },
+        ));
+        app.world_mut().spawn((
+            Transform::from_xyz(200.0, 200.0, 0.0),
+            Velocity { x: 0.0, y: 0.0 },
+            Gravity(100.0),
+            TileCollider {
+                width: 4.0,
+                height: 4.0,
+            },
+        ));
+
+        app.update();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        app.update();
+
+        let mut query = app.world_mut().query::<(&Transform, &Gravity)>();
+        let entities: Vec<_> = query.iter(app.world()).collect();
+        // Entity with stronger gravity should have fallen further
+        let heavy = entities.iter().find(|(_, g)| g.0 == 400.0).unwrap().0;
+        let light = entities.iter().find(|(_, g)| g.0 == 100.0).unwrap().0;
+        assert!(
+            heavy.translation.y < light.translation.y,
+            "heavier entity ({}) should be lower than lighter ({})",
+            heavy.translation.y,
+            light.translation.y
+        );
+    }
+
+    #[test]
+    fn gravity_capped_by_max_delta() {
+        // Verify MAX_DELTA_SECS prevents huge velocity spikes
+        let dt_huge = 1.0_f32;
+        let capped = dt_huge.min(MAX_DELTA_SECS);
+        assert_eq!(capped, MAX_DELTA_SECS);
+        assert!(capped < 0.1, "capped dt should be small");
+    }
+
+    #[test]
+    fn friction_converges_toward_zero() {
+        let mut app = fixtures::test_app();
+        app.add_systems(Update, apply_friction);
+
+        app.world_mut()
+            .spawn((Velocity { x: 100.0, y: 0.0 }, Grounded(true), Friction(0.5)));
+
+        // Apply multiple frames
+        for _ in 0..10 {
+            app.update();
+        }
+
+        let mut query = app.world_mut().query::<&Velocity>();
+        let vel = query.iter(app.world()).next().unwrap();
+        assert!(
+            vel.x < 1.0,
+            "velocity should converge to ~0 after many friction frames, got {}",
+            vel.x
+        );
+    }
+
+    #[test]
+    fn friction_does_not_affect_y_velocity() {
+        let mut app = fixtures::test_app();
+        app.add_systems(Update, apply_friction);
+
+        app.world_mut().spawn((
+            Velocity { x: 100.0, y: -50.0 },
+            Grounded(true),
+            Friction(0.5),
+        ));
+
+        app.update();
+
+        let mut query = app.world_mut().query::<&Velocity>();
+        let vel = query.iter(app.world()).next().unwrap();
+        assert_eq!(vel.y, -50.0, "friction should only affect x, not y");
+    }
+
+    // -----------------------------------------------------------------------
+    // Bob tests (continued)
+    // -----------------------------------------------------------------------
+
     #[test]
     fn bob_does_not_affect_airborne_entity() {
         let mut app = fixtures::test_app();

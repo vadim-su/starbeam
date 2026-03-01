@@ -3,7 +3,7 @@ use bevy::window::PrimaryWindow;
 
 use crate::inventory::{Hotbar, Inventory};
 use crate::item::{calculate_drops, DropDef, DroppedItem, ItemRegistry, SpawnParams};
-use crate::physics::{BobEffect, Bounce, Friction, Gravity, Grounded, TileCollider, Velocity};
+use crate::physics::{Bounce, Friction, Gravity, Grounded, TileCollider, Velocity};
 use crate::player::Player;
 use crate::registry::tile::TileId;
 use crate::ui::game_ui::icon_registry::ItemIconRegistry;
@@ -56,12 +56,6 @@ fn spawn_tile_drops(
             },
             Friction(0.9),
             Bounce(0.3),
-            BobEffect {
-                amplitude: 3.0,
-                speed: 2.0,
-                phase: 0.0,
-                rest_y: 0.0,
-            },
             sprite,
             Transform::from_translation(tile_center.extend(1.0)),
         ));

@@ -6,6 +6,36 @@ use crate::item::ItemRegistry;
 use crate::item::{DroppedItem, ItemType, PickupConfig};
 use crate::physics::Velocity;
 use crate::player::Player;
+use crate::world::chunk::WorldMap;
+use crate::world::ctx::WorldCtx;
+
+/// Check line-of-sight between two world positions by stepping through tiles.
+/// Returns true if no solid tile blocks the path.
+pub fn has_line_of_sight(
+    from: Vec2,
+    to: Vec2,
+    tile_size: f32,
+    world_map: &WorldMap,
+    ctx: &crate::world::ctx::WorldCtxRef,
+) -> bool {
+    let diff = to - from;
+    let dist = diff.length();
+    if dist < tile_size {
+        return true; // Same tile or adjacent — always visible
+    }
+
+    let steps = (dist / (tile_size * 0.5)).ceil() as u32;
+    for i in 1..steps {
+        let t = i as f32 / steps as f32;
+        let sample = from + diff * t;
+        let tx = (sample.x / tile_size).floor() as i32;
+        let ty = (sample.y / tile_size).floor() as i32;
+        if world_map.is_solid(tx, ty, ctx) {
+            return false;
+        }
+    }
+    true
+}
 
 /// Calculate magnet strength based on distance (pure function for testing).
 pub fn calculate_magnet_strength(distance: f32, config: &PickupConfig) -> f32 {
@@ -84,9 +114,12 @@ pub fn item_pickup_system(
 }
 
 /// System that pulls dropped items toward the player.
+/// Items can only be magnetized if there is line-of-sight (no solid tiles blocking).
 pub fn item_magnetism_system(
     config: Res<PickupConfig>,
     time: Res<Time>,
+    ctx: WorldCtx,
+    world_map: Res<WorldMap>,
     player_query: Query<&Transform, With<Player>>,
     mut item_query: Query<(&Transform, &mut DroppedItem, &mut Velocity)>,
 ) {
@@ -95,14 +128,36 @@ pub fn item_magnetism_system(
     };
     let player_pos = player_tf.translation.truncate();
     let delta = time.delta_secs();
+    let ctx_ref = ctx.as_ref();
 
     for (item_tf, mut item, mut vel) in &mut item_query {
         let item_pos = item_tf.translation.truncate();
         let distance = player_pos.distance(item_pos);
 
-        // Activate magnet when in range
-        if distance < config.magnet_radius {
+        // Activate magnet when in range AND line-of-sight is clear
+        if distance < config.magnet_radius
+            && has_line_of_sight(
+                item_pos,
+                player_pos,
+                ctx_ref.config.tile_size,
+                &world_map,
+                &ctx_ref,
+            )
+        {
             item.magnetized = true;
+        }
+
+        // Deactivate magnet if line-of-sight is blocked
+        if item.magnetized
+            && !has_line_of_sight(
+                item_pos,
+                player_pos,
+                ctx_ref.config.tile_size,
+                &world_map,
+                &ctx_ref,
+            )
+        {
+            item.magnetized = false;
         }
 
         // Apply magnetism
@@ -145,6 +200,69 @@ pub fn hotbar_input_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_helpers::fixtures;
+    use crate::world::chunk::WorldMap;
+    use crate::world::terrain_gen;
+
+    #[test]
+    fn line_of_sight_clear_in_empty_world() {
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
+        let world_map = WorldMap::default();
+
+        let from = Vec2::new(100.0, 30000.0);
+        let to = Vec2::new(300.0, 30000.0);
+        assert!(has_line_of_sight(from, to, wc.tile_size, &world_map, &ctx));
+    }
+
+    #[test]
+    fn line_of_sight_blocked_by_solid_tile() {
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
+
+        let surface_y = terrain_gen::surface_height(
+            &nc,
+            0,
+            &wc,
+            pc.layers.surface.terrain_frequency,
+            pc.layers.surface.terrain_amplitude,
+        );
+        let chunk_size = wc.chunk_size as i32;
+        let surface_chunk_y = surface_y.div_euclid(chunk_size);
+
+        let mut world_map = WorldMap::default();
+        for cy in (surface_chunk_y - 2)..=(surface_chunk_y + 1) {
+            for cx in -1..=1 {
+                world_map.get_or_generate_chunk(cx, cy, &ctx);
+            }
+        }
+
+        // From above ground to underground — should be blocked
+        let ts = wc.tile_size;
+        let above = Vec2::new(ts / 2.0, (surface_y + 3) as f32 * ts);
+        let below = Vec2::new(ts / 2.0, (surface_y - 5) as f32 * ts);
+        assert!(
+            !has_line_of_sight(above, below, ts, &world_map, &ctx),
+            "line of sight should be blocked through terrain"
+        );
+    }
+
+    #[test]
+    fn line_of_sight_same_tile_always_clear() {
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
+        let world_map = WorldMap::default();
+
+        let pos = Vec2::new(100.0, 100.0);
+        let nearby = Vec2::new(105.0, 105.0);
+        assert!(has_line_of_sight(
+            pos,
+            nearby,
+            wc.tile_size,
+            &world_map,
+            &ctx
+        ));
+    }
 
     #[test]
     fn calculate_magnet_strength_increases_near_player() {
