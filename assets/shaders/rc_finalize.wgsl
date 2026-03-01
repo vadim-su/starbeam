@@ -9,8 +9,6 @@ struct FinalizeUniforms {
     input_size: vec2<u32>,
     viewport_offset: vec2<u32>,  // unused (kept for struct alignment)
     viewport_size: vec2<u32>,
-    ambient_min: f32,
-    _pad: f32,
 }
 
 @group(0) @binding(0) var<uniform> uniforms: FinalizeUniforms;
@@ -50,8 +48,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let iy = i32(py);
 
     // Direct probe readout (no blur).
-    let raw = probe_radiance(ix, iy) * BRIGHTNESS;
-    let irradiance = max(raw, vec3<f32>(uniforms.ambient_min));
+    let irradiance = probe_radiance(ix, iy) * BRIGHTNESS;
 
     textureStore(lightmap_out, vec2<i32>(ix, iy), vec4<f32>(irradiance, 1.0));
 }

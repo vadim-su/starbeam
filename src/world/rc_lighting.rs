@@ -54,8 +54,6 @@ pub struct RcLightingConfig {
     pub bounce_offset: IVec2,
     /// Dynamic sun color from day/night cycle.
     pub sun_color: Vec3,
-    /// Minimum ambient light level.
-    pub ambient_min: f32,
 }
 
 impl Default for RcLightingConfig {
@@ -72,7 +70,6 @@ impl Default for RcLightingConfig {
             prev_grid_origin: IVec2::ZERO,
             bounce_offset: IVec2::ZERO,
             sun_color: Vec3::new(1.0, 0.98, 0.9),
-            ambient_min: 0.0,
         }
     }
 }
@@ -363,14 +360,21 @@ fn extract_lighting_data(
     }
 
     // --- Compute effective sun color from day/night cycle ---
-    let sun = if let Some(ref wt) = world_time {
-        [
-            wt.sun_color.x * wt.sun_intensity,
-            wt.sun_color.y * wt.sun_intensity,
-            wt.sun_color.z * wt.sun_intensity,
-        ]
+    // Bake ambient_min into sun emitters: each channel is at least ambient_min.
+    // This ensures sky-visible tiles always emit some light (even at night),
+    // while underground tiles (no sky access) stay pitch black.
+    let (sun, ambient_min) = if let Some(ref wt) = world_time {
+        let amb = wt.ambient_min;
+        (
+            [
+                (wt.sun_color.x * wt.sun_intensity).max(amb),
+                (wt.sun_color.y * wt.sun_intensity).max(amb),
+                (wt.sun_color.z * wt.sun_intensity).max(amb),
+            ],
+            amb,
+        )
     } else {
-        SUN_COLOR
+        (SUN_COLOR, 0.0)
     };
 
     // --- Fill tile data + sun emitters ---
@@ -438,9 +442,11 @@ fn extract_lighting_data(
     input.dirty = true;
 
     // Update config with day/night values for the GPU pipeline.
+    // Bake ambient_min into sun_color so sky escape in radiance_cascades.wgsl
+    // also returns at least ambient_min per channel.
     if let Some(ref wt) = world_time {
-        config.sun_color = wt.sun_color * wt.sun_intensity;
-        config.ambient_min = wt.ambient_min;
+        let base = wt.sun_color * wt.sun_intensity;
+        config.sun_color = base.max(Vec3::splat(ambient_min));
     }
 }
 

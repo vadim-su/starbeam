@@ -61,8 +61,6 @@ struct FinalizeUniformsGpu {
     input_size: UVec2,
     viewport_offset: UVec2,
     viewport_size: UVec2,
-    ambient_min: f32,
-    _pad: f32,
 }
 
 // ---------------------------------------------------------------------------
@@ -529,8 +527,6 @@ fn prepare_rc_bind_groups(
         input_size: config.input_size,
         viewport_offset: config.viewport_offset,
         viewport_size: config.viewport_size,
-        ambient_min: config.ambient_min,
-        _pad: 0.0,
     };
 
     let mut uniform_buf = encase::UniformBuffer::new(Vec::<u8>::new());
