@@ -184,23 +184,6 @@ mod tests {
                 flicker_min: 1.0,
                 drops: vec![],
             },
-            TileDef {
-                id: "torch".into(),
-                autotile: None,
-                solid: false,
-                hardness: 0.5,
-                friction: 0.0,
-                viscosity: 0.0,
-                damage_on_contact: 0.0,
-                effects: vec![],
-                light_emission: [255, 170, 40],
-                light_opacity: 0,
-                albedo: [200, 160, 80],
-                flicker_speed: 3.0,
-                flicker_strength: 0.5,
-                flicker_min: 0.5,
-                drops: vec![],
-            },
         ])
     }
 
@@ -251,8 +234,6 @@ mod tests {
         assert_eq!(reg.light_opacity(TileId::AIR), 0);
         assert_eq!(reg.light_opacity(TileId(1)), 13); // grass
         assert_eq!(reg.light_opacity(TileId(3)), 15); // stone
-        assert_eq!(reg.light_emission(TileId(4)), [255, 170, 40]); // torch
-        assert_eq!(reg.light_opacity(TileId(4)), 0); // torch
     }
 
     #[test]

@@ -4,6 +4,7 @@ use bevy::prelude::*;
 
 use super::definition::{ObjectDef, ObjectId, ObjectType, PlacementRule};
 use super::registry::ObjectRegistry;
+use crate::item::DropDef;
 use crate::registry::AppState;
 use crate::sets::GameSet;
 use crate::world::lit_sprite::{FallbackLightmap, LitSpriteMaterial};
@@ -138,9 +139,14 @@ impl Plugin for ObjectPlugin {
                 sprite: "objects/torch.png".into(),
                 solid_mask: vec![false],
                 placement: PlacementRule::FloorOrWall,
-                light_emission: [240, 180, 80],
+                light_emission: [255, 170, 40],
                 object_type: ObjectType::LightSource,
-                drops: vec![],
+                drops: vec![DropDef {
+                    item_id: "torch".into(),
+                    min: 1,
+                    max: 1,
+                    chance: 1.0,
+                }],
                 sprite_columns: 4,
                 sprite_rows: 5,
                 sprite_fps: 10.0,

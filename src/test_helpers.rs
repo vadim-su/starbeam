@@ -133,23 +133,6 @@ pub mod fixtures {
                 flicker_min: 1.0,
                 drops: vec![],
             },
-            TileDef {
-                id: "torch".into(),
-                autotile: None,
-                solid: false,
-                hardness: 0.5,
-                friction: 0.0,
-                viscosity: 0.0,
-                damage_on_contact: 0.0,
-                effects: vec![],
-                light_emission: [255, 170, 40],
-                light_opacity: 0,
-                albedo: [200, 160, 80],
-                flicker_speed: 3.0,
-                flicker_strength: 0.5,
-                flicker_min: 0.5,
-                drops: vec![],
-            },
         ])
     }
 
