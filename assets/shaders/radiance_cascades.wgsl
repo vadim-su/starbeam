@@ -154,9 +154,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let ray_dir = vec2<f32>(cos(angle), sin(angle));
 
         var radiance = vec3<f32>(0.0);
+        var transmittance = 1.0; // remaining light energy (1 = full, 0 = fully blocked)
         var hit = false;
 
         // Raymarch through the interval [ray_start, ray_end)
+        // Uses volumetric accumulation: each tile's light_opacity attenuates
+        // the ray proportionally instead of binary blocking. Dirt lets light
+        // seep through while stone blocks almost completely.
         let max_steps = u32(ray_end - ray_start) + 1u;
         for (var step = 0u; step < max_steps; step++) {
             let dist = ray_start + f32(step);
@@ -183,23 +187,20 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 // truncation. Lower cascades handle this via merge with
                 // upper cascades that already have correct sky values.
                 if cascade == uniforms.cascade_count - 1u && sample_px.y < 0 {
-                    radiance = uniforms.sun_color;
+                    radiance += uniforms.sun_color * transmittance;
                     hit = true;
                 }
                 break;
             }
 
-            let density = textureLoad(density_map, sample_px, 0).r;
+            let opacity = textureLoad(density_map, sample_px, 0).r;
 
-            if density > 0.5 {
-                // Hit a solid surface
+            if opacity > 0.01 {
+                // Partially or fully opaque tile — accumulate light and attenuate.
                 let emissive = textureLoad(emissive_map, sample_px, 0).rgb;
                 let albedo = textureLoad(albedo_map, sample_px, 0).rgb;
 
                 // Bounce light: read previous frame's lightmap at hit position.
-                // Lightmap is input-sized. When the grid origin shifts (snap),
-                // bounce_offset corrects the lookup into lightmap_prev which
-                // was written with the previous frame's grid origin.
                 let bounce_px = sample_px + uniforms.bounce_offset;
                 var reflected = vec3<f32>(0.0);
                 if bounce_px.x >= 0 && bounce_px.y >= 0 &&
@@ -208,22 +209,31 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                     reflected = prev_light * albedo * uniforms.bounce_damping;
                 }
 
-                radiance = emissive + reflected;
-                hit = true;
-                break;
+                let surface_light = emissive + reflected;
+                radiance += surface_light * opacity * transmittance;
+                transmittance *= (1.0 - opacity);
+
+                if transmittance < 0.01 {
+                    hit = true;
+                    break;
+                }
+                continue;
             }
 
             // Check for emissive air (sun edge emitters, lava glow, etc.)
             let air_emissive = textureLoad(emissive_map, sample_px, 0).rgb;
             let air_brightness = air_emissive.r + air_emissive.g + air_emissive.b;
             if air_brightness > 0.001 {
-                radiance = air_emissive;
+                radiance += air_emissive * transmittance;
                 hit = true;
                 break;
             }
         }
 
-        // If no hit and not the highest cascade, merge with upper cascade (N+1)
+        // If ray wasn't fully blocked and not the highest cascade,
+        // merge with upper cascade (N+1). Scale by remaining transmittance
+        // so light that leaked through partial-opacity tiles blends correctly
+        // with the longer-range upper cascade result.
         if !hit && cascade < uniforms.cascade_count - 1u {
             let upper_cascade = cascade + 1u;
             let upper_spacing = probe_spacing(upper_cascade);
@@ -252,7 +262,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                     upper_probes_h,
                 );
             }
-            radiance = merged / f32(group_size);
+            // Blend: accumulated radiance from partial hits + remaining
+            // transmittance carries the upper cascade contribution.
+            radiance += (merged / f32(group_size)) * transmittance;
         }
 
         // Write radiance to cascade storage texture

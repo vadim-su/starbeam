@@ -209,6 +209,31 @@ fn count_open_neighbors(
     count
 }
 
+/// Deterministic hash of a tile position for per-tile flicker phase.
+/// Uses a simple mixing function — quality doesn't need to be cryptographic,
+/// just enough that adjacent tiles get visually different phases.
+fn tile_phase(tx: i32, ty: i32) -> f32 {
+    let mut h = (tx as u32).wrapping_mul(73856093) ^ (ty as u32).wrapping_mul(19349663);
+    h = h.wrapping_mul(0x45d9f3b).wrapping_add(0x238e1f29);
+    h ^= h >> 16;
+    (h & 0xFFFF) as f32 / 65535.0
+}
+
+/// Compute flicker brightness multiplier for an emissive tile.
+/// Returns a value in `[flicker_min, flicker_min + flicker_strength]` based on
+/// three summed sine harmonics keyed by tile position and elapsed time.
+fn flicker_multiplier(tx: i32, ty: i32, elapsed: f32, speed: f32, strength: f32, min: f32) -> f32 {
+    if speed <= 0.0 || strength <= 0.0 {
+        return 1.0;
+    }
+    let phase = tile_phase(tx, ty) * std::f32::consts::TAU;
+    let t = elapsed * speed + phase;
+    // Three harmonics for organic feel
+    let noise = t.sin() * 0.5 + (t * 2.3).sin() * 0.3 + (t * 4.1).sin() * 0.2;
+    let normalized = noise * 0.5 + 0.5; // [0, 1]
+    min + normalized * strength
+}
+
 /// Compute cascade count so the highest cascade's interval_end fits within
 /// the padding. Each cascade N has interval_end = 4^(N+1). We keep adding
 /// cascades while 4^(count+1) <= padding, ensuring rays from viewport probes
@@ -234,6 +259,7 @@ fn extract_lighting_data(
     mut input: ResMut<RcInputData>,
     mut config: ResMut<RcLightingConfig>,
     world_time: Option<Res<crate::world::day_night::WorldTime>>,
+    time: Res<Time>,
 ) {
     let world_config = &*ctx.config;
     let tile_registry = &*ctx.tile_registry;
@@ -398,9 +424,12 @@ fn extract_lighting_data(
                 continue;
             };
 
-            // Density (FG only — BG handled via emitter gating below)
+            // Density: write normalized light_opacity (0–255) instead of binary.
+            // RC raymarch uses this as partial opacity — dirt lets some light
+            // through while stone blocks almost completely.
             if tile_registry.is_solid(tile_id) {
-                input.density[idx] = 255;
+                let opacity = tile_registry.light_opacity(tile_id);
+                input.density[idx] = (opacity as f32 / 15.0 * 255.0) as u8;
             } else {
                 // FG is air: place sun emitter only if BG is also air.
                 // Intensity scales with opening size (open neighbor count).
@@ -425,10 +454,19 @@ fn extract_lighting_data(
             // than area emitters like the sky band.
             let emission = tile_registry.light_emission(tile_id);
             if emission != [0, 0, 0] {
+                let def = tile_registry.get(tile_id);
+                let flicker = flicker_multiplier(
+                    tx,
+                    ty,
+                    time.elapsed_secs(),
+                    def.flicker_speed,
+                    def.flicker_strength,
+                    def.flicker_min,
+                );
                 input.emissive[idx] = [
-                    emission[0] as f32 / 255.0 * POINT_LIGHT_BOOST,
-                    emission[1] as f32 / 255.0 * POINT_LIGHT_BOOST,
-                    emission[2] as f32 / 255.0 * POINT_LIGHT_BOOST,
+                    emission[0] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
+                    emission[1] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
+                    emission[2] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
                     1.0,
                 ];
             }
@@ -553,5 +591,62 @@ mod tests {
     fn cascade_count_current_padding() {
         // RC_PADDING_TILES = 64 → should give 3 cascades
         assert_eq!(compute_cascade_count(RC_PADDING_TILES as u32), 3);
+    }
+
+    #[test]
+    fn tile_phase_deterministic() {
+        // Same position always gives same phase
+        assert_eq!(tile_phase(10, 20), tile_phase(10, 20));
+    }
+
+    #[test]
+    fn tile_phase_varies_by_position() {
+        // Different positions give different phases
+        assert_ne!(tile_phase(0, 0), tile_phase(1, 0));
+        assert_ne!(tile_phase(0, 0), tile_phase(0, 1));
+    }
+
+    #[test]
+    fn tile_phase_in_unit_range() {
+        for x in -10..10 {
+            for y in -10..10 {
+                let p = tile_phase(x, y);
+                assert!(p >= 0.0 && p <= 1.0, "phase({x},{y}) = {p}");
+            }
+        }
+    }
+
+    #[test]
+    fn flicker_no_flicker_returns_one() {
+        // speed=0 or strength=0 → multiplier is 1.0
+        assert_eq!(flicker_multiplier(0, 0, 1.0, 0.0, 0.3, 0.7), 1.0);
+        assert_eq!(flicker_multiplier(0, 0, 1.0, 3.0, 0.0, 0.7), 1.0);
+    }
+
+    #[test]
+    fn flicker_within_bounds() {
+        // For any time, result should be in [flicker_min, flicker_min + strength]
+        let min = 0.7;
+        let strength = 0.3;
+        for t in 0..100 {
+            let m = flicker_multiplier(5, 10, t as f32 * 0.1, 3.0, strength, min);
+            assert!(
+                m >= min - 0.01 && m <= min + strength + 0.01,
+                "flicker at t={}: {m} not in [{min}, {}]",
+                t as f32 * 0.1,
+                min + strength
+            );
+        }
+    }
+
+    #[test]
+    fn flicker_different_tiles_differ() {
+        // Two adjacent tiles at the same time should have different multipliers
+        let a = flicker_multiplier(0, 0, 1.0, 3.0, 0.3, 0.7);
+        let b = flicker_multiplier(1, 0, 1.0, 3.0, 0.3, 0.7);
+        assert!(
+            (a - b).abs() > 0.001,
+            "adjacent tiles shouldn't sync: a={a}, b={b}"
+        );
     }
 }

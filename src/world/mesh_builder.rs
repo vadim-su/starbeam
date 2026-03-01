@@ -144,6 +144,9 @@ mod tests {
                 light_emission: [0, 0, 0],
                 light_opacity: 0,
                 albedo: [0, 0, 0],
+                flicker_speed: 0.0,
+                flicker_strength: 0.0,
+                flicker_min: 1.0,
                 drops: vec![],
             },
             TileDef {
@@ -158,6 +161,9 @@ mod tests {
                 light_emission: [0, 0, 0],
                 light_opacity: 15,
                 albedo: [139, 90, 43],
+                flicker_speed: 0.0,
+                flicker_strength: 0.0,
+                flicker_min: 1.0,
                 drops: vec![],
             },
         ])

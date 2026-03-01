@@ -21,6 +21,10 @@ fn default_albedo() -> [u8; 3] {
     [128, 128, 128]
 }
 
+fn default_flicker_min() -> f32 {
+    1.0
+}
+
 /// Properties of a single tile type, deserialized from RON.
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)] // Fields reserved for future gameplay systems
@@ -40,6 +44,15 @@ pub struct TileDef {
     pub light_opacity: u8,
     #[serde(default = "default_albedo")]
     pub albedo: [u8; 3],
+    /// Flicker oscillation speed in Hz. 0 = no flicker.
+    #[serde(default)]
+    pub flicker_speed: f32,
+    /// Flicker amplitude (0.0–1.0). How much brightness varies.
+    #[serde(default)]
+    pub flicker_strength: f32,
+    /// Minimum brightness multiplier during flicker (floor).
+    #[serde(default = "default_flicker_min")]
+    pub flicker_min: f32,
     #[serde(default)]
     pub drops: Vec<DropDef>,
 }
@@ -115,6 +128,9 @@ mod tests {
                 light_emission: [0, 0, 0],
                 light_opacity: 0,
                 albedo: [0, 0, 0],
+                flicker_speed: 0.0,
+                flicker_strength: 0.0,
+                flicker_min: 1.0,
                 drops: vec![],
             },
             TileDef {
@@ -127,8 +143,11 @@ mod tests {
                 damage_on_contact: 0.0,
                 effects: vec![],
                 light_emission: [0, 0, 0],
-                light_opacity: 4,
+                light_opacity: 13,
                 albedo: [34, 139, 34],
+                flicker_speed: 0.0,
+                flicker_strength: 0.0,
+                flicker_min: 1.0,
                 drops: vec![],
             },
             TileDef {
@@ -141,8 +160,11 @@ mod tests {
                 damage_on_contact: 0.0,
                 effects: vec![],
                 light_emission: [0, 0, 0],
-                light_opacity: 5,
+                light_opacity: 14,
                 albedo: [139, 90, 43],
+                flicker_speed: 0.0,
+                flicker_strength: 0.0,
+                flicker_min: 1.0,
                 drops: vec![],
             },
             TileDef {
@@ -155,8 +177,11 @@ mod tests {
                 damage_on_contact: 0.0,
                 effects: vec![],
                 light_emission: [0, 0, 0],
-                light_opacity: 8,
+                light_opacity: 15,
                 albedo: [128, 128, 128],
+                flicker_speed: 0.0,
+                flicker_strength: 0.0,
+                flicker_min: 1.0,
                 drops: vec![],
             },
             TileDef {
@@ -168,9 +193,12 @@ mod tests {
                 viscosity: 0.0,
                 damage_on_contact: 0.0,
                 effects: vec![],
-                light_emission: [240, 180, 80],
+                light_emission: [255, 170, 40],
                 light_opacity: 0,
                 albedo: [200, 160, 80],
+                flicker_speed: 3.0,
+                flicker_strength: 0.5,
+                flicker_min: 0.5,
                 drops: vec![],
             },
         ])
@@ -221,9 +249,9 @@ mod tests {
         let reg = test_registry();
         assert_eq!(reg.light_emission(TileId::AIR), [0, 0, 0]);
         assert_eq!(reg.light_opacity(TileId::AIR), 0);
-        assert_eq!(reg.light_opacity(TileId(1)), 4); // grass
-        assert_eq!(reg.light_opacity(TileId(3)), 8); // stone
-        assert_eq!(reg.light_emission(TileId(4)), [240, 180, 80]); // torch
+        assert_eq!(reg.light_opacity(TileId(1)), 13); // grass
+        assert_eq!(reg.light_opacity(TileId(3)), 15); // stone
+        assert_eq!(reg.light_emission(TileId(4)), [255, 170, 40]); // torch
         assert_eq!(reg.light_opacity(TileId(4)), 0); // torch
     }
 
