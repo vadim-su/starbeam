@@ -4,7 +4,7 @@ use super::components::{BagTarget, Inventory};
 use super::hotbar::Hotbar;
 use crate::item::ItemRegistry;
 use crate::item::{DroppedItem, ItemType};
-use crate::physics::Velocity;
+use crate::physics::{Gravity, TileCollider, Velocity};
 use crate::player::Player;
 use crate::registry::player::PlayerConfig;
 
@@ -85,11 +85,17 @@ pub fn item_pickup_system(
 }
 
 /// System that pulls dropped items toward the player when within magnet radius.
+/// Items within range fly directly toward the player, ignoring terrain collisions
+/// (TileCollider and Gravity are removed so physics doesn't fight the pull).
 pub fn item_magnetism_system(
     config: Res<PlayerConfig>,
     time: Res<Time>,
     player_query: Query<&Transform, With<Player>>,
-    mut item_query: Query<(&Transform, &mut Velocity), With<DroppedItem>>,
+    mut item_query: Query<
+        (Entity, &mut Transform, &mut Velocity, Has<TileCollider>),
+        (With<DroppedItem>, Without<Player>),
+    >,
+    mut commands: Commands,
 ) {
     let Ok(player_tf) = player_query.single() else {
         return;
@@ -97,16 +103,29 @@ pub fn item_magnetism_system(
     let player_pos = player_tf.translation.truncate();
     let delta = time.delta_secs();
 
-    for (item_tf, mut vel) in &mut item_query {
+    for (entity, mut item_tf, mut vel, has_collider) in &mut item_query {
         let item_pos = item_tf.translation.truncate();
         let distance = player_pos.distance(item_pos);
 
         if distance < config.magnet_radius && distance > 0.0 {
-            let direction = (player_pos - item_pos).normalize();
-            let strength = calculate_magnet_strength(distance, &config);
+            // Strip physics so the item flies freely through terrain
+            if has_collider {
+                commands
+                    .entity(entity)
+                    .remove::<TileCollider>()
+                    .remove::<Gravity>();
+            }
 
-            vel.x += direction.x * strength * delta;
-            vel.y += direction.y * strength * delta;
+            // Move directly toward the player
+            let direction = (player_pos - item_pos).normalize();
+            let speed = config.magnet_strength * (1.0 - distance / config.magnet_radius) + 60.0;
+
+            item_tf.translation.x += direction.x * speed * delta;
+            item_tf.translation.y += direction.y * speed * delta;
+
+            // Zero out residual velocity so physics doesn't interfere
+            vel.x = 0.0;
+            vel.y = 0.0;
         }
     }
 }
