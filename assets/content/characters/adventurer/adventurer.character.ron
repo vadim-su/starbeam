@@ -1,0 +1,39 @@
+(
+  speed: 100.0,
+  jump_velocity: 220.0,
+  gravity: 500.0,
+  width: 16.0,
+  height: 32.0,
+  magnet_radius: 48.0,
+  magnet_strength: 400.0,
+  pickup_radius: 20.0,
+
+  sprite_size: (44, 44),
+  animations: {
+    "staying": (
+      frames: ["sprites/staying/frame_000.png"],
+      fps: 1.0,
+    ),
+    "running": (
+      frames: [
+        "sprites/running/frame_000.png",
+        "sprites/running/frame_001.png",
+        "sprites/running/frame_002.png",
+        "sprites/running/frame_003.png",
+      ],
+      fps: 10.0,
+    ),
+    "jumping": (
+      frames: [
+        "sprites/jumping/frame_000.png",
+        "sprites/jumping/frame_001.png",
+        "sprites/jumping/frame_002.png",
+        "sprites/jumping/frame_003.png",
+        "sprites/jumping/frame_004.png",
+        "sprites/jumping/frame_005.png",
+        "sprites/jumping/frame_006.png",
+      ],
+      fps: 12.0,
+    ),
+  },
+)

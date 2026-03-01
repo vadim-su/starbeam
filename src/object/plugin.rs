@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
+use bevy::sprite_render::MeshMaterial2d;
 
 use super::definition::ObjectId;
 use super::registry::ObjectRegistry;
@@ -8,17 +9,28 @@ use crate::registry::AppState;
 use crate::sets::GameSet;
 use crate::world::lit_sprite::{FallbackLightmap, LitSpriteMaterial};
 
-/// Per-type shared materials and animation state for rendered objects.
+/// Per-type template materials and animation metadata for rendered objects.
 #[derive(Resource)]
 pub struct ObjectSpriteMaterials {
+    /// Template material per object type (shared for non-animated, cloned for animated).
     pub materials: HashMap<ObjectId, Handle<LitSpriteMaterial>>,
-    pub animated: Vec<AnimatedObjectType>,
+    /// Animation metadata per animated object type.
+    pub animation_meta: HashMap<ObjectId, AnimationMeta>,
 }
 
-/// Tracks animation state for one object type.
-pub struct AnimatedObjectType {
-    pub object_id: ObjectId,
-    pub material: Handle<LitSpriteMaterial>,
+/// Animation metadata for an object type (frame layout, timing).
+#[derive(Clone)]
+pub struct AnimationMeta {
+    pub fps: f32,
+    pub total_frames: u32,
+    pub columns: u32,
+    pub rows: u32,
+}
+
+/// Per-entity animation state. Each animated object entity gets its own instance
+/// so animations are desynchronized (random start frame).
+#[derive(Component)]
+pub struct ObjectAnimation {
     pub timer: Timer,
     pub current_frame: u32,
     pub total_frames: u32,
@@ -47,7 +59,7 @@ fn load_object_sprites(
         return;
     };
     let mut materials = HashMap::new();
-    let mut animated = Vec::new();
+    let mut animation_meta = HashMap::new();
 
     for idx in 0..object_registry.len() {
         let id = ObjectId(idx as u16);
@@ -74,35 +86,32 @@ fn load_object_sprites(
         materials.insert(id, material.clone());
 
         if def.sprite_fps > 0.0 && total_frames > 1 {
-            animated.push(AnimatedObjectType {
-                object_id: id,
-                material,
-                timer: Timer::from_seconds(1.0 / def.sprite_fps, TimerMode::Repeating),
-                current_frame: 0,
-                total_frames,
-                columns: def.sprite_columns,
-                rows: def.sprite_rows,
-            });
+            animation_meta.insert(
+                id,
+                AnimationMeta {
+                    fps: def.sprite_fps,
+                    total_frames,
+                    columns: def.sprite_columns,
+                    rows: def.sprite_rows,
+                },
+            );
         }
     }
 
     commands.insert_resource(ObjectSpriteMaterials {
         materials,
-        animated,
+        animation_meta,
     });
 }
 
-/// Advance animation frames for all animated object types.
-/// Updates the shared material's sprite_uv_rect so all instances animate in sync.
+/// Advance animation frames for each animated object entity independently.
+/// Each entity has its own timer and frame counter, so animations are desynchronized.
 fn object_animation_system(
     time: Res<Time>,
-    mut object_sprites: Option<ResMut<ObjectSpriteMaterials>>,
+    mut query: Query<(&mut ObjectAnimation, &MeshMaterial2d<LitSpriteMaterial>)>,
     mut lit_materials: ResMut<Assets<LitSpriteMaterial>>,
 ) {
-    let Some(ref mut object_sprites) = object_sprites else {
-        return;
-    };
-    for anim in &mut object_sprites.animated {
+    for (mut anim, mat_handle) in &mut query {
         anim.timer.tick(time.delta());
         if anim.timer.just_finished() {
             anim.current_frame = (anim.current_frame + 1) % anim.total_frames;
@@ -114,7 +123,7 @@ fn object_animation_system(
             let offset_x = col as f32 * scale_x;
             let offset_y = row as f32 * scale_y;
 
-            if let Some(mat) = lit_materials.get_mut(&anim.material) {
+            if let Some(mat) = lit_materials.get_mut(&mat_handle.0) {
                 mat.sprite_uv_rect = Vec4::new(scale_x, scale_y, offset_x, offset_y);
             }
         }

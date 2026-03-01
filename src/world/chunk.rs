@@ -15,7 +15,7 @@ use crate::registry::world::WorldConfig;
 use crate::world::atlas::TileAtlas;
 use crate::world::autotile::{compute_bitmask, AutotileRegistry};
 use crate::world::ctx::{WorldCtx, WorldCtxRef};
-use crate::world::lit_sprite::SharedLitQuad;
+use crate::world::lit_sprite::{LitSpriteMaterial, SharedLitQuad};
 use crate::world::mesh_builder::{build_chunk_mesh, MeshBuildBuffers};
 use crate::world::terrain_gen;
 use crate::world::tile_renderer::SharedTileMaterial;
@@ -500,6 +500,7 @@ pub fn chunk_loading_system(
     object_registry: Option<Res<ObjectRegistry>>,
     object_sprites: Option<Res<ObjectSpriteMaterials>>,
     quad: Option<Res<SharedLitQuad>>,
+    mut lit_materials: ResMut<Assets<LitSpriteMaterial>>,
     object_entities: Query<(Entity, &ObjectDisplayChunk)>,
 ) {
     let Ok(camera_transform) = camera_query.single() else {
@@ -557,6 +558,7 @@ pub fn chunk_loading_system(
                     obj_reg,
                     object_sprites.as_deref(),
                     quad.as_deref(),
+                    &mut lit_materials,
                     ctx_ref.config.wrap_chunk_x(display_cx),
                     cy,
                     display_cx,

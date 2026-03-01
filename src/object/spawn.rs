@@ -1,11 +1,12 @@
 use bevy::prelude::*;
 use bevy::sprite_render::MeshMaterial2d;
+use rand::Rng;
 
 use super::definition::ObjectId;
-use super::plugin::ObjectSpriteMaterials;
+use super::plugin::{ObjectAnimation, ObjectSpriteMaterials};
 use super::registry::ObjectRegistry;
 use crate::world::chunk::WorldMap;
-use crate::world::lit_sprite::{LitSprite, SharedLitQuad};
+use crate::world::lit_sprite::{LitSprite, LitSpriteMaterial, SharedLitQuad};
 
 /// Marker component linking a runtime entity to its ChunkData storage.
 #[derive(Component)]
@@ -28,6 +29,7 @@ pub fn spawn_objects_for_chunk(
     object_registry: &ObjectRegistry,
     object_sprites: Option<&ObjectSpriteMaterials>,
     quad: Option<&SharedLitQuad>,
+    lit_materials: &mut Assets<LitSpriteMaterial>,
     data_chunk_x: i32,
     chunk_y: i32,
     display_chunk_x: i32,
@@ -39,6 +41,8 @@ pub fn spawn_objects_for_chunk(
     };
 
     let display_offset_x = (display_chunk_x - data_chunk_x) as f32 * chunk_size as f32 * tile_size;
+
+    let mut rng = rand::thread_rng();
 
     for (idx, obj) in chunk.objects.iter().enumerate() {
         if obj.object_id == ObjectId::NONE {
@@ -80,12 +84,43 @@ pub fn spawn_objects_for_chunk(
         ));
 
         if let (Some(sprites), Some(q)) = (object_sprites, quad) {
-            if let Some(mat_handle) = sprites.materials.get(&obj.object_id) {
-                entity_cmd.insert((
-                    LitSprite,
-                    Mesh2d(q.0.clone()),
-                    MeshMaterial2d(mat_handle.clone()),
-                ));
+            if let Some(template_handle) = sprites.materials.get(&obj.object_id) {
+                // Clone material for animated objects (each gets independent UV state),
+                // share for non-animated.
+                let mat_handle = if let Some(meta) = sprites.animation_meta.get(&obj.object_id) {
+                    let cloned = lit_materials.get(template_handle).unwrap().clone();
+                    let handle = lit_materials.add(cloned);
+
+                    let start_frame = rng.gen_range(0..meta.total_frames);
+                    let mut timer = Timer::from_seconds(1.0 / meta.fps, TimerMode::Repeating);
+                    // Advance timer by a random fraction so entities tick at different times.
+                    let random_elapsed = rng.gen_range(0.0..1.0 / meta.fps);
+                    timer.tick(std::time::Duration::from_secs_f32(random_elapsed));
+
+                    entity_cmd.insert(ObjectAnimation {
+                        timer,
+                        current_frame: start_frame,
+                        total_frames: meta.total_frames,
+                        columns: meta.columns,
+                        rows: meta.rows,
+                    });
+
+                    // Set initial UV for the random start frame.
+                    let col = start_frame / meta.rows;
+                    let row = start_frame % meta.rows;
+                    let scale_x = 1.0 / meta.columns as f32;
+                    let scale_y = 1.0 / meta.rows as f32;
+                    if let Some(mat) = lit_materials.get_mut(&handle) {
+                        mat.sprite_uv_rect =
+                            Vec4::new(scale_x, scale_y, col as f32 * scale_x, row as f32 * scale_y);
+                    }
+
+                    handle
+                } else {
+                    template_handle.clone()
+                };
+
+                entity_cmd.insert((LitSprite, Mesh2d(q.0.clone()), MeshMaterial2d(mat_handle)));
             }
         }
     }

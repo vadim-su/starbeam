@@ -1,0 +1,9 @@
+(
+  id: "wooden_table",
+  display_name: "Wooden Table",
+  size: (3, 2),
+  sprite: "wooden_table.png",
+  solid_mask: [true, false, true, false, false, false],
+  placement: Floor,
+  object_type: Decoration,
+)

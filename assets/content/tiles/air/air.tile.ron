@@ -1,0 +1,1 @@
+( id: "air", autotile: None, solid: false, hardness: 0.0, friction: 0.0, viscosity: 0.0, damage_on_contact: 0.0, effects: [], light_emission: (0, 0, 0), light_opacity: 0, albedo: (0, 0, 0), drops: [] )

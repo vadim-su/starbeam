@@ -5,7 +5,7 @@ use bevy::window::PrimaryWindow;
 use crate::inventory::{Hotbar, Inventory};
 use crate::item::{calculate_drops, DropDef, DroppedItem, ItemRegistry, SpawnParams};
 use crate::object::placement::{can_place_object, get_object_at, place_object, remove_object};
-use crate::object::plugin::ObjectSpriteMaterials;
+use crate::object::plugin::{ObjectAnimation, ObjectSpriteMaterials};
 use crate::object::registry::ObjectRegistry;
 use crate::object::spawn::{ObjectDisplayChunk, PlacedObjectEntity};
 use crate::physics::{Bounce, Friction, Gravity, Grounded, TileCollider, Velocity};
@@ -275,11 +275,64 @@ pub fn block_interaction_system(
                                         ));
 
                                     if let Some(ref sprites) = object_sprites {
-                                        if let Some(mat_handle) = sprites.materials.get(&obj_id) {
+                                        if let Some(template_handle) =
+                                            sprites.materials.get(&obj_id)
+                                        {
+                                            let mat_handle = if let Some(meta) =
+                                                sprites.animation_meta.get(&obj_id)
+                                            {
+                                                use rand::Rng;
+                                                let mut rng = rand::thread_rng();
+
+                                                let cloned = lit_materials
+                                                    .get(template_handle)
+                                                    .unwrap()
+                                                    .clone();
+                                                let handle = lit_materials.add(cloned);
+
+                                                let start_frame =
+                                                    rng.gen_range(0..meta.total_frames);
+                                                let mut timer = Timer::from_seconds(
+                                                    1.0 / meta.fps,
+                                                    TimerMode::Repeating,
+                                                );
+                                                let random_elapsed =
+                                                    rng.gen_range(0.0..1.0 / meta.fps);
+                                                timer.tick(std::time::Duration::from_secs_f32(
+                                                    random_elapsed,
+                                                ));
+
+                                                entity_cmd.insert(ObjectAnimation {
+                                                    timer,
+                                                    current_frame: start_frame,
+                                                    total_frames: meta.total_frames,
+                                                    columns: meta.columns,
+                                                    rows: meta.rows,
+                                                });
+
+                                                // Set initial UV for random start frame.
+                                                let col = start_frame / meta.rows;
+                                                let row = start_frame % meta.rows;
+                                                let scale_x = 1.0 / meta.columns as f32;
+                                                let scale_y = 1.0 / meta.rows as f32;
+                                                if let Some(mat) = lit_materials.get_mut(&handle) {
+                                                    mat.sprite_uv_rect = Vec4::new(
+                                                        scale_x,
+                                                        scale_y,
+                                                        col as f32 * scale_x,
+                                                        row as f32 * scale_y,
+                                                    );
+                                                }
+
+                                                handle
+                                            } else {
+                                                template_handle.clone()
+                                            };
+
                                             entity_cmd.insert((
                                                 LitSprite,
                                                 Mesh2d(quad.0.clone()),
-                                                MeshMaterial2d(mat_handle.clone()),
+                                                MeshMaterial2d(mat_handle),
                                             ));
                                         }
                                     }

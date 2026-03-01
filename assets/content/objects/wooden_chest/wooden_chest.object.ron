@@ -1,0 +1,9 @@
+(
+  id: "wooden_chest",
+  display_name: "Wooden Chest",
+  size: (2, 1),
+  sprite: "wooden_chest.png",
+  solid_mask: [true, true],
+  placement: Floor,
+  object_type: Container( slots: 16 ),
+)

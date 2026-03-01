@@ -1,0 +1,10 @@
+(
+  id: "dirt",
+  display_name: "Dirt Block",
+  description: "A block of common dirt.",
+  max_stack: 999,
+  rarity: Common,
+  item_type: Block,
+  icon: "item.png",
+  placeable: Some("dirt"),
+)
