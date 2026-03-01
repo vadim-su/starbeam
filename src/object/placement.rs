@@ -65,6 +65,14 @@ pub fn can_place_object(
                 }
             }
         }
+        PlacementRule::FloorOrWall => {
+            let floor_ok = (0..w).all(|dx| world_map.is_solid(anchor_x + dx, anchor_y - 1, ctx));
+            let left_solid = world_map.is_solid(anchor_x - 1, anchor_y, ctx);
+            let right_solid = world_map.is_solid(anchor_x + w, anchor_y, ctx);
+            if !floor_ok && !left_solid && !right_solid {
+                return false;
+            }
+        }
         PlacementRule::Any => {}
     }
 
@@ -248,6 +256,12 @@ mod tests {
                 light_emission: [0, 0, 0],
                 object_type: ObjectType::Decoration,
                 drops: vec![],
+                sprite_columns: 1,
+                sprite_rows: 1,
+                sprite_fps: 0.0,
+                flicker_speed: 0.0,
+                flicker_strength: 0.0,
+                flicker_min: 1.0,
             },
             ObjectDef {
                 id: "barrel".into(),
@@ -259,6 +273,12 @@ mod tests {
                 light_emission: [0, 0, 0],
                 object_type: ObjectType::Decoration,
                 drops: vec![],
+                sprite_columns: 1,
+                sprite_rows: 1,
+                sprite_fps: 0.0,
+                flicker_speed: 0.0,
+                flicker_strength: 0.0,
+                flicker_min: 1.0,
             },
             ObjectDef {
                 id: "torch".into(),
@@ -270,6 +290,12 @@ mod tests {
                 light_emission: [240, 180, 80],
                 object_type: ObjectType::LightSource,
                 drops: vec![],
+                sprite_columns: 1,
+                sprite_rows: 1,
+                sprite_fps: 0.0,
+                flicker_speed: 0.0,
+                flicker_strength: 0.0,
+                flicker_min: 1.0,
             },
             ObjectDef {
                 id: "chest".into(),
@@ -281,6 +307,30 @@ mod tests {
                 light_emission: [0, 0, 0],
                 object_type: ObjectType::Container { slots: 16 },
                 drops: vec![],
+                sprite_columns: 1,
+                sprite_rows: 1,
+                sprite_fps: 0.0,
+                flicker_speed: 0.0,
+                flicker_strength: 0.0,
+                flicker_min: 1.0,
+            },
+            // Index 4: FloorOrWall placement
+            ObjectDef {
+                id: "lantern".into(),
+                display_name: "Lantern".into(),
+                size: (1, 1),
+                sprite: "objects/lantern.png".into(),
+                solid_mask: vec![false],
+                placement: PlacementRule::FloorOrWall,
+                light_emission: [200, 160, 60],
+                object_type: ObjectType::LightSource,
+                drops: vec![],
+                sprite_columns: 1,
+                sprite_rows: 1,
+                sprite_fps: 0.0,
+                flicker_speed: 0.0,
+                flicker_strength: 0.0,
+                flicker_min: 1.0,
             },
         ])
     }
@@ -462,5 +512,50 @@ mod tests {
         map.get_or_generate_chunk(0, 0, &ctx);
 
         assert!(get_object_at(&map, 5, 5, &ctx).is_none());
+    }
+
+    #[test]
+    fn floor_or_wall_placement_accepts_floor_or_wall() {
+        let (wc, bm, br, tr, pc, nc) = fixtures::test_world_ctx();
+        let ctx = fixtures::make_ctx(&wc, &bm, &br, &tr, &pc, &nc);
+        let mut map = WorldMap::default();
+        map.get_or_generate_chunk(0, 0, &ctx);
+
+        let obj_reg = test_object_registry();
+        let lantern_id = ObjectId(4);
+
+        let test_x = 5;
+        let test_y = 5;
+
+        // Clear all surrounding tiles
+        map.set_tile(test_x, test_y, Layer::Fg, TileId::AIR, &ctx);
+        map.set_tile(test_x, test_y - 1, Layer::Fg, TileId::AIR, &ctx);
+        map.set_tile(test_x - 1, test_y, Layer::Fg, TileId::AIR, &ctx);
+        map.set_tile(test_x + 1, test_y, Layer::Fg, TileId::AIR, &ctx);
+
+        // No floor, no wall — should fail
+        assert!(!can_place_object(
+            &map, &obj_reg, lantern_id, test_x, test_y, &ctx
+        ));
+
+        // Add floor below — should succeed
+        map.set_tile(test_x, test_y - 1, Layer::Fg, TileId(1), &ctx);
+        assert!(can_place_object(
+            &map, &obj_reg, lantern_id, test_x, test_y, &ctx
+        ));
+
+        // Remove floor, add wall to the left — should succeed
+        map.set_tile(test_x, test_y - 1, Layer::Fg, TileId::AIR, &ctx);
+        map.set_tile(test_x - 1, test_y, Layer::Fg, TileId(1), &ctx);
+        assert!(can_place_object(
+            &map, &obj_reg, lantern_id, test_x, test_y, &ctx
+        ));
+
+        // Remove left wall, add wall to the right — should succeed
+        map.set_tile(test_x - 1, test_y, Layer::Fg, TileId::AIR, &ctx);
+        map.set_tile(test_x + 1, test_y, Layer::Fg, TileId(1), &ctx);
+        assert!(can_place_object(
+            &map, &obj_reg, lantern_id, test_x, test_y, &ctx
+        ));
     }
 }

@@ -795,6 +795,12 @@ mod tests {
                 light_emission: [0, 0, 0],
                 object_type: ObjectType::Decoration,
                 drops: vec![],
+                sprite_columns: 1,
+                sprite_rows: 1,
+                sprite_fps: 0.0,
+                flicker_speed: 0.0,
+                flicker_strength: 0.0,
+                flicker_min: 1.0,
             },
             ObjectDef {
                 id: "barrel".into(),
@@ -806,6 +812,12 @@ mod tests {
                 light_emission: [0, 0, 0],
                 object_type: ObjectType::Decoration,
                 drops: vec![],
+                sprite_columns: 1,
+                sprite_rows: 1,
+                sprite_fps: 0.0,
+                flicker_speed: 0.0,
+                flicker_strength: 0.0,
+                flicker_min: 1.0,
             },
             ObjectDef {
                 id: "torch".into(),
@@ -817,6 +829,12 @@ mod tests {
                 light_emission: [240, 180, 80],
                 object_type: ObjectType::LightSource,
                 drops: vec![],
+                sprite_columns: 1,
+                sprite_rows: 1,
+                sprite_fps: 0.0,
+                flicker_speed: 0.0,
+                flicker_strength: 0.0,
+                flicker_min: 1.0,
             },
         ])
     }

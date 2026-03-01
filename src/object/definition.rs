@@ -16,6 +16,7 @@ pub enum PlacementRule {
     Floor,
     Wall,
     Ceiling,
+    FloorOrWall,
     Any,
 }
 
@@ -34,6 +35,18 @@ fn default_light_emission() -> [u8; 3] {
     [0, 0, 0]
 }
 
+fn default_one() -> u32 {
+    1
+}
+
+fn default_zero_f32() -> f32 {
+    0.0
+}
+
+fn default_one_f32() -> f32 {
+    1.0
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ObjectDef {
     pub id: String,
@@ -48,6 +61,20 @@ pub struct ObjectDef {
     pub object_type: ObjectType,
     #[serde(default)]
     pub drops: Vec<DropDef>,
+    // Animation
+    #[serde(default = "default_one")]
+    pub sprite_columns: u32,
+    #[serde(default = "default_one")]
+    pub sprite_rows: u32,
+    #[serde(default = "default_zero_f32")]
+    pub sprite_fps: f32,
+    // Flicker (for light sources)
+    #[serde(default = "default_zero_f32")]
+    pub flicker_speed: f32,
+    #[serde(default = "default_zero_f32")]
+    pub flicker_strength: f32,
+    #[serde(default = "default_one_f32")]
+    pub flicker_min: f32,
 }
 
 impl ObjectDef {
@@ -95,6 +122,12 @@ mod tests {
             light_emission: [0, 0, 0],
             object_type: ObjectType::Decoration,
             drops: vec![],
+            sprite_columns: 1,
+            sprite_rows: 1,
+            sprite_fps: 0.0,
+            flicker_speed: 0.0,
+            flicker_strength: 0.0,
+            flicker_min: 1.0,
         };
         assert!(def.is_tile_solid(0, 0));
     }
@@ -112,6 +145,12 @@ mod tests {
             light_emission: [0, 0, 0],
             object_type: ObjectType::Decoration,
             drops: vec![],
+            sprite_columns: 1,
+            sprite_rows: 1,
+            sprite_fps: 0.0,
+            flicker_speed: 0.0,
+            flicker_strength: 0.0,
+            flicker_min: 1.0,
         };
         assert!(def.is_tile_solid(0, 0));
         assert!(!def.is_tile_solid(1, 0));
@@ -133,6 +172,12 @@ mod tests {
             light_emission: [240, 180, 80],
             object_type: ObjectType::LightSource,
             drops: vec![],
+            sprite_columns: 1,
+            sprite_rows: 1,
+            sprite_fps: 0.0,
+            flicker_speed: 0.0,
+            flicker_strength: 0.0,
+            flicker_min: 1.0,
         };
         assert!(!def.is_tile_solid(5, 5));
     }
