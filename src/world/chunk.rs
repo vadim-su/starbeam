@@ -3,7 +3,9 @@ use std::collections::HashSet;
 
 use bevy::prelude::*;
 
+use crate::object::definition::ObjectId;
 use crate::object::placed::{OccupancyRef, PlacedObject};
+use crate::object::registry::ObjectRegistry;
 use crate::registry::tile::{TileId, TileRegistry};
 use crate::registry::world::WorldConfig;
 use crate::world::atlas::TileAtlas;
@@ -209,6 +211,42 @@ impl WorldMap {
     pub fn is_solid(&self, tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> bool {
         self.get_tile(tile_x, tile_y, Layer::Fg, ctx)
             .is_some_and(|tile| ctx.tile_registry.is_solid(tile))
+    }
+
+    /// Check if a tile is solid, considering both fg tiles and placed objects.
+    pub fn is_solid_or_object(
+        &self,
+        tile_x: i32,
+        tile_y: i32,
+        ctx: &WorldCtxRef,
+        object_registry: &ObjectRegistry,
+    ) -> bool {
+        if self.is_solid(tile_x, tile_y, ctx) {
+            return true;
+        }
+
+        let wrapped_x = ctx.config.wrap_tile_x(tile_x);
+        let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, ctx.config.chunk_size);
+        let (lx, ly) = tile_to_local(wrapped_x, tile_y, ctx.config.chunk_size);
+
+        if let Some(chunk) = self.chunks.get(&(cx, cy)) {
+            let idx = (ly * ctx.config.chunk_size + lx) as usize;
+            if let Some(occ) = &chunk.occupancy[idx] {
+                if let Some(obj) = chunk.objects.get(occ.object_index as usize) {
+                    if obj.object_id == ObjectId::NONE {
+                        return false;
+                    }
+                    let def = object_registry.get(obj.object_id);
+                    let obj_base_x = cx * ctx.config.chunk_size as i32 + obj.local_x as i32;
+                    let obj_base_y = cy * ctx.config.chunk_size as i32 + obj.local_y as i32;
+                    let rel_x = (wrapped_x - obj_base_x) as u32;
+                    let rel_y = (tile_y - obj_base_y) as u32;
+                    return def.is_tile_solid(rel_x, rel_y);
+                }
+            }
+        }
+
+        false
     }
 }
 

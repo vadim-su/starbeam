@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use crate::math::{tile_aabb, Aabb};
+use crate::object::registry::ObjectRegistry;
 use crate::sets::GameSet;
 use crate::world::chunk::WorldMap;
 use crate::world::ctx::WorldCtx;
@@ -98,6 +99,7 @@ pub fn tile_collision(
     time: Res<Time>,
     ctx: WorldCtx,
     world_map: Res<WorldMap>,
+    object_registry: Option<Res<ObjectRegistry>>,
     mut query: Query<(
         &mut Transform,
         &mut Velocity,
@@ -110,6 +112,13 @@ pub fn tile_collision(
     let dt = time.delta_secs().min(MAX_DELTA_SECS);
     let ts = ctx.config.tile_size;
     let ctx_ref = ctx.as_ref();
+
+    let is_solid = |tx: i32, ty: i32| -> bool {
+        match &object_registry {
+            Some(reg) => world_map.is_solid_or_object(tx, ty, &ctx_ref, reg),
+            None => world_map.is_solid(tx, ty, &ctx_ref),
+        }
+    };
 
     for (mut tf, mut vel, collider, mut grounded, bounce, mut bob) in &mut query {
         let pos = &mut tf.translation;
@@ -127,7 +136,7 @@ pub fn tile_collision(
         pos.x += vel.x * dt;
         let aabb = Aabb::from_center(pos.x, pos.y, w, h);
         for (tx, ty) in aabb.overlapping_tiles(ts) {
-            if world_map.is_solid(tx, ty, &ctx_ref) {
+            if is_solid(tx, ty) {
                 let tile = tile_aabb(tx, ty, ts);
                 let entity_aabb = Aabb::from_center(pos.x, pos.y, w, h);
                 if entity_aabb.overlaps(&tile) {
@@ -148,7 +157,7 @@ pub fn tile_collision(
         }
         let aabb = Aabb::from_center(pos.x, pos.y, w, h);
         for (tx, ty) in aabb.overlapping_tiles(ts) {
-            if world_map.is_solid(tx, ty, &ctx_ref) {
+            if is_solid(tx, ty) {
                 let tile = tile_aabb(tx, ty, ts);
                 let entity_aabb = Aabb::from_center(pos.x, pos.y, w, h);
                 if entity_aabb.overlaps(&tile) {
