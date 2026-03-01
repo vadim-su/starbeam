@@ -3,9 +3,10 @@ use bevy::prelude::*;
 use super::components::{BagTarget, Inventory};
 use super::hotbar::Hotbar;
 use crate::item::ItemRegistry;
-use crate::item::{DroppedItem, ItemType, PickupConfig};
+use crate::item::{DroppedItem, ItemType};
 use crate::physics::Velocity;
 use crate::player::Player;
+use crate::registry::player::PlayerConfig;
 use crate::world::chunk::WorldMap;
 use crate::world::ctx::WorldCtx;
 
@@ -38,7 +39,7 @@ pub fn has_line_of_sight(
 }
 
 /// Calculate magnet strength based on distance (pure function for testing).
-pub fn calculate_magnet_strength(distance: f32, config: &PickupConfig) -> f32 {
+pub fn calculate_magnet_strength(distance: f32, config: &PlayerConfig) -> f32 {
     if distance >= config.magnet_radius {
         return 0.0;
     }
@@ -48,7 +49,7 @@ pub fn calculate_magnet_strength(distance: f32, config: &PickupConfig) -> f32 {
 }
 
 /// Check if item should be picked up (pure function for testing).
-pub fn should_pickup(distance: f32, config: &PickupConfig) -> bool {
+pub fn should_pickup(distance: f32, config: &PlayerConfig) -> bool {
     distance < config.pickup_radius
 }
 
@@ -62,7 +63,7 @@ pub struct ItemPickupEvent {
 /// System that detects and triggers item pickup.
 #[allow(clippy::too_many_arguments)]
 pub fn item_pickup_system(
-    config: Res<PickupConfig>,
+    config: Res<PlayerConfig>,
     mut player_query: Query<(Entity, &Transform, &mut Inventory), With<Player>>,
     item_registry: Res<ItemRegistry>,
     mut item_query: Query<(Entity, &Transform, &mut DroppedItem)>,
@@ -116,7 +117,7 @@ pub fn item_pickup_system(
 /// System that pulls dropped items toward the player.
 /// Items can only be magnetized if there is line-of-sight (no solid tiles blocking).
 pub fn item_magnetism_system(
-    config: Res<PickupConfig>,
+    config: Res<PlayerConfig>,
     time: Res<Time>,
     ctx: WorldCtx,
     world_map: Res<WorldMap>,
@@ -266,10 +267,10 @@ mod tests {
 
     #[test]
     fn calculate_magnet_strength_increases_near_player() {
-        let config = PickupConfig::default();
+        let config = fixtures::test_player_config();
 
-        // Just inside magnet radius (47.0 < 48.0)
-        let strength = calculate_magnet_strength(47.0, &config);
+        // Inside magnet radius (90.0 < 96.0)
+        let strength = calculate_magnet_strength(90.0, &config);
         assert!(strength > 0.0);
 
         // Very close to player
@@ -279,18 +280,18 @@ mod tests {
 
     #[test]
     fn calculate_magnet_strength_zero_outside_radius() {
-        let config = PickupConfig::default();
+        let config = fixtures::test_player_config();
 
-        let strength = calculate_magnet_strength(100.0, &config);
+        let strength = calculate_magnet_strength(200.0, &config);
         assert_eq!(strength, 0.0);
     }
 
     #[test]
     fn should_pickup_within_radius() {
-        let config = PickupConfig::default();
+        let config = fixtures::test_player_config();
 
         assert!(should_pickup(10.0, &config));
-        assert!(should_pickup(15.9, &config)); // Just under 16.0
-        assert!(!should_pickup(20.0, &config));
+        assert!(should_pickup(19.9, &config)); // Just under 20.0
+        assert!(!should_pickup(25.0, &config));
     }
 }

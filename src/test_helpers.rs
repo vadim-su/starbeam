@@ -229,6 +229,9 @@ pub mod fixtures {
             gravity: 980.0,
             width: 24.0,
             height: 40.0,
+            magnet_radius: 96.0,
+            magnet_strength: 400.0,
+            pickup_radius: 20.0,
         }
     }
 

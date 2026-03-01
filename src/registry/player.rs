@@ -9,4 +9,23 @@ pub struct PlayerConfig {
     pub gravity: f32,
     pub width: f32,
     pub height: f32,
+    /// Radius (px) within which dropped items are pulled toward the player.
+    #[serde(default = "default_magnet_radius")]
+    pub magnet_radius: f32,
+    /// Maximum magnetism pull speed (px/s).
+    #[serde(default = "default_magnet_strength")]
+    pub magnet_strength: f32,
+    /// Radius (px) within which items are instantly picked up.
+    #[serde(default = "default_pickup_radius")]
+    pub pickup_radius: f32,
+}
+
+fn default_magnet_radius() -> f32 {
+    96.0
+}
+fn default_magnet_strength() -> f32 {
+    400.0
+}
+fn default_pickup_radius() -> f32 {
+    20.0
 }

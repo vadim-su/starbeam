@@ -86,6 +86,9 @@ pub(crate) fn check_loading(
         gravity: player.gravity,
         width: player.width,
         height: player.height,
+        magnet_radius: player.magnet_radius.unwrap_or(96.0),
+        magnet_strength: player.magnet_strength.unwrap_or(400.0),
+        pickup_radius: player.pickup_radius.unwrap_or(20.0),
     });
     commands.insert_resource(WorldConfig {
         width_tiles: world_cfg.width_tiles,

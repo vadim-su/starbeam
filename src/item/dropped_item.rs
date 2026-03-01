@@ -9,24 +9,6 @@ pub struct DroppedItem {
     pub magnetized: bool,
 }
 
-/// Configuration for item pickup behavior.
-#[derive(Resource, Debug, Clone)]
-pub struct PickupConfig {
-    pub magnet_radius: f32,
-    pub magnet_strength: f32,
-    pub pickup_radius: f32,
-}
-
-impl Default for PickupConfig {
-    fn default() -> Self {
-        Self {
-            magnet_radius: 48.0, // 3 tiles
-            magnet_strength: 200.0,
-            pickup_radius: 16.0, // 1 tile
-        }
-    }
-}
-
 /// Parameters for spawning a dropped item.
 pub struct SpawnParams {
     pub position: Vec2,

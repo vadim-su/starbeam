@@ -4,4 +4,7 @@
   gravity: 500.0,
   width: 16.0,
   height: 32.0,
+  magnet_radius: 96.0,
+  magnet_strength: 400.0,
+  pickup_radius: 20.0,
 )

@@ -21,6 +21,12 @@ pub struct PlayerDefAsset {
     pub gravity: f32,
     pub width: f32,
     pub height: f32,
+    #[serde(default)]
+    pub magnet_radius: Option<f32>,
+    #[serde(default)]
+    pub magnet_strength: Option<f32>,
+    #[serde(default)]
+    pub pickup_radius: Option<f32>,
 }
 
 /// Asset loaded from world.config.ron
