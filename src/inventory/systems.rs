@@ -118,7 +118,7 @@ pub fn item_magnetism_system(
 
             // Move directly toward the player
             let direction = (player_pos - item_pos).normalize();
-            let speed = config.magnet_strength * (1.0 - distance / config.magnet_radius) + 60.0;
+            let speed = config.magnet_strength * (1.0 - distance / config.magnet_radius) + 30.0;
 
             item_tf.translation.x += direction.x * speed * delta;
             item_tf.translation.y += direction.y * speed * delta;
@@ -126,6 +126,15 @@ pub fn item_magnetism_system(
             // Zero out residual velocity so physics doesn't interfere
             vel.x = 0.0;
             vel.y = 0.0;
+        } else if !has_collider {
+            // Left magnet radius — restore physics so item falls back down
+            commands.entity(entity).insert((
+                TileCollider {
+                    width: 4.0,
+                    height: 4.0,
+                },
+                Gravity(400.0),
+            ));
         }
     }
 }
