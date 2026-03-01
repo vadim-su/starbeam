@@ -4,6 +4,9 @@ use bevy::window::PrimaryWindow;
 
 use crate::inventory::{Hotbar, Inventory};
 use crate::item::{calculate_drops, DropDef, DroppedItem, ItemRegistry, SpawnParams};
+use crate::object::placement::{can_place_object, get_object_at, place_object, remove_object};
+use crate::object::registry::ObjectRegistry;
+use crate::object::spawn::{ObjectDisplayChunk, PlacedObjectEntity};
 use crate::physics::{Bounce, Friction, Gravity, Grounded, TileCollider, Velocity};
 use crate::player::Player;
 use crate::registry::tile::TileId;
@@ -94,6 +97,8 @@ pub fn block_interaction_system(
     fallback_lm: Res<FallbackLightmap>,
     fallback_img: Res<FallbackItemImage>,
     mut lit_materials: ResMut<Assets<LitSpriteMaterial>>,
+    object_registry: Option<Res<ObjectRegistry>>,
+    object_entities: Query<(Entity, &PlacedObjectEntity)>,
 ) {
     let left_click = mouse.just_pressed(MouseButton::Left);
     let right_click = mouse.just_pressed(MouseButton::Right);
@@ -130,6 +135,51 @@ pub fn block_interaction_system(
     }
 
     if left_click {
+        // Check for object first
+        if let Some(ref obj_reg) = object_registry {
+            if let Some((anchor_x, anchor_y, obj_idx, obj_id)) =
+                get_object_at(&world_map, tile_x, tile_y, &ctx_ref)
+            {
+                // Break object
+                let def = obj_reg.get(obj_id);
+                let tile_center = Vec2::new(
+                    tile_x as f32 * ctx_ref.config.tile_size + ctx_ref.config.tile_size / 2.0,
+                    tile_y as f32 * ctx_ref.config.tile_size + ctx_ref.config.tile_size / 2.0,
+                );
+                spawn_tile_drops(
+                    &mut commands,
+                    &def.drops,
+                    tile_center,
+                    &item_registry,
+                    &icon_registry,
+                    &quad,
+                    &fallback_lm,
+                    &mut lit_materials,
+                    &fallback_img.0,
+                );
+
+                // Despawn the object entity
+                let wrapped_ax = ctx_ref.config.wrap_tile_x(anchor_x);
+                let data_cx = wrapped_ax / ctx_ref.config.chunk_size as i32;
+                let data_cy = anchor_y / ctx_ref.config.chunk_size as i32;
+                for (entity, placed) in object_entities.iter() {
+                    if placed.data_chunk == (data_cx, data_cy) && placed.object_index == obj_idx {
+                        commands.entity(entity).despawn();
+                    }
+                }
+
+                remove_object(
+                    &mut world_map,
+                    obj_reg,
+                    anchor_x,
+                    anchor_y,
+                    obj_idx,
+                    &ctx_ref,
+                );
+                return;
+            }
+        }
+
         // Foreground layer interaction
         let Some(current) = world_map.get_tile(tile_x, tile_y, Layer::Fg, &ctx_ref) else {
             return;
@@ -155,7 +205,70 @@ pub fn block_interaction_system(
             );
             world_map.set_tile(tile_x, tile_y, Layer::Fg, TileId::AIR, &ctx_ref);
         } else {
-            // Place fg tile from left hand of active hotbar slot
+            // Try to place object first, then fall back to tile placement
+            let Some(item_id) = hotbar.slots[hotbar.active_slot].left_hand.as_deref() else {
+                return;
+            };
+            if inventory.count_item(item_id) == 0 {
+                return;
+            }
+
+            // Check if item places an object
+            if let Some(ref obj_reg) = object_registry {
+                if let Some(obj_name) = resolve_placeable_object(item_id, &item_registry) {
+                    if let Some(obj_id) = obj_reg.by_name(&obj_name) {
+                        if can_place_object(&world_map, obj_reg, obj_id, tile_x, tile_y, &ctx_ref) {
+                            place_object(&mut world_map, obj_reg, obj_id, tile_x, tile_y, &ctx_ref);
+                            inventory.remove_item(item_id, 1);
+
+                            // Spawn entity for the new object
+                            let def = obj_reg.get(obj_id);
+                            let wrapped_x = ctx_ref.config.wrap_tile_x(tile_x);
+                            let data_cx = wrapped_x / ctx_ref.config.chunk_size as i32;
+                            let data_cy = tile_y / ctx_ref.config.chunk_size as i32;
+                            let chunk = world_map.chunk(data_cx, data_cy).unwrap();
+                            let new_idx = (chunk.objects.len() - 1) as u16;
+
+                            let world_x = tile_x as f32 * ctx_ref.config.tile_size
+                                + ctx_ref.config.tile_size / 2.0;
+                            let world_y = tile_y as f32 * ctx_ref.config.tile_size
+                                + ctx_ref.config.tile_size / 2.0;
+                            let offset_x =
+                                (def.size.0 as f32 - 1.0) * ctx_ref.config.tile_size / 2.0;
+                            let offset_y =
+                                (def.size.1 as f32 - 1.0) * ctx_ref.config.tile_size / 2.0;
+
+                            // Find display chunk for this data chunk
+                            for (&(display_cx, display_cy), _) in &loaded_chunks.map {
+                                if ctx_ref.config.wrap_chunk_x(display_cx) == data_cx
+                                    && display_cy == data_cy
+                                {
+                                    commands.spawn((
+                                        PlacedObjectEntity {
+                                            data_chunk: (data_cx, data_cy),
+                                            object_index: new_idx,
+                                            object_id: obj_id,
+                                        },
+                                        ObjectDisplayChunk {
+                                            display_chunk: (display_cx, data_cy),
+                                        },
+                                        Transform::from_translation(Vec3::new(
+                                            world_x + offset_x,
+                                            world_y + offset_y,
+                                            0.5,
+                                        )),
+                                        Visibility::default(),
+                                    ));
+                                    break;
+                                }
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // Fall back to tile placement
             let has_neighbor = [(-1, 0), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
                 let nx = tile_x + dx;
                 let ny = tile_y + dy;
@@ -170,15 +283,9 @@ pub fn block_interaction_system(
                 return;
             }
 
-            let Some(item_id) = hotbar.slots[hotbar.active_slot].left_hand.as_deref() else {
-                return;
-            };
             let Some(place_id) = resolve_placeable(item_id, &item_registry, &ctx_ref) else {
                 return;
             };
-            if inventory.count_item(item_id) == 0 {
-                return;
-            }
 
             world_map.set_tile(tile_x, tile_y, Layer::Fg, place_id, &ctx_ref);
             inventory.remove_item(item_id, 1);
@@ -256,6 +363,13 @@ pub fn block_interaction_system(
             }
         }
     }
+}
+
+/// Look up item_id → placeable_object name. Returns None if not an object placer.
+fn resolve_placeable_object(item_id: &str, item_registry: &ItemRegistry) -> Option<String> {
+    let item_def_id = item_registry.by_name(item_id)?;
+    let item_def = item_registry.get(item_def_id);
+    item_def.placeable_object.clone()
 }
 
 /// Look up item_id → placeable tile name → TileId. Returns None if not placeable.
