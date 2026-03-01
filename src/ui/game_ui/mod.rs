@@ -113,7 +113,8 @@ impl Plugin for GameUiPlugin {
                     toggle_inventory,
                     drag_drop::update_drag_position,
                     tooltip::update_tooltip,
-                ),
+                )
+                    .run_if(in_state(AppState::InGame)),
             );
     }
 }

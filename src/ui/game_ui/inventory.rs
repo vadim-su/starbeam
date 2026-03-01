@@ -2,10 +2,12 @@
 //!
 //! Spawned hidden; toggled by E/I keys via `toggle_inventory` in mod.rs.
 
+use bevy::picking::events::Drag;
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
 
 use super::components::*;
+use super::components::{on_slot_hover, on_slot_unhover};
 use super::drag_drop::{handle_drop, on_bag_slot_drag_start, on_drag_end};
 use super::spawn_slot_icon_children;
 use super::theme::UiTheme;
@@ -32,8 +34,8 @@ pub fn spawn_inventory_screen(commands: &mut Commands, theme: &UiTheme) {
                 margin: UiRect::new(
                     Val::Px(-config.width / 2.0),
                     Val::Auto,
-                    Val::Auto,
                     Val::Px(-config.height / 2.0),
+                    Val::Auto,
                 ),
                 flex_direction: FlexDirection::Row,
                 padding: UiRect::all(Val::Px(config.padding)),
@@ -43,8 +45,12 @@ pub fn spawn_inventory_screen(commands: &mut Commands, theme: &UiTheme) {
             BackgroundColor(bg_dark),
             BorderColor::all(border_color),
             Visibility::Hidden,
-            Pickable::IGNORE,
+            Pickable {
+                should_block_lower: true,
+                is_hoverable: true,
+            },
         ))
+        .observe(on_inventory_window_drag)
         .with_children(|parent| {
             // ── Left column: Equipment ──
             let eq_slot_size = config.equipment.slot_size;
@@ -92,20 +98,8 @@ pub fn spawn_inventory_screen(commands: &mut Commands, theme: &UiTheme) {
                                     is_hoverable: true,
                                 },
                             ))
-                            .observe(
-                                |trigger: On<Pointer<Over>>,
-                                 mut hovered: ResMut<HoveredSlot>,
-                                 slot_query: Query<&UiSlot>| {
-                                    if let Ok(slot) = slot_query.get(trigger.event_target()) {
-                                        hovered.slot = Some(slot.slot_type);
-                                    }
-                                },
-                            )
-                            .observe(
-                                |_trigger: On<Pointer<Out>>, mut hovered: ResMut<HoveredSlot>| {
-                                    hovered.slot = None;
-                                },
-                            );
+                            .observe(on_slot_hover)
+                            .observe(on_slot_unhover);
                     }
                 });
 
@@ -162,23 +156,8 @@ pub fn spawn_inventory_screen(commands: &mut Commands, theme: &UiTheme) {
                                     },
                                 ))
                                 .with_children(spawn_slot_icon_children)
-                                .observe(
-                                    |trigger: On<Pointer<Over>>,
-                                     mut hovered: ResMut<HoveredSlot>,
-                                     slot_query: Query<&UiSlot>| {
-                                        if let Ok(slot) =
-                                            slot_query.get(trigger.event_target())
-                                        {
-                                            hovered.slot = Some(slot.slot_type);
-                                        }
-                                    },
-                                )
-                                .observe(
-                                    |_trigger: On<Pointer<Out>>,
-                                     mut hovered: ResMut<HoveredSlot>| {
-                                        hovered.slot = None;
-                                    },
-                                )
+                                .observe(on_slot_hover)
+                                .observe(on_slot_unhover)
                                 .observe(on_bag_slot_drag_start)
                                 .observe(on_drag_end)
                                 .observe(handle_drop);
@@ -227,23 +206,8 @@ pub fn spawn_inventory_screen(commands: &mut Commands, theme: &UiTheme) {
                                     },
                                 ))
                                 .with_children(spawn_slot_icon_children)
-                                .observe(
-                                    |trigger: On<Pointer<Over>>,
-                                     mut hovered: ResMut<HoveredSlot>,
-                                     slot_query: Query<&UiSlot>| {
-                                        if let Ok(slot) =
-                                            slot_query.get(trigger.event_target())
-                                        {
-                                            hovered.slot = Some(slot.slot_type);
-                                        }
-                                    },
-                                )
-                                .observe(
-                                    |_trigger: On<Pointer<Out>>,
-                                     mut hovered: ResMut<HoveredSlot>| {
-                                        hovered.slot = None;
-                                    },
-                                )
+                                .observe(on_slot_hover)
+                                .observe(on_slot_unhover)
                                 .observe(on_bag_slot_drag_start)
                                 .observe(on_drag_end)
                                 .observe(handle_drop);
@@ -251,4 +215,29 @@ pub fn spawn_inventory_screen(commands: &mut Commands, theme: &UiTheme) {
                         });
                 });
         });
+}
+
+/// Drag the inventory window by moving its margin offsets.
+fn on_inventory_window_drag(
+    trigger: On<Pointer<Drag>>,
+    mut query: Query<&mut Node, With<InventoryScreen>>,
+    drag_state: Res<DragState>,
+) {
+    // Don't move window while dragging an item
+    if drag_state.dragging.is_some() {
+        return;
+    }
+
+    let Ok(mut node) = query.get_mut(trigger.event_target()) else {
+        return;
+    };
+
+    let delta = trigger.event().delta;
+
+    if let Val::Px(ref mut left) = node.margin.left {
+        *left += delta.x;
+    }
+    if let Val::Px(ref mut top) = node.margin.top {
+        *top += delta.y;
+    }
 }

@@ -1,3 +1,4 @@
+use bevy::picking::prelude::*;
 use bevy::prelude::*;
 
 /// Which hand in a hotbar slot.
@@ -92,4 +93,20 @@ pub struct ItemCount;
 #[derive(Resource, Default)]
 pub struct InventoryScreenState {
     pub visible: bool,
+}
+
+/// Observer: set HoveredSlot on pointer enter.
+pub fn on_slot_hover(
+    trigger: On<Pointer<Over>>,
+    mut hovered: ResMut<HoveredSlot>,
+    slot_query: Query<&UiSlot>,
+) {
+    if let Ok(slot) = slot_query.get(trigger.event_target()) {
+        hovered.slot = Some(slot.slot_type);
+    }
+}
+
+/// Observer: clear HoveredSlot on pointer leave.
+pub fn on_slot_unhover(_trigger: On<Pointer<Out>>, mut hovered: ResMut<HoveredSlot>) {
+    hovered.slot = None;
 }

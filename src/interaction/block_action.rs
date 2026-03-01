@@ -2,13 +2,35 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
 use crate::inventory::{Hotbar, Inventory};
-use crate::item::{calculate_drops, DroppedItem, DroppedItemPhysics, ItemRegistry, SpawnParams};
+use crate::item::{
+    calculate_drops, DropDef, DroppedItem, DroppedItemPhysics, ItemRegistry, SpawnParams,
+};
 use crate::player::Player;
 use crate::registry::tile::TileId;
 use crate::world::chunk::{
     update_bitmasks_around, world_to_tile, ChunkDirty, Layer, LoadedChunks, WorldMap,
 };
 use crate::world::ctx::WorldCtx;
+
+/// Spawn dropped items at a tile position with random trajectories and sprites.
+fn spawn_tile_drops(commands: &mut Commands, tile_drops: &[DropDef], tile_center: Vec2) {
+    let drops = calculate_drops(tile_drops);
+    for (item_id, count) in drops {
+        let params = SpawnParams::random(tile_center);
+        commands.spawn((
+            DroppedItem {
+                item_id,
+                count,
+                velocity: params.velocity(),
+                lifetime: Timer::from_seconds(300.0, TimerMode::Once),
+                magnetized: false,
+            },
+            DroppedItemPhysics::default(),
+            // TODO: add Sprite from ItemIconRegistry once asset loading is available here
+            Transform::from_translation(tile_center.extend(1.0)),
+        ));
+    }
+}
 
 const BLOCK_REACH: f32 = 5.0;
 
@@ -67,28 +89,12 @@ pub fn block_interaction_system(
         if ctx_ref.tile_registry.is_solid(current) {
             // Break fg tile
             let tile_def = ctx_ref.tile_registry.get(current);
-            let drops = calculate_drops(&tile_def.drops);
-            world_map.set_tile(tile_x, tile_y, Layer::Fg, TileId::AIR, &ctx_ref);
-
-            // Spawn drops
             let tile_center = Vec2::new(
                 tile_x as f32 * ctx_ref.config.tile_size + ctx_ref.config.tile_size / 2.0,
                 tile_y as f32 * ctx_ref.config.tile_size + ctx_ref.config.tile_size / 2.0,
             );
-            for (item_id, count) in drops {
-                let params = SpawnParams::random(tile_center);
-                commands.spawn((
-                    DroppedItem {
-                        item_id,
-                        count,
-                        velocity: params.velocity(),
-                        lifetime: Timer::from_seconds(300.0, TimerMode::Once),
-                        magnetized: false,
-                    },
-                    DroppedItemPhysics::default(),
-                    Transform::from_translation(tile_center.extend(1.0)),
-                ));
-            }
+            spawn_tile_drops(&mut commands, &tile_def.drops, tile_center);
+            world_map.set_tile(tile_x, tile_y, Layer::Fg, TileId::AIR, &ctx_ref);
         } else {
             // Place fg tile from left hand of active hotbar slot
             let has_neighbor = [(-1, 0), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
@@ -105,10 +111,9 @@ pub fn block_interaction_system(
                 return;
             }
 
-            let Some(stack) = hotbar.slots[hotbar.active_slot].left_hand.as_ref() else {
+            let Some(item_id) = hotbar.slots[hotbar.active_slot].left_hand.as_deref() else {
                 return;
             };
-            let item_id = stack.item_id.as_str();
             let Some(place_id) = resolve_placeable(item_id, &item_registry, &ctx_ref) else {
                 return;
             };
@@ -128,28 +133,12 @@ pub fn block_interaction_system(
         if current_bg != TileId::AIR {
             // Break bg tile
             let tile_def = ctx_ref.tile_registry.get(current_bg);
-            let drops = calculate_drops(&tile_def.drops);
-            world_map.set_tile(tile_x, tile_y, Layer::Bg, TileId::AIR, &ctx_ref);
-
-            // Spawn drops
             let tile_center = Vec2::new(
                 tile_x as f32 * ctx_ref.config.tile_size + ctx_ref.config.tile_size / 2.0,
                 tile_y as f32 * ctx_ref.config.tile_size + ctx_ref.config.tile_size / 2.0,
             );
-            for (item_id, count) in drops {
-                let params = SpawnParams::random(tile_center);
-                commands.spawn((
-                    DroppedItem {
-                        item_id,
-                        count,
-                        velocity: params.velocity(),
-                        lifetime: Timer::from_seconds(300.0, TimerMode::Once),
-                        magnetized: false,
-                    },
-                    DroppedItemPhysics::default(),
-                    Transform::from_translation(tile_center.extend(1.0)),
-                ));
-            }
+            spawn_tile_drops(&mut commands, &tile_def.drops, tile_center);
+            world_map.set_tile(tile_x, tile_y, Layer::Bg, TileId::AIR, &ctx_ref);
         } else {
             // Place bg tile from right hand of active hotbar slot
             let has_neighbor = [(-1, 0), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
@@ -166,10 +155,9 @@ pub fn block_interaction_system(
                 return;
             }
 
-            let Some(stack) = hotbar.slots[hotbar.active_slot].right_hand.as_ref() else {
+            let Some(item_id) = hotbar.slots[hotbar.active_slot].right_hand.as_deref() else {
                 return;
             };
-            let item_id = stack.item_id.as_str();
             let Some(place_id) = resolve_placeable(item_id, &item_registry, &ctx_ref) else {
                 return;
             };
@@ -207,7 +195,7 @@ fn resolve_placeable(
     item_registry: &ItemRegistry,
     ctx: &crate::world::ctx::WorldCtxRef<'_>,
 ) -> Option<TileId> {
-    let item_def_id = item_registry.by_name(item_id);
+    let item_def_id = item_registry.by_name(item_id)?;
     let item_def = item_registry.get(item_def_id);
     let tile_name = item_def.placeable.as_deref()?;
     Some(ctx.tile_registry.by_name(tile_name))

@@ -30,15 +30,18 @@ impl ItemRegistry {
         &self.defs[id.0 as usize]
     }
 
+    /// Try to get an ItemDef, returning None for out-of-bounds IDs.
+    pub fn try_get(&self, id: ItemId) -> Option<&ItemDef> {
+        self.defs.get(id.0 as usize)
+    }
+
     pub fn max_stack(&self, id: ItemId) -> u16 {
         self.defs[id.0 as usize].max_stack
     }
 
-    pub fn by_name(&self, name: &str) -> ItemId {
-        *self
-            .name_to_id
-            .get(name)
-            .unwrap_or_else(|| panic!("Unknown item: {name}"))
+    /// Look up item by name. Returns None for unknown items.
+    pub fn by_name(&self, name: &str) -> Option<ItemId> {
+        self.name_to_id.get(name).copied()
     }
 
     pub fn len(&self) -> usize {
@@ -87,9 +90,14 @@ mod tests {
     #[test]
     fn registry_lookup_by_name() {
         let reg = test_registry();
-        let id = reg.by_name("dirt");
-        assert_eq!(id, ItemId(0));
-        assert_eq!(reg.by_name("stone"), ItemId(1));
+        assert_eq!(reg.by_name("dirt"), Some(ItemId(0)));
+        assert_eq!(reg.by_name("stone"), Some(ItemId(1)));
+    }
+
+    #[test]
+    fn by_name_returns_none_on_unknown() {
+        let reg = test_registry();
+        assert_eq!(reg.by_name("nonexistent_item"), None);
     }
 
     #[test]
@@ -101,16 +109,15 @@ mod tests {
     }
 
     #[test]
+    fn try_get_returns_none_for_invalid_id() {
+        let reg = test_registry();
+        assert!(reg.try_get(ItemId(999)).is_none());
+    }
+
+    #[test]
     fn registry_max_stack() {
         let reg = test_registry();
         assert_eq!(reg.max_stack(ItemId(0)), 999);
         assert_eq!(reg.max_stack(ItemId(1)), 999);
-    }
-
-    #[test]
-    #[should_panic]
-    fn by_name_panics_on_unknown() {
-        let reg = test_registry();
-        reg.by_name("nonexistent_item");
     }
 }

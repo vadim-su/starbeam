@@ -12,7 +12,12 @@ impl From<HexColor> for Color {
         let r = u8::from_str_radix(&s[0..2], 16).unwrap_or(0) as f32 / 255.0;
         let g = u8::from_str_radix(&s[2..4], 16).unwrap_or(0) as f32 / 255.0;
         let b = u8::from_str_radix(&s[4..6], 16).unwrap_or(0) as f32 / 255.0;
-        Color::srgb(r, g, b)
+        if s.len() >= 8 {
+            let a = u8::from_str_radix(&s[6..8], 16).unwrap_or(255) as f32 / 255.0;
+            Color::srgba(r, g, b, a)
+        } else {
+            Color::srgb(r, g, b)
+        }
     }
 }
 
@@ -94,5 +99,32 @@ impl UiTheme {
     pub fn load() -> Self {
         let ron_str = include_str!("../../../assets/ui.ron");
         ron::from_str(ron_str).expect("Failed to parse ui.ron")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hex_color_rgb() {
+        let color: Color = HexColor("#FF8000".into()).into();
+        let Color::Srgba(c) = color else {
+            panic!("expected Srgba");
+        };
+        assert!((c.red - 1.0).abs() < 0.01);
+        assert!((c.green - 0.502).abs() < 0.01);
+        assert!((c.blue - 0.0).abs() < 0.01);
+        assert!((c.alpha - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn hex_color_rgba() {
+        let color: Color = HexColor("#FF800080".into()).into();
+        let Color::Srgba(c) = color else {
+            panic!("expected Srgba");
+        };
+        assert!((c.red - 1.0).abs() < 0.01);
+        assert!((c.alpha - 0.502).abs() < 0.01);
     }
 }

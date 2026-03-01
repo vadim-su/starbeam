@@ -53,7 +53,7 @@ impl RecipeRegistry {
                 r.unlocked_by.is_unlocked(unlocked)
                     && r.ingredients
                         .iter()
-                        .all(|ing| inventory.count_item(&ing.item_id) >= ing.count)
+                        .all(|ing| inventory.count_item(&ing.item_id) >= ing.count as u32)
             })
             .collect()
     }

@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 
-use super::components::Inventory;
+use super::components::{BagTarget, Inventory};
 use super::hotbar::Hotbar;
 use crate::item::ItemRegistry;
-use crate::item::{DroppedItem, PickupConfig};
+use crate::item::{DroppedItem, ItemType, PickupConfig};
 use crate::player::Player;
 
 /// Calculate magnet strength based on distance (pure function for testing).
@@ -34,7 +34,7 @@ pub fn item_pickup_system(
     config: Res<PickupConfig>,
     mut player_query: Query<(Entity, &Transform, &mut Inventory), With<Player>>,
     item_registry: Res<ItemRegistry>,
-    mut item_query: Query<(Entity, &Transform, &DroppedItem)>,
+    mut item_query: Query<(Entity, &Transform, &mut DroppedItem)>,
     mut commands: Commands,
     mut pickup_events: MessageWriter<ItemPickupEvent>,
 ) {
@@ -43,23 +43,41 @@ pub fn item_pickup_system(
     };
     let player_pos = player_tf.translation.truncate();
 
-    for (item_entity, item_tf, item) in &mut item_query {
+    for (item_entity, item_tf, mut item) in &mut item_query {
         let item_pos = item_tf.translation.truncate();
         let distance = player_pos.distance(item_pos);
 
         if should_pickup(distance, &config) {
-            // Try to add to inventory
-            let max_stack = item_registry.max_stack(item_registry.by_name(&item.item_id));
-            let remaining = inventory.try_add_item(&item.item_id, item.count, max_stack);
+            // Look up max_stack; skip unknown items instead of panicking
+            let Some(item_def_id) = item_registry.by_name(&item.item_id) else {
+                continue;
+            };
+            let item_def = item_registry.get(item_def_id);
+            let max_stack = item_def.max_stack;
+            let target = match item_def.item_type {
+                ItemType::Block | ItemType::Material => BagTarget::Material,
+                _ => BagTarget::Main,
+            };
+            let remaining = inventory.try_add_item(&item.item_id, item.count, max_stack, target);
 
             if remaining == 0 {
-                // Successfully picked up
+                // Fully picked up
+                let picked_count = item.count;
                 commands.entity(item_entity).despawn();
                 pickup_events.write(ItemPickupEvent {
                     item_id: item.item_id.clone(),
-                    count: item.count,
+                    count: picked_count,
+                });
+            } else if remaining < item.count {
+                // Partially picked up — update dropped item count to prevent duplication
+                let picked_count = item.count - remaining;
+                item.count = remaining;
+                pickup_events.write(ItemPickupEvent {
+                    item_id: item.item_id.clone(),
+                    count: picked_count,
                 });
             }
+            // remaining == item.count means nothing was picked up (inventory full)
         }
     }
 }

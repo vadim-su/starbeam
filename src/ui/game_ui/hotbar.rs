@@ -2,6 +2,7 @@ use bevy::picking::prelude::*;
 use bevy::prelude::*;
 
 use super::components::*;
+use super::components::{on_slot_hover, on_slot_unhover};
 use super::drag_drop::handle_drop;
 use super::spawn_slot_icon_children;
 use super::theme::UiTheme;
@@ -86,20 +87,8 @@ pub fn spawn_hotbar(commands: &mut Commands, theme: &UiTheme) {
                                     is_hoverable: true,
                                 },
                             ))
-                            .observe(
-                                |trigger: On<Pointer<Over>>,
-                                 mut hovered: ResMut<HoveredSlot>,
-                                 slot_query: Query<&UiSlot>| {
-                                    if let Ok(slot) = slot_query.get(trigger.event_target()) {
-                                        hovered.slot = Some(slot.slot_type);
-                                    }
-                                },
-                            )
-                            .observe(
-                                |_trigger: On<Pointer<Out>>, mut hovered: ResMut<HoveredSlot>| {
-                                    hovered.slot = None;
-                                },
-                            )
+                            .observe(on_slot_hover)
+                            .observe(on_slot_unhover)
                             .observe(handle_drop)
                             .with_children(spawn_slot_icon_children);
                         // Right hand half
@@ -122,20 +111,8 @@ pub fn spawn_hotbar(commands: &mut Commands, theme: &UiTheme) {
                                     is_hoverable: true,
                                 },
                             ))
-                            .observe(
-                                |trigger: On<Pointer<Over>>,
-                                 mut hovered: ResMut<HoveredSlot>,
-                                 slot_query: Query<&UiSlot>| {
-                                    if let Ok(slot) = slot_query.get(trigger.event_target()) {
-                                        hovered.slot = Some(slot.slot_type);
-                                    }
-                                },
-                            )
-                            .observe(
-                                |_trigger: On<Pointer<Out>>, mut hovered: ResMut<HoveredSlot>| {
-                                    hovered.slot = None;
-                                },
-                            )
+                            .observe(on_slot_hover)
+                            .observe(on_slot_unhover)
                             .observe(handle_drop)
                             .with_children(spawn_slot_icon_children);
                         // Slot number label
@@ -178,11 +155,11 @@ pub fn update_hotbar_slots(
             continue;
         };
 
-        // Get item for THIS slot (not just active slot)
+        // Get item_id for THIS slot (not just active slot)
         let item_opt = if hand == Hand::Left {
-            hotbar.slots[index].left_hand.as_ref()
+            hotbar.slots[index].left_hand.as_deref()
         } else {
-            hotbar.slots[index].right_hand.as_ref()
+            hotbar.slots[index].right_hand.as_deref()
         };
 
         // Update visual state based on item presence

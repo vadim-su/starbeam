@@ -99,14 +99,27 @@ pub fn apply_bounce(velocity: Vec2, bounce: f32, hit_ground: bool) -> Vec2 {
     }
 }
 
-/// System that updates dropped item physics.
+/// System that updates dropped item physics and despawns expired items.
 pub fn dropped_item_physics_system(
     time: Res<Time>,
-    mut query: Query<(&mut DroppedItem, &DroppedItemPhysics, &mut Transform)>,
+    mut commands: Commands,
+    mut query: Query<(
+        Entity,
+        &mut DroppedItem,
+        &DroppedItemPhysics,
+        &mut Transform,
+    )>,
 ) {
     let delta = time.delta_secs();
 
-    for (mut item, physics, mut transform) in &mut query {
+    for (entity, mut item, physics, mut transform) in &mut query {
+        // Update lifetime and despawn expired items
+        item.lifetime.tick(time.delta());
+        if item.lifetime.just_finished() {
+            commands.entity(entity).despawn();
+            continue;
+        }
+
         // Apply gravity
         item.velocity = apply_gravity(item.velocity, physics.gravity, delta);
 
@@ -118,9 +131,6 @@ pub fn dropped_item_physics_system(
         if item.velocity.length() < FRICTION_THRESHOLD {
             item.velocity = apply_friction(item.velocity, physics.friction);
         }
-
-        // Update lifetime
-        item.lifetime.tick(time.delta());
     }
 }
 
@@ -132,7 +142,7 @@ pub fn calculate_drops(tile_drops: &[crate::item::DropDef]) -> Vec<(String, u16)
     tile_drops
         .iter()
         .filter_map(|drop| {
-            if rng.gen_range(0.0..1.0) < drop.chance {
+            if rng.gen_range(0.0f32..=1.0) < drop.chance {
                 let count = rng.gen_range(drop.min..=drop.max);
                 Some((drop.item_id.clone(), count))
             } else {

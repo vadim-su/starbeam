@@ -77,7 +77,7 @@ fn spawn_player(
         Player,
         {
             let mut inv = Inventory::new();
-            inv.try_add_item("torch", 10, 999);
+            inv.try_add_item("torch", 10, 999, crate::inventory::BagTarget::Main);
             inv
         },
         Hotbar::new(),

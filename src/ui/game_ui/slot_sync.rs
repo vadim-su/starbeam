@@ -47,9 +47,8 @@ pub fn update_slot_icons(
 
     // Query for slots with children
     slot_query: Query<(Entity, &UiSlot), With<Children>>,
-    // Child queries — use Without<T> to prove disjoint access to ImageNode
-    mut icon_query: Query<&mut ImageNode, (With<ItemIcon>, Without<SlotFrame>)>,
-    mut frame_query: Query<&mut ImageNode, (With<SlotFrame>, Without<ItemIcon>)>,
+    // Single query for ImageNode children — Has<T> used to distinguish icon vs frame
+    mut image_query: Query<(&mut ImageNode, Has<ItemIcon>, Has<SlotFrame>)>,
     mut count_query: Query<&mut Text, With<ItemCount>>,
     mut visibility_query: Query<&mut Visibility, Or<(With<ItemIcon>, With<SlotFrame>)>>,
     children_query: Query<&Children>,
@@ -91,11 +90,20 @@ pub fn update_slot_icons(
             SlotType::Hotbar { index, hand } => {
                 let Ok(hb) = &hotbar else { continue };
                 let slot_data = &hb.slots[index];
-                match hand {
-                    Hand::Left => slot_data.left_hand.as_ref(),
-                    Hand::Right => slot_data.right_hand.as_ref(),
-                }
-                .map(|s| (s.item_id.as_str(), s.count))
+                let item_id_opt = match hand {
+                    Hand::Left => slot_data.left_hand.as_deref(),
+                    Hand::Right => slot_data.right_hand.as_deref(),
+                };
+                // Resolve count from inventory for hotbar references
+                item_id_opt.and_then(|id| {
+                    let Ok(inv) = &inventory else { return None };
+                    let count = inv.count_item(id);
+                    if count > 0 {
+                        Some((id, count.min(u16::MAX as u32) as u16))
+                    } else {
+                        None // Item no longer in inventory
+                    }
+                })
             }
             SlotType::Equipment(_) => continue,
         };
@@ -107,18 +115,20 @@ pub fn update_slot_icons(
 
         // Update children based on item presence
         if let Some((item_id, count)) = item_data {
-            let item_id_typed = item_registry.by_name(item_id);
+            let Some(item_id_typed) = item_registry.by_name(item_id) else {
+                continue;
+            };
 
             for child in children.iter() {
-                // Update icon
-                if let Ok(mut image_node) = icon_query.get_mut(child) {
-                    if let Some(handle) = icon_registry.get(item_id_typed) {
-                        image_node.image = handle.clone();
+                // Update icon or frame image
+                if let Ok((mut image_node, is_icon, is_frame)) = image_query.get_mut(child) {
+                    if is_icon {
+                        if let Some(handle) = icon_registry.get(item_id_typed) {
+                            image_node.image = handle.clone();
+                        }
+                    } else if is_frame {
+                        image_node.image = slot_frames.common.clone();
                     }
-                }
-                // Update frame
-                if let Ok(mut image_node) = frame_query.get_mut(child) {
-                    image_node.image = slot_frames.common.clone();
                 }
                 // Update count
                 if let Ok(mut text) = count_query.get_mut(child) {
@@ -128,9 +138,9 @@ pub fn update_slot_icons(
                         Text::new("")
                     };
                 }
-                // Show elements
+                // Inherit visibility from parent (respects InventoryScreen hidden/visible)
                 if let Ok(mut vis) = visibility_query.get_mut(child) {
-                    *vis = Visibility::Visible;
+                    *vis = Visibility::Inherited;
                 }
             }
         } else {
