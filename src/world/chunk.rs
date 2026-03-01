@@ -6,6 +6,9 @@ use bevy::prelude::*;
 use crate::object::definition::ObjectId;
 use crate::object::placed::{OccupancyRef, PlacedObject};
 use crate::object::registry::ObjectRegistry;
+use crate::object::spawn::{
+    despawn_objects_for_chunk, spawn_objects_for_chunk, ObjectDisplayChunk,
+};
 use crate::registry::tile::{TileId, TileRegistry};
 use crate::registry::world::WorldConfig;
 use crate::world::atlas::TileAtlas;
@@ -482,6 +485,8 @@ pub fn chunk_loading_system(
     atlas: Res<TileAtlas>,
     material: Res<SharedTileMaterial>,
     mut buffers: ResMut<MeshBuildBuffers>,
+    object_registry: Option<Res<ObjectRegistry>>,
+    object_entities: Query<(Entity, &ObjectDisplayChunk)>,
 ) {
     let Ok(camera_transform) = camera_query.single() else {
         return;
@@ -531,6 +536,18 @@ pub fn chunk_loading_system(
                 display_cx,
                 cy,
             );
+            if let Some(ref obj_reg) = object_registry {
+                spawn_objects_for_chunk(
+                    &mut commands,
+                    &world_map,
+                    obj_reg,
+                    ctx_ref.config.wrap_chunk_x(display_cx),
+                    cy,
+                    display_cx,
+                    ctx_ref.config.tile_size,
+                    ctx_ref.config.chunk_size,
+                );
+            }
         }
     }
 
@@ -541,6 +558,7 @@ pub fn chunk_loading_system(
         .copied()
         .collect();
     for (cx, cy) in to_remove {
+        despawn_objects_for_chunk(&mut commands, &object_entities, cx, cy);
         despawn_chunk(&mut commands, &mut loaded_chunks, cx, cy);
     }
 }
