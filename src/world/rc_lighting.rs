@@ -1,6 +1,8 @@
 use bevy::prelude::*;
 use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 
+use crate::object::definition::ObjectId;
+use crate::object::registry::ObjectRegistry;
 use crate::registry::tile::{TileId, TileRegistry};
 use crate::registry::world::WorldConfig;
 use crate::registry::AppState;
@@ -260,6 +262,7 @@ fn extract_lighting_data(
     mut config: ResMut<RcLightingConfig>,
     world_time: Option<Res<crate::world::day_night::WorldTime>>,
     time: Res<Time>,
+    object_registry: Option<Res<ObjectRegistry>>,
 ) {
     let world_config = &*ctx.config;
     let tile_registry = &*ctx.tile_registry;
@@ -469,6 +472,46 @@ fn extract_lighting_data(
                     emission[2] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
                     1.0,
                 ];
+            }
+
+            // Object-layer emissive (torches, lanterns, etc.)
+            // Checked after tile emission so an object light on an air tile
+            // fills the emissive slot that tile emission left at zero.
+            if let Some(ref obj_reg) = object_registry {
+                let wrapped_x = world_config.wrap_tile_x(tx);
+                let (cx, cy) = tile_to_chunk(wrapped_x, ty, world_config.chunk_size);
+                let (lx, ly) = tile_to_local(wrapped_x, ty, world_config.chunk_size);
+                if let Some(chunk) = world_map.chunk(cx, cy) {
+                    let occ_idx = (ly * world_config.chunk_size + lx) as usize;
+                    if let Some(occ) = &chunk.occupancy[occ_idx] {
+                        let (dcx, dcy) = occ.data_chunk;
+                        if let Some(data_chunk) = world_map.chunk(dcx, dcy) {
+                            if let Some(obj) = data_chunk.objects.get(occ.object_index as usize) {
+                                if obj.object_id != ObjectId::NONE {
+                                    if let Some(def) = obj_reg.try_get(obj.object_id) {
+                                        let oe = def.light_emission;
+                                        if oe != [0, 0, 0] {
+                                            let flicker = flicker_multiplier(
+                                                tx,
+                                                ty,
+                                                time.elapsed_secs(),
+                                                def.flicker_speed,
+                                                def.flicker_strength,
+                                                def.flicker_min,
+                                            );
+                                            input.emissive[idx] = [
+                                                oe[0] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
+                                                oe[1] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
+                                                oe[2] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
+                                                1.0,
+                                            ];
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // Albedo
