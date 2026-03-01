@@ -242,11 +242,15 @@ pub fn block_interaction_system(
                             let offset_y =
                                 (def.size.1 as f32 - 1.0) * ctx_ref.config.tile_size / 2.0;
 
-                            // Find display chunk for this data chunk
+                            // Spawn entity for every display chunk that maps to this data chunk
                             for (&(display_cx, display_cy), _) in &loaded_chunks.map {
                                 if ctx_ref.config.wrap_chunk_x(display_cx) == data_cx
                                     && display_cy == data_cy
                                 {
+                                    let display_offset_x = (display_cx - data_cx) as f32
+                                        * ctx_ref.config.chunk_size as f32
+                                        * ctx_ref.config.tile_size;
+
                                     let mut entity_cmd =
                                         commands.spawn((
                                             PlacedObjectEntity {
@@ -258,7 +262,7 @@ pub fn block_interaction_system(
                                                 display_chunk: (display_cx, data_cy),
                                             },
                                             Transform::from_translation(Vec3::new(
-                                                world_x + offset_x,
+                                                world_x + offset_x + display_offset_x,
                                                 world_y + offset_y,
                                                 0.5,
                                             ))
@@ -279,7 +283,6 @@ pub fn block_interaction_system(
                                             ));
                                         }
                                     }
-                                    break;
                                 }
                             }
                             return;
