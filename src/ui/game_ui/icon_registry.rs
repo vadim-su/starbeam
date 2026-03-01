@@ -4,10 +4,12 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
+use crate::item::ItemId;
+
 /// Registry mapping item IDs to icon image handles.
 #[derive(Resource)]
 pub struct ItemIconRegistry {
-    icons: HashMap<String, Handle<Image>>,
+    icons: HashMap<ItemId, Handle<Image>>,
 }
 
 impl ItemIconRegistry {
@@ -18,13 +20,13 @@ impl ItemIconRegistry {
     }
 
     /// Register an icon for an item.
-    pub fn register(&mut self, item_id: &str, handle: Handle<Image>) {
-        self.icons.insert(item_id.to_string(), handle);
+    pub fn register(&mut self, id: ItemId, handle: Handle<Image>) {
+        self.icons.insert(id, handle);
     }
 
-    /// Get icon handle for an item.
-    pub fn get(&self, item_id: &str) -> Option<&Handle<Image>> {
-        self.icons.get(item_id)
+    /// Get icon handle for an item by ItemId.
+    pub fn get(&self, id: ItemId) -> Option<&Handle<Image>> {
+        self.icons.get(&id)
     }
 }
 

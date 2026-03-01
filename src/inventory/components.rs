@@ -1,18 +1,14 @@
 use bevy::prelude::*;
 
-/// A single slot in the inventory.
-#[derive(Clone, Debug, PartialEq)]
-pub struct InventorySlot {
-    pub item_id: String,
-    pub count: u16,
-}
-
 /// A stack of items with ID and count.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Stack {
     pub item_id: String,
     pub count: u16,
 }
+
+/// A single slot in the inventory — type alias for Stack.
+pub type InventorySlot = Stack;
 
 /// Player inventory component.
 #[derive(Component, Debug)]
@@ -213,6 +209,52 @@ mod tests {
 
         assert_eq!(remaining, 0);
         assert_eq!(inv.main_bag[1].as_ref().unwrap().count, 10);
+    }
+
+    #[test]
+    fn stack_default_is_empty() {
+        let stack = Stack::default();
+        assert_eq!(stack.item_id, "");
+        assert_eq!(stack.count, 0);
+    }
+
+    #[test]
+    fn stack_equality() {
+        let a = Stack {
+            item_id: "dirt".into(),
+            count: 10,
+        };
+        let b = Stack {
+            item_id: "dirt".into(),
+            count: 10,
+        };
+        let c = Stack {
+            item_id: "stone".into(),
+            count: 10,
+        };
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn stack_clone() {
+        let original = Stack {
+            item_id: "dirt".into(),
+            count: 50,
+        };
+        let cloned = original.clone();
+        assert_eq!(original, cloned);
+    }
+
+    #[test]
+    fn stack_as_inventory_slot() {
+        // InventorySlot is a type alias for Stack — verify interchangeability
+        let slot: InventorySlot = Stack {
+            item_id: "dirt".into(),
+            count: 10,
+        };
+        assert_eq!(slot.item_id, "dirt");
+        assert_eq!(slot.count, 10);
     }
 
     #[test]

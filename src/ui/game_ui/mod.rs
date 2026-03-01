@@ -7,11 +7,11 @@ pub mod slot_sync;
 pub mod theme;
 pub mod tooltip;
 
-use std::collections::HashMap;
-
 use bevy::asset::RenderAssetUsages;
+use bevy::picking::prelude::*;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use bevy::ui::widget::ImageNode;
 
 use crate::registry::AppState;
 
@@ -148,7 +148,7 @@ fn init_slot_frames(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     commands.insert_resource(SlotFrames::new(&mut images));
 }
 
-/// Load item icons from terrain textures.
+/// Load item icons using paths from ItemDef.icon.
 fn load_item_icons(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -156,31 +156,58 @@ fn load_item_icons(
 ) {
     let mut icon_registry = ItemIconRegistry::new();
 
-    // Map item IDs to their icon paths
-    // For blocks, use terrain textures
-    let icon_paths: HashMap<&str, &str> = [
-        ("dirt", "world/terrain/dirt.png"),
-        ("stone", "world/terrain/stone.png"),
-        ("grass", "world/terrain/grass.png"),
-        ("torch", "world/terrain/dirt.png"), // Placeholder
-    ]
-    .iter()
-    .cloned()
-    .collect();
-
     for i in 0..item_registry.len() {
         let id = crate::item::ItemId(i as u16);
         let def = item_registry.get(id);
-
-        // Try to load from icon_paths map, fallback to terrain texture
-        let path = icon_paths
-            .get(def.id.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| format!("world/terrain/{}.png", def.id));
-
-        let handle: Handle<Image> = asset_server.load(path);
-        icon_registry.register(&def.id, handle);
+        let handle: Handle<Image> = asset_server.load(&def.icon);
+        icon_registry.register(id, handle);
     }
 
     commands.insert_resource(icon_registry);
+}
+
+/// Spawn the standard icon/frame/count children inside a UI slot.
+pub fn spawn_slot_icon_children(parent: &mut ChildSpawnerCommands) {
+    // Item icon
+    parent.spawn((
+        ItemIcon,
+        ImageNode::default(),
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            ..default()
+        },
+        Visibility::Hidden,
+        Pickable::IGNORE,
+    ));
+    // Frame overlay
+    parent.spawn((
+        SlotFrame,
+        ImageNode::default(),
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            position_type: PositionType::Absolute,
+            ..default()
+        },
+        Visibility::Hidden,
+        Pickable::IGNORE,
+    ));
+    // Count text
+    parent.spawn((
+        ItemCount,
+        Text::new(""),
+        TextFont {
+            font_size: 9.0,
+            ..default()
+        },
+        TextColor(Color::WHITE),
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: Val::Px(1.0),
+            right: Val::Px(2.0),
+            ..default()
+        },
+        Pickable::IGNORE,
+    ));
 }
