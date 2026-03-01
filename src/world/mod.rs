@@ -31,15 +31,25 @@ impl Plugin for WorldPlugin {
             .init_resource::<WorldMap>()
             .init_resource::<LoadedChunks>()
             .init_resource::<MeshBuildBuffers>()
+            .add_message::<day_night::DayPhaseChanged>()
             .add_systems(
                 OnEnter(AppState::InGame),
-                lit_sprite::init_lit_sprite_resources,
+                (
+                    lit_sprite::init_lit_sprite_resources,
+                    day_night::load_day_night_config,
+                ),
             )
             .add_systems(
                 Update,
                 (chunk::chunk_loading_system, chunk::rebuild_dirty_chunks)
                     .chain()
                     .in_set(GameSet::WorldUpdate),
+            )
+            .add_systems(
+                Update,
+                day_night::tick_world_time
+                    .in_set(GameSet::WorldUpdate)
+                    .run_if(resource_exists::<day_night::WorldTime>),
             );
     }
 }

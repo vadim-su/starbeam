@@ -52,6 +52,10 @@ pub struct RcLightingConfig {
     /// lightmap_prev (which was written with prev_grid_origin).
     /// Computed as (dx, -dy) where d = grid_origin - prev_grid_origin.
     pub bounce_offset: IVec2,
+    /// Dynamic sun color from day/night cycle.
+    pub sun_color: Vec3,
+    /// Minimum ambient light level.
+    pub ambient_min: f32,
 }
 
 impl Default for RcLightingConfig {
@@ -67,6 +71,8 @@ impl Default for RcLightingConfig {
             grid_origin: IVec2::ZERO,
             prev_grid_origin: IVec2::ZERO,
             bounce_offset: IVec2::ZERO,
+            sun_color: Vec3::new(1.0, 0.98, 0.9),
+            ambient_min: 0.0,
         }
     }
 }
@@ -230,6 +236,7 @@ fn extract_lighting_data(
     ctx: WorldCtx,
     mut input: ResMut<RcInputData>,
     mut config: ResMut<RcLightingConfig>,
+    world_time: Option<Res<crate::world::day_night::WorldTime>>,
 ) {
     let world_config = &*ctx.config;
     let tile_registry = &*ctx.tile_registry;
@@ -355,6 +362,17 @@ fn extract_lighting_data(
         }
     }
 
+    // --- Compute effective sun color from day/night cycle ---
+    let sun = if let Some(ref wt) = world_time {
+        [
+            wt.sun_color.x * wt.sun_intensity,
+            wt.sun_color.y * wt.sun_intensity,
+            wt.sun_color.z * wt.sun_intensity,
+        ]
+    } else {
+        SUN_COLOR
+    };
+
     // --- Fill tile data + sun emitters ---
     // Sun emitters are placed at every tile where BOTH FG and BG are air.
     // Worldgen guarantees cave air always has BG=solid (fill_block below
@@ -372,7 +390,7 @@ fn extract_lighting_data(
             let Some(tile_id) = get_fg_tile(&world_map, tx, ty, &world_config, &tile_registry)
             else {
                 // Above world or unloaded chunk — sky emitter
-                input.emissive[idx] = [SUN_COLOR[0], SUN_COLOR[1], SUN_COLOR[2], 1.0];
+                input.emissive[idx] = [sun[0], sun[1], sun[2], 1.0];
                 continue;
             };
 
@@ -389,9 +407,9 @@ fn extract_lighting_data(
                         count_open_neighbors(&world_map, tx, ty, &world_config, &tile_registry);
                     let intensity = (1 + open) as f32 / 5.0;
                     input.emissive[idx] = [
-                        SUN_COLOR[0] * intensity,
-                        SUN_COLOR[1] * intensity,
-                        SUN_COLOR[2] * intensity,
+                        sun[0] * intensity,
+                        sun[1] * intensity,
+                        sun[2] * intensity,
                         1.0,
                     ];
                 }
@@ -418,6 +436,12 @@ fn extract_lighting_data(
     }
 
     input.dirty = true;
+
+    // Update config with day/night values for the GPU pipeline.
+    if let Some(ref wt) = world_time {
+        config.sun_color = wt.sun_color * wt.sun_intensity;
+        config.ambient_min = wt.ambient_min;
+    }
 }
 
 /// Update the tile material lightmap handles to point to the current RC lightmap

@@ -23,7 +23,8 @@ struct RcUniforms {
     _pad0: f32,                  // 36..40
     grid_origin: vec2<i32>,      // 40..48  world-space origin (min_tx, min_ty)
     bounce_offset: vec2<i32>,    // 48..56  offset for lightmap_prev reads on grid snap
-    _pad1: vec2<u32>,            // 56..64
+    sun_color: vec3<f32>,        // 56..68
+    _pad1: f32,                  // 68..72
 }
 
 @group(0) @binding(0) var<uniform> uniforms: RcUniforms;
@@ -182,7 +183,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 // truncation. Lower cascades handle this via merge with
                 // upper cascades that already have correct sky values.
                 if cascade == uniforms.cascade_count - 1u && sample_px.y < 0 {
-                    radiance = vec3<f32>(1.0, 0.98, 0.9); // SUN_COLOR
+                    radiance = uniforms.sun_color;
                     hit = true;
                 }
                 break;

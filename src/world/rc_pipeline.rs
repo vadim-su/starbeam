@@ -51,7 +51,8 @@ struct RcUniformsGpu {
     _pad0: f32,
     grid_origin: IVec2,
     bounce_offset: IVec2,
-    _pad1: UVec2,
+    sun_color: Vec3,
+    _pad1: f32,
 }
 
 /// Uniforms for the finalize compute shader (`rc_finalize.wgsl`).
@@ -60,7 +61,8 @@ struct FinalizeUniformsGpu {
     input_size: UVec2,
     viewport_offset: UVec2,
     viewport_size: UVec2,
-    _pad: UVec2,
+    ambient_min: f32,
+    _pad: f32,
 }
 
 // ---------------------------------------------------------------------------
@@ -485,7 +487,8 @@ fn prepare_rc_bind_groups(
             _pad0: 0.0,
             grid_origin: config.grid_origin,
             bounce_offset: config.bounce_offset,
-            _pad1: UVec2::ZERO,
+            sun_color: config.sun_color,
+            _pad1: 0.0,
         };
 
         let mut uniform_buf = encase::UniformBuffer::new(Vec::<u8>::new());
@@ -526,7 +529,8 @@ fn prepare_rc_bind_groups(
         input_size: config.input_size,
         viewport_offset: config.viewport_offset,
         viewport_size: config.viewport_size,
-        _pad: UVec2::ZERO,
+        ambient_min: config.ambient_min,
+        _pad: 0.0,
     };
 
     let mut uniform_buf = encase::UniformBuffer::new(Vec::<u8>::new());
