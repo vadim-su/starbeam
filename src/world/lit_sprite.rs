@@ -23,6 +23,11 @@ pub struct LitSpriteMaterial {
     pub lightmap: Handle<Image>,
     #[uniform(4)]
     pub lightmap_uv_rect: Vec4, // (scale_x, scale_y, offset_x, offset_y)
+    /// Sprite sheet sub-region: (scale_x, scale_y, offset_x, offset_y).
+    /// Default (1,1,0,0) = full texture. For sprite sheets, scale = frame size / sheet size,
+    /// offset = frame position in normalized coords.
+    #[uniform(5)]
+    pub sprite_uv_rect: Vec4,
 }
 
 impl Material2d for LitSpriteMaterial {

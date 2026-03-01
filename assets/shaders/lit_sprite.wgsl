@@ -41,12 +41,20 @@ struct LightmapXform {
 @group(2) @binding(3) var lightmap_sampler: sampler;
 @group(2) @binding(4) var<uniform> lm_xform: LightmapXform;
 
+struct SpriteUvRect {
+    scale: vec2<f32>,
+    offset: vec2<f32>,
+}
+
+@group(2) @binding(5) var<uniform> sprite_rect: SpriteUvRect;
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // Handle flipped UVs from negative Transform.scale.x (flip_x).
     // When scale.x < 0, uv.x arrives mirrored; abs() corrects it so the
     // texture always samples in [0,1]. The world_pos is already correct.
-    let uv = vec2<f32>(abs(in.uv.x), in.uv.y);
+    let base_uv = vec2<f32>(abs(in.uv.x), in.uv.y);
+    let uv = base_uv * sprite_rect.scale + sprite_rect.offset;
 
     let color = textureSample(sprite_texture, sprite_sampler, uv);
     if color.a < 0.01 {
