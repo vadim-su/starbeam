@@ -3,6 +3,7 @@ use std::collections::HashSet;
 
 use bevy::prelude::*;
 
+use crate::object::placed::{OccupancyRef, PlacedObject};
 use crate::registry::tile::{TileId, TileRegistry};
 use crate::registry::world::WorldConfig;
 use crate::world::atlas::TileAtlas;
@@ -68,6 +69,8 @@ impl TileLayer {
 pub struct ChunkData {
     pub fg: TileLayer,
     pub bg: TileLayer,
+    pub objects: Vec<PlacedObject>,
+    pub occupancy: Vec<Option<OccupancyRef>>,
     #[allow(dead_code)] // Reserved for future block-damage system
     pub damage: Vec<u8>,
 }
@@ -126,6 +129,8 @@ impl WorldMap {
                     tiles: chunk_tiles.bg,
                     bitmasks: vec![0; len],
                 },
+                objects: Vec::new(),
+                occupancy: vec![None; len],
                 damage: vec![0; len],
             }
         })
