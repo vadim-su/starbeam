@@ -109,6 +109,7 @@ impl Plugin for GameUiPlugin {
                 (
                     hotbar::update_hotbar_slots,
                     slot_sync::sync_slot_contents,
+                    slot_sync::update_slot_icons,
                     toggle_inventory,
                     drag_drop::update_drag_position,
                     tooltip::update_tooltip,
