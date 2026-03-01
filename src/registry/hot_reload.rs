@@ -5,8 +5,8 @@ use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
 
 use super::assets::{
-    BiomeAsset, ParallaxConfigAsset, PlanetTypeAsset, PlayerDefAsset, TileRegistryAsset,
-    WorldConfigAsset,
+    BiomeAsset, ObjectRegistryAsset, ParallaxConfigAsset, PlanetTypeAsset, PlayerDefAsset,
+    TileRegistryAsset, WorldConfigAsset,
 };
 use super::biome::{
     BiomeDef, BiomeId, BiomeRegistry, LayerBoundaries, LayerConfig, LayerConfigs, PlanetConfig,
@@ -15,6 +15,7 @@ use super::player::PlayerConfig;
 use super::tile::TileRegistry;
 use super::world::WorldConfig;
 use super::{BiomeParallaxConfigs, RegistryHandles};
+use crate::object::registry::ObjectRegistry;
 
 use crate::parallax::config::ParallaxConfig;
 use crate::world::biome_map::BiomeMap;
@@ -94,6 +95,26 @@ pub(crate) fn hot_reload_tiles(
         {
             *registry = TileRegistry::from_defs(asset.tiles.clone());
             info!("Hot-reloaded TileRegistry ({} tiles)", asset.tiles.len());
+        }
+    }
+}
+
+pub(crate) fn hot_reload_objects(
+    mut events: MessageReader<AssetEvent<ObjectRegistryAsset>>,
+    handles: Res<RegistryHandles>,
+    assets: Res<Assets<ObjectRegistryAsset>>,
+    mut registry: ResMut<ObjectRegistry>,
+) {
+    for event in events.read() {
+        if let AssetEvent::Modified { id } = event
+            && *id == handles.objects.id()
+            && let Some(asset) = assets.get(&handles.objects)
+        {
+            *registry = ObjectRegistry::from_defs(asset.objects.clone());
+            info!(
+                "Hot-reloaded ObjectRegistry ({} objects)",
+                asset.objects.len()
+            );
         }
     }
 }

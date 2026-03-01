@@ -5,12 +5,19 @@ use bevy::reflect::TypePath;
 use serde::Deserialize;
 
 use super::tile::TileDef;
+use crate::object::definition::ObjectDef;
 use crate::parallax::config::ParallaxLayerDef;
 
 /// Asset loaded from tiles.registry.ron
 #[derive(Asset, TypePath, Debug, Deserialize)]
 pub struct TileRegistryAsset {
     pub tiles: Vec<TileDef>,
+}
+
+/// Asset loaded from objects.registry.ron
+#[derive(Asset, TypePath, Debug, Deserialize)]
+pub struct ObjectRegistryAsset {
+    pub objects: Vec<ObjectDef>,
 }
 
 /// Asset loaded from player.def.ron
@@ -150,4 +157,26 @@ pub struct BiomeAsset {
     #[allow(dead_code)]
     #[serde(default)]
     pub status_effects: Option<Vec<String>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ron_roundtrip_objects() {
+        let ron_str = std::fs::read_to_string("assets/world/objects.objects.ron")
+            .expect("objects.objects.ron should exist");
+        let asset: ObjectRegistryAsset =
+            ron::from_str(&ron_str).expect("objects.objects.ron should parse");
+        assert!(
+            asset.objects.len() >= 2,
+            "should have at least none + torch"
+        );
+        assert_eq!(asset.objects[0].id, "none");
+        assert_eq!(asset.objects[1].id, "torch_object");
+        assert_eq!(asset.objects[1].light_emission, [255, 170, 40]);
+        assert_eq!(asset.objects[1].sprite_columns, 4);
+        assert_eq!(asset.objects[1].sprite_rows, 5);
+    }
 }

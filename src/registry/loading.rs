@@ -7,8 +7,8 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use super::assets::{
-    AutotileAsset, BiomeAsset, ParallaxConfigAsset, PlanetTypeAsset, PlayerDefAsset,
-    TileRegistryAsset, WorldConfigAsset,
+    AutotileAsset, BiomeAsset, ObjectRegistryAsset, ParallaxConfigAsset, PlanetTypeAsset,
+    PlayerDefAsset, TileRegistryAsset, WorldConfigAsset,
 };
 use super::biome::{
     BiomeDef, BiomeId, BiomeRegistry, LayerBoundaries, LayerConfig, LayerConfigs, PlanetConfig,
@@ -18,6 +18,7 @@ use super::player::PlayerConfig;
 use super::tile::TileRegistry;
 use super::world::WorldConfig;
 use super::{AppState, BiomeParallaxConfigs, RegistryHandles};
+use crate::object::registry::ObjectRegistry;
 
 use crate::parallax::config::ParallaxConfig;
 use crate::world::atlas::{build_combined_atlas, AtlasParams, TileAtlas};
@@ -30,6 +31,7 @@ use crate::world::tile_renderer::{SharedTileMaterial, TileMaterial};
 #[derive(Resource)]
 pub(crate) struct LoadingAssets {
     tiles: Handle<TileRegistryAsset>,
+    objects: Handle<ObjectRegistryAsset>,
     player: Handle<PlayerDefAsset>,
     world_config: Handle<WorldConfigAsset>,
 }
@@ -51,10 +53,12 @@ pub(crate) struct LoadingBiomeAssets {
 
 pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServer>) {
     let tiles = asset_server.load::<TileRegistryAsset>("world/tiles.registry.ron");
+    let objects = asset_server.load::<ObjectRegistryAsset>("world/objects.objects.ron");
     let player = asset_server.load::<PlayerDefAsset>("characters/adventurer/adventurer.def.ron");
     let world_config = asset_server.load::<WorldConfigAsset>("world/world.config.ron");
     commands.insert_resource(LoadingAssets {
         tiles,
+        objects,
         player,
         world_config,
     });
@@ -65,12 +69,14 @@ pub(crate) fn check_loading(
     loading: Res<LoadingAssets>,
     asset_server: Res<AssetServer>,
     tile_assets: Res<Assets<TileRegistryAsset>>,
+    object_assets: Res<Assets<ObjectRegistryAsset>>,
     player_assets: Res<Assets<PlayerDefAsset>>,
     world_assets: Res<Assets<WorldConfigAsset>>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
-    let (Some(tiles), Some(player), Some(world_cfg)) = (
+    let (Some(tiles), Some(objects), Some(player), Some(world_cfg)) = (
         tile_assets.get(&loading.tiles),
+        object_assets.get(&loading.objects),
         player_assets.get(&loading.player),
         world_assets.get(&loading.world_config),
     ) else {
@@ -80,6 +86,7 @@ pub(crate) fn check_loading(
     // Build resources from loaded assets
     let registry_ref = TileRegistry::from_defs(tiles.tiles.clone());
     commands.insert_resource(registry_ref);
+    commands.insert_resource(ObjectRegistry::from_defs(objects.objects.clone()));
     commands.insert_resource(PlayerConfig {
         speed: player.speed,
         jump_velocity: player.jump_velocity,
@@ -104,6 +111,7 @@ pub(crate) fn check_loading(
     // Keep handles alive for hot-reload
     commands.insert_resource(RegistryHandles {
         tiles: loading.tiles.clone(),
+        objects: loading.objects.clone(),
         player: loading.player.clone(),
         world_config: loading.world_config.clone(),
     });

@@ -12,13 +12,13 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 
 use assets::{
-    AutotileAsset, BiomeAsset, ParallaxConfigAsset, PlanetTypeAsset, PlayerDefAsset,
-    TileRegistryAsset, WorldConfigAsset,
+    AutotileAsset, BiomeAsset, ObjectRegistryAsset, ParallaxConfigAsset, PlanetTypeAsset,
+    PlayerDefAsset, TileRegistryAsset, WorldConfigAsset,
 };
 use biome::BiomeId;
 use hot_reload::{
-    hot_reload_biome_parallax, hot_reload_biomes, hot_reload_planet_type, hot_reload_player,
-    hot_reload_tiles, hot_reload_world,
+    hot_reload_biome_parallax, hot_reload_biomes, hot_reload_objects, hot_reload_planet_type,
+    hot_reload_player, hot_reload_tiles, hot_reload_world,
 };
 use loader::RonLoader;
 use loading::{
@@ -32,6 +32,7 @@ use crate::parallax::config::ParallaxConfig;
 #[derive(Resource)]
 pub struct RegistryHandles {
     pub tiles: Handle<TileRegistryAsset>,
+    pub objects: Handle<ObjectRegistryAsset>,
     pub player: Handle<PlayerDefAsset>,
     pub world_config: Handle<WorldConfigAsset>,
 }
@@ -58,11 +59,13 @@ impl Plugin for RegistryPlugin {
     fn build(&self, app: &mut App) {
         app.init_state::<AppState>()
             .init_asset::<TileRegistryAsset>()
+            .init_asset::<ObjectRegistryAsset>()
             .init_asset::<PlayerDefAsset>()
             .init_asset::<WorldConfigAsset>()
             .init_asset::<ParallaxConfigAsset>()
             .init_asset::<AutotileAsset>()
             .register_asset_loader(RonLoader::<TileRegistryAsset>::new(&["registry.ron"]))
+            .register_asset_loader(RonLoader::<ObjectRegistryAsset>::new(&["objects.ron"]))
             .register_asset_loader(RonLoader::<PlayerDefAsset>::new(&["def.ron"]))
             .register_asset_loader(RonLoader::<WorldConfigAsset>::new(&["config.ron"]))
             .register_asset_loader(RonLoader::<ParallaxConfigAsset>::new(&["parallax.ron"]))
@@ -88,6 +91,7 @@ impl Plugin for RegistryPlugin {
                     hot_reload_player,
                     hot_reload_world,
                     hot_reload_tiles,
+                    hot_reload_objects,
                     hot_reload_biomes,
                     hot_reload_planet_type,
                     hot_reload_biome_parallax,
