@@ -19,6 +19,10 @@ pub struct ParallaxLayerState {
     pub initialized: bool,
 }
 
+/// Marker for the sky layer — receives full day/night tint.
+#[derive(Component)]
+pub struct ParallaxSkyLayer;
+
 /// Marker for individual tile sprites within a repeating parallax layer.
 /// These are spawned as children of the `ParallaxLayerConfig` entity.
 #[derive(Component)]

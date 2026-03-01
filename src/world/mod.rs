@@ -50,6 +50,12 @@ impl Plugin for WorldPlugin {
                 day_night::tick_world_time
                     .in_set(GameSet::WorldUpdate)
                     .run_if(resource_exists::<day_night::WorldTime>),
+            )
+            .add_systems(
+                Update,
+                day_night::tint_parallax_layers
+                    .in_set(GameSet::Parallax)
+                    .run_if(resource_exists::<day_night::WorldTime>),
             );
     }
 }

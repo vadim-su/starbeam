@@ -7,7 +7,7 @@ use crate::registry::BiomeParallaxConfigs;
 use crate::world::biome_map::BiomeMap;
 use crate::world::chunk::world_to_tile;
 
-use super::spawn::{ParallaxLayerConfig, ParallaxLayerState};
+use super::spawn::{ParallaxLayerConfig, ParallaxLayerState, ParallaxSkyLayer};
 
 /// Tracks which biome the player is currently in.
 #[derive(Resource, Debug)]
@@ -218,7 +218,7 @@ fn spawn_biome_parallax(
         let image_handle: Handle<Image> = asset_server.load(&layer_def.image);
         let color = Color::srgba(1.0, 1.0, 1.0, initial_alpha);
 
-        commands.spawn((
+        let mut entity_cmd = commands.spawn((
             ParallaxLayerConfig {
                 biome_id,
                 speed_x: layer_def.speed_x,
@@ -234,6 +234,10 @@ fn spawn_biome_parallax(
             },
             Transform::from_xyz(0.0, 0.0, layer_def.z_order),
         ));
+        // Sky layer: no parallax scroll (speed=0), receives full day/night tint
+        if layer_def.speed_x == 0.0 && layer_def.speed_y == 0.0 {
+            entity_cmd.insert(ParallaxSkyLayer);
+        }
     }
 
     info!(

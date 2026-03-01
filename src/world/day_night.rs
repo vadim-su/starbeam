@@ -1,6 +1,8 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 
+use crate::parallax::spawn::{ParallaxLayerConfig, ParallaxSkyLayer};
+
 /// Day phase indices into the config arrays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DayPhase {
@@ -192,6 +194,29 @@ pub fn tick_world_time(
     world_time.danger_multiplier = lerp_phase_value(&config.danger_multipliers, phase, progress);
     world_time.temperature_modifier =
         lerp_phase_value(&config.temperature_modifiers, phase, progress);
+}
+
+/// Tint parallax layers based on time of day.
+/// Sky layers get full tint; background layers get 50% blend.
+pub fn tint_parallax_layers(
+    world_time: Res<WorldTime>,
+    mut sky_query: Query<&mut Sprite, With<ParallaxSkyLayer>>,
+    mut layer_query: Query<&mut Sprite, (With<ParallaxLayerConfig>, Without<ParallaxSkyLayer>)>,
+) {
+    let sky_tint = world_time.sky_color;
+
+    // Sky: full RGB tint, preserve alpha (biome transition controls alpha)
+    for mut sprite in &mut sky_query {
+        let alpha = sprite.color.alpha();
+        sprite.color = sky_tint.with_alpha(alpha);
+    }
+
+    // Background hills/trees: 50% blend toward sky tint, preserve alpha
+    for mut sprite in &mut layer_query {
+        let alpha = sprite.color.alpha();
+        let blended = Color::WHITE.mix(&sky_tint, 0.5).with_alpha(alpha);
+        sprite.color = blended;
+    }
 }
 
 /// Loads the day/night config from the embedded RON file and inserts resources.

@@ -11,6 +11,7 @@ use crate::registry::tile::TileRegistry;
 use crate::registry::world::WorldConfig;
 use crate::registry::BiomeParallaxConfigs;
 use crate::world::chunk::{tile_to_chunk, tile_to_local, world_to_tile, LoadedChunks, WorldMap};
+use crate::world::day_night::WorldTime;
 use crate::world::rc_lighting::RcLightingConfig;
 
 /// Tracks debug panel visibility.
@@ -46,6 +47,8 @@ pub fn draw_debug_panel(
     entities: Query<Entity>,
     // Lighting
     mut rc_config: ResMut<RcLightingConfig>,
+    // Day/Night
+    mut world_time: Option<ResMut<WorldTime>>,
     // Parallax
     biome_registry: Res<BiomeRegistry>,
     biome_parallax: Option<Res<BiomeParallaxConfigs>>,
@@ -304,6 +307,47 @@ pub fn draw_debug_panel(
                         egui::Slider::new(&mut rc_config.bounce_damping, 0.0..=1.0).step_by(0.05),
                     );
                 });
+
+            // --- Day/Night ---
+            if let Some(ref mut wt) = world_time {
+                egui::CollapsingHeader::new(egui::RichText::new("Day/Night").strong())
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        egui::Grid::new("day_night_grid")
+                            .num_columns(2)
+                            .spacing([20.0, 4.0])
+                            .show(ui, |ui| {
+                                ui.label("Phase:");
+                                ui.monospace(format!("{}", wt.phase));
+                                ui.end_row();
+
+                                ui.label("Progress:");
+                                ui.monospace(format!("{:.1}%", wt.phase_progress * 100.0));
+                                ui.end_row();
+
+                                ui.label("Sun color:");
+                                ui.monospace(format!(
+                                    "({:.2}, {:.2}, {:.2})",
+                                    wt.sun_color.x, wt.sun_color.y, wt.sun_color.z
+                                ));
+                                ui.end_row();
+
+                                ui.label("Sun intensity:");
+                                ui.monospace(format!("{:.2}", wt.sun_intensity));
+                                ui.end_row();
+
+                                ui.label("Ambient min:");
+                                ui.monospace(format!("{:.3}", wt.ambient_min));
+                                ui.end_row();
+                            });
+
+                        ui.separator();
+                        ui.label("Time of day:");
+                        ui.add(egui::Slider::new(&mut wt.time_of_day, 0.0..=0.999).step_by(0.001));
+
+                        ui.checkbox(&mut wt.paused, "Pause time");
+                    });
+            }
 
             // --- Parallax ---
             if let (Some(biome_parallax), Some(current_biome)) = (&biome_parallax, &current_biome) {
