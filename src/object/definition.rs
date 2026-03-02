@@ -1,10 +1,10 @@
 use bevy::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::item::DropDef;
 
 /// Compact object identifier. Index into ObjectRegistry.defs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct ObjectId(pub u16);
 
 impl ObjectId {

@@ -4,10 +4,9 @@ use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 use crate::object::definition::ObjectId;
 use crate::object::registry::ObjectRegistry;
 use crate::registry::tile::{TileId, TileRegistry};
-use crate::registry::world::ActiveWorld;
 use crate::registry::AppState;
 use crate::sets::GameSet;
-use crate::world::chunk::{tile_to_chunk, tile_to_local, world_to_tile, WorldMap};
+use crate::world::chunk::{world_to_tile, WorldMap};
 use crate::world::ctx::WorldCtx;
 use crate::world::lit_sprite::LitSpriteMaterial;
 use crate::world::rc_pipeline;
@@ -96,6 +95,22 @@ pub struct RcInputData {
 
 // `Default` derived: all Vecs empty, numerics 0, dirty false.
 
+/// Dirty flag: set `true` whenever tiles are modified (block_action, worldgen, etc.)
+/// so that the next `extract_lighting_data` rebuilds density/albedo/flat grids.
+#[derive(Resource, Default)]
+pub struct RcGridDirty(pub bool);
+
+/// Cached flat tile grids for the RC lighting system.
+/// Stored in `Local<RcCachedGrid>` to persist between frames without
+/// re-extracting tiles from the chunk `HashMap` every frame.
+#[derive(Default)]
+struct RcCachedGrid {
+    fg: Vec<TileId>,
+    bg: Vec<TileId>,
+    origin: IVec2,
+    size: UVec2,
+}
+
 /// Reset RC lighting state to defaults.
 ///
 /// Registered on `OnEnter(LoadingBiomes)` to ensure that any stale data
@@ -103,9 +118,14 @@ pub struct RcInputData {
 /// extract may run after `handle_warp` in the same Update) is zeroed before
 /// `ExtractResource` copies it to the render world. Without this, the GPU
 /// compute node would keep dispatching with old-planet data during loading.
-fn reset_rc_on_loading(mut config: ResMut<RcLightingConfig>, mut input: ResMut<RcInputData>) {
+fn reset_rc_on_loading(
+    mut config: ResMut<RcLightingConfig>,
+    mut input: ResMut<RcInputData>,
+    mut rc_dirty: ResMut<RcGridDirty>,
+) {
     *config = RcLightingConfig::default();
     *input = RcInputData::default();
+    rc_dirty.0 = true; // Force grid rebuild on next frame
 }
 
 /// Plugin that registers RC lighting resources and the per-frame extract system.
@@ -120,6 +140,7 @@ impl Plugin for RcLightingPlugin {
 
         app.init_resource::<RcLightingConfig>()
             .init_resource::<RcInputData>()
+            .init_resource::<RcGridDirty>()
             .insert_resource(gpu_images)
             .add_plugins((
                 ExtractResourcePlugin::<RcLightingConfig>::default(),
@@ -161,70 +182,29 @@ impl Plugin for RcLightingPlugin {
     }
 }
 
-/// Look up a foreground tile without requiring `WorldCtxRef`.
-/// Returns stone (bedrock) for `tile_y < 0`, `None` for above-world or unloaded chunks.
-fn get_fg_tile(
-    world_map: &WorldMap,
-    tile_x: i32,
-    tile_y: i32,
-    world_config: &ActiveWorld,
-    tile_registry: &TileRegistry,
-) -> Option<TileId> {
-    if tile_y < 0 {
-        return Some(tile_registry.by_name("stone")); // bedrock below world
-    }
-    if tile_y >= world_config.height_tiles {
-        return None; // above world, treat as air
-    }
-    let wrapped_x = world_config.wrap_tile_x(tile_x);
-    let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, world_config.chunk_size);
-    let (lx, ly) = tile_to_local(wrapped_x, tile_y, world_config.chunk_size);
-    world_map
-        .chunk(cx, cy)
-        .map(|chunk| chunk.fg.get(lx, ly, world_config.chunk_size))
-}
-
-/// Look up a background tile without requiring `WorldCtxRef`.
-/// Returns stone (bedrock) for `tile_y < 0`, `None` for above-world or unloaded chunks.
-fn get_bg_tile(
-    world_map: &WorldMap,
-    tile_x: i32,
-    tile_y: i32,
-    world_config: &ActiveWorld,
-    tile_registry: &TileRegistry,
-) -> Option<TileId> {
-    if tile_y < 0 {
-        return Some(tile_registry.by_name("stone")); // bedrock below world
-    }
-    if tile_y >= world_config.height_tiles {
-        return None; // above world, treat as air
-    }
-    let wrapped_x = world_config.wrap_tile_x(tile_x);
-    let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, world_config.chunk_size);
-    let (lx, ly) = tile_to_local(wrapped_x, tile_y, world_config.chunk_size);
-    world_map
-        .chunk(cx, cy)
-        .map(|chunk| chunk.bg.get(lx, ly, world_config.chunk_size))
-}
-
-/// Count how many of the 4 cardinal neighbors are "open" (both FG and BG air).
-/// Used to scale sun emitter intensity: isolated tiles glow dimly while tiles
-/// in large openings receive full sunlight.
-fn count_open_neighbors(
-    world_map: &WorldMap,
-    tx: i32,
-    ty: i32,
-    world_config: &ActiveWorld,
-    tile_registry: &TileRegistry,
+/// Count how many of the 4 cardinal neighbors are "open" (both FG and BG air)
+/// using direct array indexing into the flat tile grids.
+/// Out-of-bounds neighbors (grid edges in padding zone) are treated as open.
+fn count_open_neighbors_grid(
+    bx: usize,
+    by: usize,
+    w: usize,
+    h: usize,
+    fg: &[TileId],
+    bg: &[TileId],
+    tile_reg: &TileRegistry,
 ) -> u32 {
     let mut count = 0u32;
-    for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
-        let nx = tx + dx;
-        let ny = ty + dy;
-        let fg_air = get_fg_tile(world_map, nx, ny, world_config, tile_registry)
-            .is_none_or(|id| !tile_registry.is_solid(id));
-        let bg_air = get_bg_tile(world_map, nx, ny, world_config, tile_registry)
-            .is_none_or(|id| !tile_registry.is_solid(id));
+    for (dx, dy) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+        let nx = bx as i32 + dx;
+        let ny = by as i32 + dy;
+        if nx < 0 || nx >= w as i32 || ny < 0 || ny >= h as i32 {
+            count += 1; // out of grid bounds → treat as open
+            continue;
+        }
+        let nidx = ny as usize * w + nx as usize;
+        let fg_air = !tile_reg.is_solid(fg[nidx]);
+        let bg_air = !tile_reg.is_solid(bg[nidx]);
         if fg_air && bg_air {
             count += 1;
         }
@@ -274,6 +254,16 @@ fn compute_cascade_count(padding: u32) -> u32 {
 
 /// Per-frame system: reads camera viewport and visible tiles, fills
 /// density/emissive/albedo buffers for the GPU radiance cascades pipeline.
+///
+/// **Optimizations over the naive per-tile approach:**
+/// 1. Flat `Vec<TileId>` grids built by iterating chunks (1 HashMap lookup
+///    per chunk, row-wise `copy_from_slice`) instead of ~600K per-tile lookups.
+/// 2. Density/albedo only rebuilt when the grid moves or tiles change
+///    (`RcGridDirty`); cached flat grids persist in `Local<RcCachedGrid>`.
+/// 3. Fast-paths: sky tiles (`ty >= height`) → full sun row; bedrock
+///    (`ty < 0`) → skip emissive entirely.
+/// 4. `count_open_neighbors_grid` uses 4 array reads instead of 8 HashMap
+///    lookups.
 #[allow(clippy::too_many_arguments)]
 fn extract_lighting_data(
     camera_query: Query<(&Camera, &Transform, &Projection), With<Camera2d>>,
@@ -284,9 +274,12 @@ fn extract_lighting_data(
     world_time: Option<Res<crate::world::day_night::WorldTime>>,
     time: Res<Time>,
     object_registry: Option<Res<ObjectRegistry>>,
+    mut rc_dirty: ResMut<RcGridDirty>,
+    mut cache: Local<RcCachedGrid>,
 ) {
     let world_config = &*ctx.config;
     let tile_registry = &*ctx.tile_registry;
+    let height_tiles = world_config.height_tiles;
     // Reset dirty flag; will be set true if we produce new data
     input.dirty = false;
 
@@ -381,11 +374,6 @@ fn extract_lighting_data(
         input.height = input_h;
     }
 
-    // Clear buffers
-    input.density.fill(0);
-    input.emissive.fill([0.0; 4]);
-    input.albedo.fill([0, 0, 0, 0]);
-
     // --- Pre-generate chunk data for the RC grid ---
     // Ensures tile lookups never return None for in-bounds tiles, so unloaded
     // chunks at the edge of the lighting radius have correct tile data instead
@@ -394,7 +382,7 @@ fn extract_lighting_data(
         let ctx_ref = ctx.as_ref();
         let cs = world_config.chunk_size as i32;
         let clamp_min_ty = min_ty.max(0);
-        let clamp_max_ty = max_ty.min(world_config.height_tiles - 1);
+        let clamp_max_ty = max_ty.min(height_tiles - 1);
         if clamp_min_ty <= clamp_max_ty {
             let gen_min_cy = clamp_min_ty.div_euclid(cs);
             let gen_max_cy = clamp_max_ty.div_euclid(cs);
@@ -407,6 +395,99 @@ fn extract_lighting_data(
                 }
             }
         }
+    }
+
+    // --- Determine whether to rebuild flat grids + density/albedo ---
+    let new_size = UVec2::new(input_w, input_h);
+    let need_rebuild = new_grid_origin != cache.origin || new_size != cache.size || rc_dirty.0;
+
+    // --- Rebuild flat tile grids + density/albedo when needed ---
+    // Instead of ~63K×2 HashMap lookups (get_fg_tile + get_bg_tile per tile),
+    // iterate ~70 chunks with row-wise copy_from_slice (~2K memcpy calls).
+    if need_rebuild {
+        let cs = world_config.chunk_size as i32;
+        let cs_usize = world_config.chunk_size as usize;
+        let w_usize = input_w as usize;
+        let stone = tile_registry.by_name("stone");
+
+        // Resize and default to AIR (sky tiles above world stay AIR)
+        cache.fg.resize(total, TileId::AIR);
+        cache.bg.resize(total, TileId::AIR);
+        cache.fg.fill(TileId::AIR);
+        cache.bg.fill(TileId::AIR);
+
+        // Fill bedrock rows (ty < 0) with stone
+        for ty in min_ty..0_i32.min(max_ty + 1) {
+            let buf_y = (max_ty - ty) as usize;
+            let row_start = buf_y * w_usize;
+            cache.fg[row_start..row_start + w_usize].fill(stone);
+            cache.bg[row_start..row_start + w_usize].fill(stone);
+        }
+
+        // Fill from chunks using row-wise copy_from_slice
+        let clamp_min_ty = min_ty.max(0);
+        let clamp_max_ty = max_ty.min(height_tiles - 1);
+        if clamp_min_ty <= clamp_max_ty {
+            let grid_min_cy = clamp_min_ty.div_euclid(cs);
+            let grid_max_cy = clamp_max_ty.div_euclid(cs);
+            let grid_min_cx = min_tx.div_euclid(cs);
+            let grid_max_cx = max_tx.div_euclid(cs);
+
+            for cy in grid_min_cy..=grid_max_cy {
+                for cx in grid_min_cx..=grid_max_cx {
+                    let data_cx = world_config.wrap_chunk_x(cx);
+                    let Some(chunk) = world_map.chunk(data_cx, cy) else {
+                        continue;
+                    };
+
+                    let chunk_tx0 = cx * cs;
+                    let chunk_ty0 = cy * cs;
+
+                    // Intersect chunk tile range with RC grid and valid world Y
+                    let tx0 = chunk_tx0.max(min_tx);
+                    let tx1 = (chunk_tx0 + cs).min(max_tx + 1);
+                    let ty0 = chunk_ty0.max(clamp_min_ty);
+                    let ty1 = (chunk_ty0 + cs).min(clamp_max_ty + 1);
+
+                    if tx0 >= tx1 || ty0 >= ty1 {
+                        continue;
+                    }
+
+                    let lx0 = (tx0 - chunk_tx0) as usize;
+                    let row_len = (tx1 - tx0) as usize;
+                    let buf_x0 = (tx0 - min_tx) as usize;
+
+                    for ty in ty0..ty1 {
+                        let ly = (ty - chunk_ty0) as usize;
+                        let buf_y = (max_ty - ty) as usize;
+
+                        let src_start = ly * cs_usize + lx0;
+                        let dst_start = buf_y * w_usize + buf_x0;
+
+                        cache.fg[dst_start..dst_start + row_len]
+                            .copy_from_slice(&chunk.fg.tiles[src_start..src_start + row_len]);
+                        cache.bg[dst_start..dst_start + row_len]
+                            .copy_from_slice(&chunk.bg.tiles[src_start..src_start + row_len]);
+                    }
+                }
+            }
+        }
+
+        // Rebuild density + albedo from flat grids
+        input.density.fill(0);
+        input.albedo.fill([0, 0, 0, 0]);
+        for idx in 0..total {
+            let fg_id = cache.fg[idx];
+            if tile_registry.is_solid(fg_id) {
+                let opacity = tile_registry.light_opacity(fg_id);
+                input.density[idx] = (opacity as f32 / 15.0 * 255.0) as u8;
+                let albedo = tile_registry.albedo(fg_id);
+                input.albedo[idx] = [albedo[0], albedo[1], albedo[2], 255];
+            }
+        }
+
+        cache.origin = new_grid_origin;
+        cache.size = new_size;
     }
 
     // --- Compute effective sun color from day/night cycle ---
@@ -427,41 +508,74 @@ fn extract_lighting_data(
         (SUN_COLOR, 0.0)
     };
 
-    // --- Fill tile data + sun emitters ---
-    // Sun emitters are placed at every tile where BOTH FG and BG are air.
-    // Worldgen guarantees cave air always has BG=solid (fill_block below
-    // surface), so only sky tiles and player-dug openings (both layers
-    // removed) become emitters. This handles side windows, vertical shafts,
-    // and any shape of opening — no top-down scan limitation.
-    for ty in min_ty..=max_ty {
-        for tx in min_tx..=max_tx {
-            let buf_x = (tx - min_tx) as u32;
-            // GPU textures have Y=0 at top; world Y increases upward.
-            // Flip so that max_ty (top of world view) maps to texel row 0.
-            let buf_y = (max_ty - ty) as u32;
-            let idx = (buf_y * input_w + buf_x) as usize;
+    // --- Rebuild emissive every frame (day/night + flicker change) ---
+    input.emissive.fill([0.0; 4]);
+    let w_usize = input_w as usize;
+    let h_usize = input_h as usize;
+    let elapsed = time.elapsed_secs();
 
-            let Some(tile_id) = get_fg_tile(&world_map, tx, ty, &world_config, &tile_registry)
-            else {
-                // Above world or unloaded chunk — sky emitter
+    for buf_y in 0..h_usize {
+        let ty = max_ty - buf_y as i32;
+
+        // Fast path: sky above world — full sun emitter for entire row
+        if ty >= height_tiles {
+            let row_start = buf_y * w_usize;
+            for idx in row_start..row_start + w_usize {
                 input.emissive[idx] = [sun[0], sun[1], sun[2], 1.0];
-                continue;
-            };
+            }
+            continue;
+        }
 
-            // Density: write normalized light_opacity (0–255) instead of binary.
-            // RC raymarch uses this as partial opacity — dirt lets some light
-            // through while stone blocks almost completely.
-            if tile_registry.is_solid(tile_id) {
-                let opacity = tile_registry.light_opacity(tile_id);
-                input.density[idx] = (opacity as f32 / 15.0 * 255.0) as u8;
+        // Fast path: bedrock below world — no emissive (fully opaque)
+        if ty < 0 {
+            continue;
+        }
+
+        // In-world tiles: sun emitters + tile-specific emissive
+        let row_start = buf_y * w_usize;
+        for buf_x in 0..w_usize {
+            let idx = row_start + buf_x;
+            let fg_id = cache.fg[idx];
+
+            if tile_registry.is_solid(fg_id) {
+                // Tile-specific emissive (torches, lava, etc.)
+                // Boosted by POINT_LIGHT_BOOST to compensate for small angular
+                // coverage — a single-tile emitter is hit by far fewer RC rays
+                // than area emitters like the sky band.
+                let emission = tile_registry.light_emission(fg_id);
+                if emission != [0, 0, 0] {
+                    let tx = min_tx + buf_x as i32;
+                    let def = tile_registry.get(fg_id);
+                    let flicker = flicker_multiplier(
+                        tx,
+                        ty,
+                        elapsed,
+                        def.flicker_speed,
+                        def.flicker_strength,
+                        def.flicker_min,
+                    );
+                    input.emissive[idx] = [
+                        emission[0] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
+                        emission[1] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
+                        emission[2] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
+                        1.0,
+                    ];
+                }
             } else {
                 // FG is air: place sun emitter only if BG is also air.
                 // Intensity scales with opening size (open neighbor count).
-                let bg_is_air = get_bg_tile(&world_map, tx, ty, &world_config, &tile_registry)
-                    .is_none_or(|id| !tile_registry.is_solid(id));
-                if bg_is_air {
-                    let open =
-                        count_open_neighbors(&world_map, tx, ty, &world_config, &tile_registry);
+                let bg_id = cache.bg[idx];
+                let bg_air = !tile_registry.is_solid(bg_id);
+                if bg_air {
+                    let open = count_open_neighbors_grid(
+                        buf_x,
+                        buf_y,
+                        w_usize,
+                        h_usize,
+                        &cache.fg,
+                        &cache.bg,
+                        tile_registry,
+                    );
                     let intensity = (1 + open) as f32 / 5.0;
                     input.emissive[idx] = [
                         sun[0] * intensity,
@@ -471,76 +585,91 @@ fn extract_lighting_data(
                     ];
                 }
             }
+        }
+    }
 
-            // Tile-specific emissive (torches, lava, etc.) overrides sun.
-            // Boosted by POINT_LIGHT_BOOST to compensate for small angular
-            // coverage — a single-tile emitter is hit by far fewer RC rays
-            // than area emitters like the sky band.
-            let emission = tile_registry.light_emission(tile_id);
-            if emission != [0, 0, 0] {
-                let def = tile_registry.get(tile_id);
-                let flicker = flicker_multiplier(
-                    tx,
-                    ty,
-                    time.elapsed_secs(),
-                    def.flicker_speed,
-                    def.flicker_strength,
-                    def.flicker_min,
-                );
-                input.emissive[idx] = [
-                    emission[0] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
-                    emission[1] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
-                    emission[2] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
-                    1.0,
-                ];
-            }
+    // --- Object emissive (iterate by chunk, not per-tile HashMap) ---
+    // Checked after tile emission so an object light on an air tile
+    // fills the emissive slot that tile emission left at zero.
+    if let Some(ref obj_reg) = object_registry {
+        let cs = world_config.chunk_size as i32;
+        let cs_u = world_config.chunk_size;
+        let clamp_min_ty = min_ty.max(0);
+        let clamp_max_ty = max_ty.min(height_tiles - 1);
+        if clamp_min_ty <= clamp_max_ty {
+            let obj_min_cy = clamp_min_ty.div_euclid(cs);
+            let obj_max_cy = clamp_max_ty.div_euclid(cs);
+            let obj_min_cx = min_tx.div_euclid(cs);
+            let obj_max_cx = max_tx.div_euclid(cs);
 
-            // Object-layer emissive (torches, lanterns, etc.)
-            // Checked after tile emission so an object light on an air tile
-            // fills the emissive slot that tile emission left at zero.
-            if let Some(ref obj_reg) = object_registry {
-                let wrapped_x = world_config.wrap_tile_x(tx);
-                let (cx, cy) = tile_to_chunk(wrapped_x, ty, world_config.chunk_size);
-                let (lx, ly) = tile_to_local(wrapped_x, ty, world_config.chunk_size);
-                if let Some(chunk) = world_map.chunk(cx, cy) {
-                    let occ_idx = (ly * world_config.chunk_size + lx) as usize;
-                    if let Some(occ) = &chunk.occupancy[occ_idx] {
-                        let (dcx, dcy) = occ.data_chunk;
-                        if let Some(data_chunk) = world_map.chunk(dcx, dcy) {
-                            if let Some(obj) = data_chunk.objects.get(occ.object_index as usize) {
-                                if obj.object_id != ObjectId::NONE {
-                                    if let Some(def) = obj_reg.try_get(obj.object_id) {
-                                        let oe = def.light_emission;
-                                        if oe != [0, 0, 0] {
-                                            let flicker = flicker_multiplier(
-                                                tx,
-                                                ty,
-                                                time.elapsed_secs(),
-                                                def.flicker_speed,
-                                                def.flicker_strength,
-                                                def.flicker_min,
-                                            );
-                                            input.emissive[idx] = [
-                                                oe[0] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
-                                                oe[1] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
-                                                oe[2] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
-                                                1.0,
-                                            ];
-                                        }
-                                    }
-                                }
+            for cy in obj_min_cy..=obj_max_cy {
+                for cx in obj_min_cx..=obj_max_cx {
+                    let data_cx = world_config.wrap_chunk_x(cx);
+                    let Some(chunk) = world_map.chunk(data_cx, cy) else {
+                        continue;
+                    };
+
+                    let chunk_tx0 = cx * cs;
+                    let chunk_ty0 = cy * cs;
+                    let tx0 = chunk_tx0.max(min_tx);
+                    let tx1 = (chunk_tx0 + cs).min(max_tx + 1);
+                    let ty0 = chunk_ty0.max(clamp_min_ty);
+                    let ty1 = (chunk_ty0 + cs).min(clamp_max_ty + 1);
+
+                    for ty in ty0..ty1 {
+                        let ly = (ty - chunk_ty0) as u32;
+                        for tx in tx0..tx1 {
+                            let lx = (tx - chunk_tx0) as u32;
+                            let occ_idx = (ly * cs_u + lx) as usize;
+                            let Some(occ) = &chunk.occupancy[occ_idx] else {
+                                continue;
+                            };
+
+                            let (dcx, dcy) = occ.data_chunk;
+                            let Some(data_chunk) = world_map.chunk(dcx, dcy) else {
+                                continue;
+                            };
+                            let Some(obj) = data_chunk.objects.get(occ.object_index as usize)
+                            else {
+                                continue;
+                            };
+                            if obj.object_id == ObjectId::NONE {
+                                continue;
                             }
+                            let Some(def) = obj_reg.try_get(obj.object_id) else {
+                                continue;
+                            };
+                            let oe = def.light_emission;
+                            if oe == [0, 0, 0] {
+                                continue;
+                            }
+
+                            let buf_x = (tx - min_tx) as u32;
+                            let buf_y = (max_ty - ty) as u32;
+                            let idx = (buf_y * input_w + buf_x) as usize;
+
+                            let flicker = flicker_multiplier(
+                                tx,
+                                ty,
+                                elapsed,
+                                def.flicker_speed,
+                                def.flicker_strength,
+                                def.flicker_min,
+                            );
+                            input.emissive[idx] = [
+                                oe[0] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
+                                oe[1] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
+                                oe[2] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
+                                1.0,
+                            ];
                         }
                     }
                 }
             }
-
-            // Albedo
-            let albedo = tile_registry.albedo(tile_id);
-            input.albedo[idx] = [albedo[0], albedo[1], albedo[2], 255];
         }
     }
 
+    rc_dirty.0 = false;
     input.dirty = true;
 
     // Update config with day/night values for the GPU pipeline.

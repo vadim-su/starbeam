@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::inventory::InventorySlot;
 
 use super::definition::ObjectId;
@@ -5,7 +7,7 @@ use super::definition::ObjectId;
 /// Reference from an occupancy grid cell to the object that occupies it.
 /// `data_chunk` stores the chunk coordinates where the PlacedObject lives,
 /// which may differ from the chunk this occupancy cell is in (for multi-tile objects).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct OccupancyRef {
     pub object_index: u16,
     pub is_anchor: bool,
@@ -13,7 +15,7 @@ pub struct OccupancyRef {
 }
 
 /// State of a placed object (varies by ObjectType).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub enum ObjectState {
     #[default]
     Default,
@@ -23,7 +25,7 @@ pub enum ObjectState {
 }
 
 /// A single object placed in a chunk, stored in ChunkData.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlacedObject {
     pub object_id: ObjectId,
     pub local_x: u32,

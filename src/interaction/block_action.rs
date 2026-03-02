@@ -19,6 +19,7 @@ use crate::world::ctx::WorldCtx;
 use crate::world::lit_sprite::{
     FallbackItemImage, FallbackLightmap, LitSprite, LitSpriteMaterial, SharedLitQuad,
 };
+use crate::world::rc_lighting::RcGridDirty;
 
 /// Dropped item display size in pixels (icons are 16×16).
 const DROPPED_ITEM_SIZE: f32 = 16.0;
@@ -96,13 +97,17 @@ pub fn block_interaction_system(
     item_registry: Res<ItemRegistry>,
     icon_registry: Res<ItemIconRegistry>,
     quad: Res<SharedLitQuad>,
-    fallbacks: (Res<FallbackLightmap>, Res<FallbackItemImage>),
+    fallbacks: (
+        Res<FallbackLightmap>,
+        Res<FallbackItemImage>,
+        ResMut<RcGridDirty>,
+    ),
     mut lit_materials: ResMut<Assets<LitSpriteMaterial>>,
     object_registry: Option<Res<ObjectRegistry>>,
     object_sprites: Option<Res<ObjectSpriteMaterials>>,
     object_entities: Query<(Entity, &PlacedObjectEntity)>,
 ) {
-    let (fallback_lm, fallback_img) = fallbacks;
+    let (fallback_lm, fallback_img, mut rc_dirty) = fallbacks;
     let left_click = mouse.just_pressed(MouseButton::Left);
     let right_click = mouse.just_pressed(MouseButton::Right);
     if !left_click && !right_click {
@@ -423,6 +428,10 @@ pub fn block_interaction_system(
     } else {
         return;
     }
+
+    // Notify RC lighting that tiles changed — density/albedo/flat grids
+    // must be rebuilt on the next frame.
+    rc_dirty.0 = true;
 
     // Update bitmasks for the modified layer
     let modified_layer = if left_click { Layer::Fg } else { Layer::Bg };

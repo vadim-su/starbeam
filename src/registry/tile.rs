@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::item::DropDef;
 
 /// Compact tile identifier. Index into TileRegistry.defs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct TileId(pub u16);
 
 impl TileId {
