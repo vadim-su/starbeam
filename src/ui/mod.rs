@@ -30,6 +30,6 @@ impl Plugin for UiPlugin {
                 EguiPrimaryContextPass,
                 star_map::draw_star_map.run_if(in_state(AppState::InGame)),
             )
-            .add_systems(Update, handle_warp);
+            .add_systems(Update, handle_warp.run_if(in_state(AppState::InGame)));
     }
 }
