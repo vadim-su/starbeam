@@ -1,6 +1,7 @@
 mod camera;
 pub mod cosmos;
 pub mod crafting;
+pub mod fluid;
 mod interaction;
 pub mod inventory;
 pub mod item;
