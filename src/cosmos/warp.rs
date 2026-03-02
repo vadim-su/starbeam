@@ -23,6 +23,11 @@ pub struct WarpToBody {
     pub orbit: u32,
 }
 
+/// Marker resource: when present, the player should be teleported to the
+/// surface of the new world on the next `InGame` enter.
+#[derive(Resource)]
+pub struct NeedsRespawn;
+
 /// System that handles planet warping.
 #[allow(clippy::too_many_arguments)]
 pub fn handle_warp(
@@ -105,7 +110,10 @@ pub fn handle_warp(
         parallax_configs: Vec::new(),
     });
 
-    // --- 7. Transition to LoadingBiomes state ---
+    // --- 7. Mark player for respawn on new world surface ---
+    commands.insert_resource(NeedsRespawn);
+
+    // --- 8. Transition to LoadingBiomes state ---
     next_state.set(AppState::LoadingBiomes);
 
     info!(

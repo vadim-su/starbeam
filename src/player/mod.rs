@@ -5,6 +5,7 @@ pub mod wrap;
 use bevy::prelude::*;
 use bevy::sprite_render::MeshMaterial2d;
 
+use crate::cosmos::warp::NeedsRespawn;
 use crate::inventory::{Hotbar, Inventory};
 use crate::physics::{Gravity, TileCollider};
 use crate::registry::biome::PlanetConfig;
@@ -32,7 +33,12 @@ impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             OnEnter(AppState::InGame),
-            (animation::load_character_animations, spawn_player).chain(),
+            (
+                animation::load_character_animations,
+                spawn_player,
+                respawn_player_on_warp,
+            )
+                .chain(),
         )
         .add_systems(
             Update,
@@ -47,6 +53,7 @@ impl Plugin for PlayerPlugin {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_player(
     mut commands: Commands,
     player_config: Res<PlayerConfig>,
@@ -57,7 +64,13 @@ fn spawn_player(
     quad: Res<SharedLitQuad>,
     fallback_lm: Res<FallbackLightmap>,
     mut lit_materials: ResMut<Assets<LitSpriteMaterial>>,
+    existing_player: Query<Entity, With<Player>>,
 ) {
+    // Skip if player already exists (e.g. after warp — respawn_player handles repositioning)
+    if existing_player.iter().next().is_some() {
+        return;
+    }
+
     let spawn_tile_x = 0;
     let surface_y = terrain_gen::surface_height(
         &noise_cache,
@@ -107,4 +120,47 @@ fn spawn_player(
             1.0,
         )),
     ));
+}
+
+/// After a warp, teleport the existing player to the new world's surface.
+/// Runs on `OnEnter(InGame)` — only acts when `NeedsRespawn` marker exists.
+fn respawn_player_on_warp(
+    mut commands: Commands,
+    needs_respawn: Option<Res<NeedsRespawn>>,
+    world_config: Res<ActiveWorld>,
+    planet_config: Res<PlanetConfig>,
+    noise_cache: Res<TerrainNoiseCache>,
+    player_config: Res<PlayerConfig>,
+    mut player_query: Query<(&mut Transform, &mut Velocity), With<Player>>,
+) {
+    if needs_respawn.is_none() {
+        return;
+    }
+
+    let Ok((mut transform, mut velocity)) = player_query.single_mut() else {
+        return;
+    };
+
+    let spawn_tile_x = 0;
+    let surface_y = terrain_gen::surface_height(
+        &noise_cache,
+        spawn_tile_x,
+        &world_config,
+        planet_config.layers.surface.terrain_frequency,
+        planet_config.layers.surface.terrain_amplitude,
+    );
+    let spawn_pixel_x = spawn_tile_x as f32 * world_config.tile_size + world_config.tile_size / 2.0;
+    let spawn_pixel_y =
+        (surface_y + 5) as f32 * world_config.tile_size + player_config.height / 2.0;
+
+    transform.translation.x = spawn_pixel_x;
+    transform.translation.y = spawn_pixel_y;
+    *velocity = Velocity::default();
+
+    commands.remove_resource::<NeedsRespawn>();
+
+    info!(
+        "Player respawned at tile ({}, {}) → pixel ({:.0}, {:.0})",
+        spawn_tile_x, surface_y, spawn_pixel_x, spawn_pixel_y
+    );
 }
