@@ -8,6 +8,7 @@ pub mod reactions;
 pub mod registry;
 pub mod render;
 pub mod simulation;
+pub mod splash;
 pub mod systems;
 pub mod wave;
 
@@ -32,6 +33,7 @@ impl Plugin for FluidPlugin {
             .init_resource::<systems::ActiveFluidChunks>()
             .init_resource::<wave::WaveConfig>()
             .init_resource::<wave::WaveState>()
+            .init_resource::<splash::SplashConfig>()
             .add_systems(Startup, systems::init_fluid_material)
             .add_systems(
                 Update,
@@ -39,6 +41,8 @@ impl Plugin for FluidPlugin {
                     systems::fluid_simulation,
                     systems::wave_consume_events,
                     systems::wave_simulation,
+                    splash::spawn_splash_particles,
+                    splash::reabsorb_particles,
                     systems::fluid_rebuild_meshes,
                 )
                     .chain()
