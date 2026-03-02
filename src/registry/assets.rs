@@ -5,6 +5,7 @@ use bevy::reflect::TypePath;
 use serde::Deserialize;
 
 use super::tile::TileDef;
+use crate::fluid::FluidDef;
 use crate::item::definition::ItemDef;
 use crate::object::definition::ObjectDef;
 use crate::parallax::config::ParallaxLayerDef;
@@ -13,6 +14,12 @@ use crate::parallax::config::ParallaxLayerDef;
 #[derive(Asset, TypePath, Debug, Deserialize)]
 pub struct TileRegistryAsset {
     pub tiles: Vec<TileDef>,
+}
+
+/// Asset loaded from *.fluid.ron (monolithic fluid list)
+#[derive(Asset, TypePath, Debug, Deserialize)]
+pub struct FluidRegistryAsset {
+    pub fluids: Vec<FluidDef>,
 }
 
 /// Asset loaded from a single *.object.ron file (per-entity).
@@ -280,5 +287,25 @@ mod tests {
         assert_eq!(asset.id, "dirt");
         assert_eq!(asset.max_stack, 999);
         assert!(asset.placeable.is_some());
+    }
+
+    #[test]
+    fn ron_roundtrip_fluids() {
+        let ron_str = std::fs::read_to_string("assets/content/fluids/fluids.fluid.ron")
+            .expect("fluids.fluid.ron should exist");
+        let asset: FluidRegistryAsset =
+            ron::from_str(&ron_str).expect("fluids.fluid.ron should parse");
+        assert_eq!(asset.fluids.len(), 5);
+        assert_eq!(asset.fluids[0].id, "water");
+        assert_eq!(asset.fluids[0].color, [64, 128, 255, 180]);
+        assert!(!asset.fluids[0].is_gas);
+        assert_eq!(asset.fluids[1].id, "lava");
+        assert_eq!(asset.fluids[1].light_emission, [255, 100, 20]);
+        assert_eq!(asset.fluids[2].id, "steam");
+        assert!(asset.fluids[2].is_gas);
+        assert_eq!(asset.fluids[3].id, "toxic_gas");
+        assert_eq!(asset.fluids[3].effects, vec!["breathing_damage"]);
+        assert_eq!(asset.fluids[4].id, "smoke");
+        assert_eq!(asset.fluids[4].effects, vec!["reduce_visibility"]);
     }
 }

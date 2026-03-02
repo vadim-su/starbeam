@@ -247,6 +247,7 @@ pub fn respawn_saved_dropped_items(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fluid::FluidCell;
     use crate::registry::tile::TileId;
     use crate::world::chunk::TileLayer;
     use bevy::math::IVec2;
@@ -467,6 +468,7 @@ mod tests {
         let chunk_a = ChunkData {
             fg: TileLayer::new_air(len),
             bg: TileLayer::new_air(len),
+            fluids: vec![FluidCell::EMPTY; len],
             objects: Vec::new(),
             occupancy: vec![None; len],
             damage: vec![0; len],
@@ -508,6 +510,7 @@ mod tests {
         let chunk = ChunkData {
             fg,
             bg: TileLayer::new_air(len),
+            fluids: vec![FluidCell::EMPTY; len],
             objects: Vec::new(),
             occupancy: vec![None; len],
             damage: vec![0; len],
@@ -616,6 +619,7 @@ mod tests {
         let chunk = ChunkData {
             fg: TileLayer::new_air(len),
             bg: TileLayer::new_air(len),
+            fluids: vec![FluidCell::EMPTY; len],
             objects: Vec::new(),
             occupancy: vec![None; len],
             damage: vec![0; len],
