@@ -53,7 +53,7 @@ pub fn handle_warp(
         .system
         .bodies
         .iter()
-        .find(|b| b.address.orbit == warp.orbit)
+        .find(|b| b.address.orbit() == Some(warp.orbit))
     else {
         warn!("WarpToBody: no body at orbit {}", warp.orbit);
         return;
@@ -61,7 +61,10 @@ pub fn handle_warp(
 
     info!(
         "Warping to orbit {} — {} ({}×{})",
-        body.address.orbit, body.planet_type_id, body.width_tiles, body.height_tiles
+        body.address.orbit().unwrap_or(0),
+        body.planet_type_id,
+        body.width_tiles,
+        body.height_tiles
     );
 
     // --- 1. Despawn all chunk entities ---
@@ -130,6 +133,7 @@ pub fn handle_warp(
 
     info!(
         "Warp complete — loading biomes for {} at orbit {}",
-        body.planet_type_id, body.address.orbit
+        body.planet_type_id,
+        body.address.orbit().unwrap_or(0)
     );
 }

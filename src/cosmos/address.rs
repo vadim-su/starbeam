@@ -1,10 +1,12 @@
 //! Celestial addressing and deterministic seed derivation for the procedural universe.
 //!
-//! Every celestial body (planet, moon) is uniquely identified by a [`CelestialAddress`]
-//! and all its procedural parameters are derived deterministically from a universe seed
-//! via a hash-chain producing [`CelestialSeeds`].
+//! Every celestial body (planet, moon, station, asteroid, ship) is uniquely
+//! identified by a [`CelestialAddress`] and all its procedural parameters are
+//! derived deterministically from a universe seed via a hash-chain producing
+//! [`CelestialSeeds`].
 
 use bevy::math::IVec2;
+use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // Celestial address
@@ -12,13 +14,89 @@ use bevy::math::IVec2;
 
 /// Unique address for any celestial body in the universe.
 ///
-/// Hierarchy: galaxy → system → orbit → optional satellite (moon).
-#[derive(Clone, Hash, Eq, PartialEq, Debug)]
-pub struct CelestialAddress {
-    pub galaxy: IVec2,
-    pub system: IVec2,
-    pub orbit: u32,
-    pub satellite: Option<u32>,
+/// Each variant captures the minimal coordinates needed for that location type.
+/// Only `Planet` and `Moon` are constructed today; the remaining variants exist
+/// to support future content without another migration.
+#[derive(Clone, Hash, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub enum CelestialAddress {
+    Planet {
+        galaxy: IVec2,
+        system: IVec2,
+        orbit: u32,
+    },
+    Moon {
+        galaxy: IVec2,
+        system: IVec2,
+        orbit: u32,
+        satellite: u32,
+    },
+    Station {
+        galaxy: IVec2,
+        system: IVec2,
+        station_id: u32,
+    },
+    Asteroid {
+        galaxy: IVec2,
+        system: IVec2,
+        belt: u32,
+        index: u32,
+    },
+    Ship {
+        owner_id: u64,
+    },
+}
+
+impl CelestialAddress {
+    pub fn planet(galaxy: IVec2, system: IVec2, orbit: u32) -> Self {
+        Self::Planet {
+            galaxy,
+            system,
+            orbit,
+        }
+    }
+
+    pub fn moon(galaxy: IVec2, system: IVec2, orbit: u32, satellite: u32) -> Self {
+        Self::Moon {
+            galaxy,
+            system,
+            orbit,
+            satellite,
+        }
+    }
+
+    pub fn galaxy(&self) -> Option<IVec2> {
+        match self {
+            Self::Planet { galaxy, .. }
+            | Self::Moon { galaxy, .. }
+            | Self::Station { galaxy, .. }
+            | Self::Asteroid { galaxy, .. } => Some(*galaxy),
+            Self::Ship { .. } => None,
+        }
+    }
+
+    pub fn system(&self) -> Option<IVec2> {
+        match self {
+            Self::Planet { system, .. }
+            | Self::Moon { system, .. }
+            | Self::Station { system, .. }
+            | Self::Asteroid { system, .. } => Some(*system),
+            Self::Ship { .. } => None,
+        }
+    }
+
+    pub fn orbit(&self) -> Option<u32> {
+        match self {
+            Self::Planet { orbit, .. } | Self::Moon { orbit, .. } => Some(*orbit),
+            _ => None,
+        }
+    }
+
+    pub fn satellite(&self) -> Option<u32> {
+        match self {
+            Self::Moon { satellite, .. } => Some(*satellite),
+            _ => None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -58,17 +136,40 @@ impl CelestialSeeds {
     /// For moons the body_seed is double-hashed:
     /// `hash(hash(system_seed, orbit), satellite_index)`.
     pub fn derive(universe_seed: u64, address: &CelestialAddress) -> Self {
-        let galaxy_seed = hash_combine(
-            universe_seed,
-            pack_coords(address.galaxy.x, address.galaxy.y),
-        );
-        let system_seed =
-            hash_combine(galaxy_seed, pack_coords(address.system.x, address.system.y));
+        let (galaxy, system, orbit, satellite) = match address {
+            CelestialAddress::Planet {
+                galaxy,
+                system,
+                orbit,
+            } => (*galaxy, *system, *orbit, None),
+            CelestialAddress::Moon {
+                galaxy,
+                system,
+                orbit,
+                satellite,
+            } => (*galaxy, *system, *orbit, Some(*satellite)),
+            CelestialAddress::Station {
+                galaxy,
+                system,
+                station_id,
+            } => (*galaxy, *system, *station_id, None),
+            CelestialAddress::Asteroid {
+                galaxy,
+                system,
+                belt,
+                index,
+            } => (*galaxy, *system, *belt, Some(*index)),
+            CelestialAddress::Ship { owner_id } => {
+                (IVec2::ZERO, IVec2::ZERO, *owner_id as u32, None)
+            }
+        };
+
+        let galaxy_seed = hash_combine(universe_seed, pack_coords(galaxy.x, galaxy.y));
+        let system_seed = hash_combine(galaxy_seed, pack_coords(system.x, system.y));
         let star_seed = hash_tag(system_seed, "star");
+        let planet_seed = hash_combine(system_seed, orbit as u64);
 
-        let planet_seed = hash_combine(system_seed, address.orbit as u64);
-
-        let body_seed = match address.satellite {
+        let body_seed = match satellite {
             Some(sat) => hash_combine(planet_seed, sat as u64),
             None => planet_seed,
         };
@@ -135,12 +236,7 @@ mod tests {
     const UNIVERSE_SEED: u64 = 12345;
 
     fn test_address() -> CelestialAddress {
-        CelestialAddress {
-            galaxy: IVec2::new(0, 0),
-            system: IVec2::new(3, -2),
-            orbit: 2,
-            satellite: None,
-        }
+        CelestialAddress::planet(IVec2::new(0, 0), IVec2::new(3, -2), 2)
     }
 
     #[test]
@@ -167,18 +263,8 @@ mod tests {
 
     #[test]
     fn different_orbit_different_body_seed() {
-        let addr_a = CelestialAddress {
-            galaxy: IVec2::new(0, 0),
-            system: IVec2::new(3, -2),
-            orbit: 1,
-            satellite: None,
-        };
-        let addr_b = CelestialAddress {
-            galaxy: IVec2::new(0, 0),
-            system: IVec2::new(3, -2),
-            orbit: 2,
-            satellite: None,
-        };
+        let addr_a = CelestialAddress::planet(IVec2::new(0, 0), IVec2::new(3, -2), 1);
+        let addr_b = CelestialAddress::planet(IVec2::new(0, 0), IVec2::new(3, -2), 2);
         let a = CelestialSeeds::derive(UNIVERSE_SEED, &addr_a);
         let b = CelestialSeeds::derive(UNIVERSE_SEED, &addr_b);
         // Same system → same star_seed
@@ -189,18 +275,8 @@ mod tests {
 
     #[test]
     fn moon_differs_from_planet() {
-        let planet = CelestialAddress {
-            galaxy: IVec2::new(0, 0),
-            system: IVec2::new(1, 1),
-            orbit: 3,
-            satellite: None,
-        };
-        let moon = CelestialAddress {
-            galaxy: IVec2::new(0, 0),
-            system: IVec2::new(1, 1),
-            orbit: 3,
-            satellite: Some(0),
-        };
+        let planet = CelestialAddress::planet(IVec2::new(0, 0), IVec2::new(1, 1), 3);
+        let moon = CelestialAddress::moon(IVec2::new(0, 0), IVec2::new(1, 1), 3, 0);
         let p = CelestialSeeds::derive(UNIVERSE_SEED, &planet);
         let m = CelestialSeeds::derive(UNIVERSE_SEED, &moon);
         assert_ne!(p.body_seed, m.body_seed);
@@ -208,18 +284,8 @@ mod tests {
 
     #[test]
     fn different_galaxy_different_seeds() {
-        let addr_a = CelestialAddress {
-            galaxy: IVec2::new(0, 0),
-            system: IVec2::new(1, 1),
-            orbit: 0,
-            satellite: None,
-        };
-        let addr_b = CelestialAddress {
-            galaxy: IVec2::new(1, 0),
-            system: IVec2::new(1, 1),
-            orbit: 0,
-            satellite: None,
-        };
+        let addr_a = CelestialAddress::planet(IVec2::new(0, 0), IVec2::new(1, 1), 0);
+        let addr_b = CelestialAddress::planet(IVec2::new(1, 0), IVec2::new(1, 1), 0);
         let a = CelestialSeeds::derive(UNIVERSE_SEED, &addr_a);
         let b = CelestialSeeds::derive(UNIVERSE_SEED, &addr_b);
         assert_ne!(a.galaxy_seed, b.galaxy_seed);

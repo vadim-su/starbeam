@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { version = "0.18.0", features = ["file_watcher"] }
+bevy = { version = "0.18.0", features = ["file_watcher", "serialize"] }
 noise = "0.9"
 serde = { version = "1", features = ["derive"] }
 ron = "0.12"

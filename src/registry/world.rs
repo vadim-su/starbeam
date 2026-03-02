@@ -50,12 +50,7 @@ mod tests {
     use bevy::math::IVec2;
 
     fn test_config() -> ActiveWorld {
-        let address = CelestialAddress {
-            galaxy: IVec2::ZERO,
-            system: IVec2::ZERO,
-            orbit: 2,
-            satellite: None,
-        };
+        let address = CelestialAddress::planet(IVec2::ZERO, IVec2::ZERO, 2);
         let seeds = CelestialSeeds::derive(42, &address);
         ActiveWorld {
             address,

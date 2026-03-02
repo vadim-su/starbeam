@@ -353,7 +353,7 @@ pub(crate) fn check_loading(
         system.star.type_id,
         system.bodies.len(),
         body.planet_type_id,
-        body.address.orbit,
+        body.address.orbit().unwrap_or(0),
     );
 
     commands.remove_resource::<LoadingAssets>();

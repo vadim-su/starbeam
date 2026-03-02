@@ -15,12 +15,7 @@ pub mod fixtures {
     use crate::world::terrain_gen::TerrainNoiseCache;
 
     pub fn test_active_world() -> ActiveWorld {
-        let address = CelestialAddress {
-            galaxy: IVec2::ZERO,
-            system: IVec2::ZERO,
-            orbit: 2,
-            satellite: None,
-        };
+        let address = CelestialAddress::planet(IVec2::ZERO, IVec2::ZERO, 2);
         let seeds = CelestialSeeds::derive(42, &address);
         ActiveWorld {
             address,

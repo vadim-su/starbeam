@@ -79,10 +79,10 @@ pub fn draw_star_map(
             ui.add_space(4.0);
 
             // --- Body list ---
-            let current_orbit = active_world.address.orbit;
+            let current_orbit = active_world.address.orbit().unwrap_or(0);
 
             for body in &system.bodies {
-                let is_current = body.address.orbit == current_orbit;
+                let is_current = body.address.orbit() == Some(current_orbit);
 
                 let type_color = match body.planet_type_id.as_str() {
                     "garden" => egui::Color32::from_rgb(100, 200, 100),
@@ -93,7 +93,7 @@ pub fn draw_star_map(
                 ui.horizontal(|ui| {
                     // Orbit number
                     ui.label(
-                        egui::RichText::new(format!("#{}", body.address.orbit))
+                        egui::RichText::new(format!("#{}", body.address.orbit().unwrap_or(0)))
                             .monospace()
                             .color(egui::Color32::from_gray(140)),
                     );
@@ -127,7 +127,7 @@ pub fn draw_star_map(
                             .clicked()
                         {
                             warp_events.write(WarpToBody {
-                                orbit: body.address.orbit,
+                                orbit: body.address.orbit().unwrap_or(0),
                             });
                         }
                     });

@@ -85,12 +85,7 @@ pub fn generate_system(
     planet_templates: &std::collections::HashMap<String, &PlanetTypeAsset>,
     gen_config: &GenerationConfigAsset,
 ) -> GeneratedSystem {
-    let base_addr = CelestialAddress {
-        galaxy,
-        system,
-        orbit: 0,
-        satellite: None,
-    };
+    let base_addr = CelestialAddress::planet(galaxy, system, 0);
     let seeds = CelestialSeeds::derive(universe_seed, &base_addr);
 
     // Pick star type
@@ -116,12 +111,7 @@ pub fn generate_system(
     // Generate bodies for each orbit
     let mut bodies = Vec::with_capacity(orbit_count as usize);
     for orbit in 0..orbit_count {
-        let addr = CelestialAddress {
-            galaxy,
-            system,
-            orbit,
-            satellite: None,
-        };
+        let addr = CelestialAddress::planet(galaxy, system, orbit);
         let body_seeds = CelestialSeeds::derive(universe_seed, &addr);
 
         // Determine planet type from star's temperature zones
@@ -602,9 +592,9 @@ mod tests {
         );
 
         // CelestialAddress must have correct structure
-        assert_eq!(garden_body.address.galaxy, IVec2::ZERO);
-        assert_eq!(garden_body.address.system, IVec2::ZERO);
-        assert!(garden_body.address.satellite.is_none());
+        assert_eq!(garden_body.address.galaxy(), Some(IVec2::ZERO));
+        assert_eq!(garden_body.address.system(), Some(IVec2::ZERO));
+        assert!(garden_body.address.satellite().is_none());
 
         // Generation must be deterministic (same seed → same result)
         let system2 = generate_system(
