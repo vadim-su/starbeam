@@ -132,6 +132,26 @@ fn compute_depth(
     distance as f32 / MAX_DEPTH_SCAN as f32
 }
 
+/// Get the fill level of a horizontal neighbor cell, if it contains the same fluid.
+/// Returns `None` if the neighbor is out of bounds, empty, or a different fluid.
+fn neighbor_fill(
+    fluids: &[FluidCell],
+    local_x: i32,
+    local_y: u32,
+    chunk_size: u32,
+    fluid_id: super::cell::FluidId,
+) -> Option<f32> {
+    if local_x < 0 || local_x >= chunk_size as i32 {
+        return None;
+    }
+    let idx = (local_y * chunk_size + local_x as u32) as usize;
+    let cell = &fluids[idx];
+    if cell.is_empty() || cell.fluid_id != fluid_id {
+        return None;
+    }
+    Some(cell.mass.min(1.0))
+}
+
 /// Build a Bevy `Mesh` for the fluid layer of a single chunk.
 ///
 /// Each non-empty fluid cell becomes a colored quad whose height reflects
@@ -257,13 +277,58 @@ pub fn build_fluid_mesh(
                 [0.0, 0.0, 0.0, 0.0]
             };
 
+            // Smooth surface vertices by interpolating fill with horizontal neighbors.
+            // This eliminates the staircase pattern during fluid settling.
+            let (y0_left, y0_right, y1_left, y1_right) = if is_surface {
+                let left_fill = neighbor_fill(
+                    fluids,
+                    local_x as i32 - 1,
+                    local_y,
+                    chunk_size,
+                    cell.fluid_id,
+                );
+                let right_fill = neighbor_fill(
+                    fluids,
+                    local_x as i32 + 1,
+                    local_y,
+                    chunk_size,
+                    cell.fluid_id,
+                );
+
+                if def.is_gas {
+                    // Gas: smooth bottom vertices (surface edge)
+                    let y0_l = match left_fill {
+                        Some(lf) => world_y + (1.0 - (fill + lf) / 2.0) * tile_size,
+                        None => y0,
+                    };
+                    let y0_r = match right_fill {
+                        Some(rf) => world_y + (1.0 - (fill + rf) / 2.0) * tile_size,
+                        None => y0,
+                    };
+                    (y0_l, y0_r, y1, y1)
+                } else {
+                    // Liquid: smooth top vertices (surface edge)
+                    let y1_l = match left_fill {
+                        Some(lf) => world_y + ((fill + lf) / 2.0) * tile_size,
+                        None => y1,
+                    };
+                    let y1_r = match right_fill {
+                        Some(rf) => world_y + ((fill + rf) / 2.0) * tile_size,
+                        None => y1,
+                    };
+                    (y0, y0, y1_l, y1_r)
+                }
+            } else {
+                (y0, y0, y1, y1)
+            };
+
             let vi = positions.len() as u32;
 
             positions.extend_from_slice(&[
-                [world_x, y0, FLUID_Z],
-                [world_x + tile_size, y0, FLUID_Z],
-                [world_x + tile_size, y1, FLUID_Z],
-                [world_x, y1, FLUID_Z],
+                [world_x, y0_left, FLUID_Z],              // 0: bottom-left
+                [world_x + tile_size, y0_right, FLUID_Z], // 1: bottom-right
+                [world_x + tile_size, y1_right, FLUID_Z], // 2: top-right
+                [world_x, y1_left, FLUID_Z],              // 3: top-left
             ]);
 
             colors.extend_from_slice(&[color, color, color, color]);
@@ -871,5 +936,70 @@ mod tests {
             "missing FLUID_DATA"
         );
         assert!(mesh.indices().is_some(), "missing indices");
+    }
+
+    #[test]
+    fn surface_vertices_interpolated_with_neighbors() {
+        let reg = test_fluid_registry();
+        // 4×4 chunk: 3 adjacent surface water cells at y=0 with different fills.
+        //   x=0: fill=0.4, x=1: fill=0.8, x=2: fill=0.6, x=3: empty
+        let mut fluids = vec![FluidCell::EMPTY; 16];
+        fluids[0] = FluidCell::new(FluidId(1), 0.4); // (0,0)
+        fluids[1] = FluidCell::new(FluidId(1), 0.8); // (1,0)
+        fluids[2] = FluidCell::new(FluidId(1), 0.6); // (2,0)
+
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 4, 8.0, &reg, None, None)
+            .expect("should produce a mesh");
+
+        if let Some(bevy::mesh::VertexAttributeValues::Float32x3(pos)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        {
+            // 3 quads × 4 vertices = 12
+            assert_eq!(pos.len(), 12);
+
+            // Quad 0: cell (0,0), fill=0.4
+            //   top-left (v3): no left neighbor → y1 = 0.4 * 8 = 3.2
+            //   top-right (v2): right neighbor fill=0.8 → avg = (0.4+0.8)/2 = 0.6 → y = 4.8
+            assert!(
+                (pos[3][1] - 3.2).abs() < 1e-4,
+                "q0 top-left Y: got {}",
+                pos[3][1]
+            );
+            assert!(
+                (pos[2][1] - 4.8).abs() < 1e-4,
+                "q0 top-right Y: got {}",
+                pos[2][1]
+            );
+
+            // Quad 1: cell (1,0), fill=0.8
+            //   top-left (v7): left neighbor fill=0.4 → avg = (0.8+0.4)/2 = 0.6 → y = 4.8
+            //   top-right (v6): right neighbor fill=0.6 → avg = (0.8+0.6)/2 = 0.7 → y = 5.6
+            assert!(
+                (pos[7][1] - 4.8).abs() < 1e-4,
+                "q1 top-left Y: got {}",
+                pos[7][1]
+            );
+            assert!(
+                (pos[6][1] - 5.6).abs() < 1e-4,
+                "q1 top-right Y: got {}",
+                pos[6][1]
+            );
+
+            // Quad 2: cell (2,0), fill=0.6
+            //   top-left (v11): left neighbor fill=0.8 → avg = (0.6+0.8)/2 = 0.7 → y = 5.6
+            //   top-right (v10): no right neighbor → y1 = 0.6 * 8 = 4.8
+            assert!(
+                (pos[11][1] - 5.6).abs() < 1e-4,
+                "q2 top-left Y: got {}",
+                pos[11][1]
+            );
+            assert!(
+                (pos[10][1] - 4.8).abs() < 1e-4,
+                "q2 top-right Y: got {}",
+                pos[10][1]
+            );
+        } else {
+            panic!("expected Float32x3 positions");
+        }
     }
 }
