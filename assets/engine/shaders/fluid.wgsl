@@ -39,7 +39,11 @@ fn vertex(in: VertexInput) -> VertexOutput {
     let flags = in.fluid_data.w;
     let is_wave = (flags % 2.0) >= 0.5;
     if is_wave {
-        world_pos.y += sin(world_pos.x * 3.0 + uniforms.time * 2.0) * 1.5;
+        // Multi-octave ripple: base (slow, large) + mid + detail (fast, small)
+        let base   = sin(world_pos.x * 1.5 + uniforms.time * 1.0) * 1.2;
+        let mid    = sin(world_pos.x * 4.0 + world_pos.y * 0.5 + uniforms.time * 1.8) * 0.5;
+        let detail = sin(world_pos.x * 9.0 - world_pos.y * 1.2 + uniforms.time * 3.0) * 0.2;
+        world_pos.y += base + mid + detail;
     }
 
     // Reconstruct local position with wave offset applied
