@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
+use bevy::tasks::ComputeTaskPool;
 
 use crate::fluid::systems::{FluidMaterial, SharedFluidMaterial};
 use crate::object::definition::ObjectId;
@@ -278,8 +279,6 @@ fn extract_lighting_data(
     mut rc_dirty: ResMut<RcGridDirty>,
     mut cache: Local<RcCachedGrid>,
 ) {
-    let _t0 = std::time::Instant::now();
-
     let world_config = &*ctx.config;
     let tile_registry = &*ctx.tile_registry;
     let height_tiles = world_config.height_tiles;
@@ -511,84 +510,99 @@ fn extract_lighting_data(
         (SUN_COLOR, 0.0)
     };
 
-    // --- Rebuild emissive every frame (day/night + flicker change) ---
+    // --- Rebuild emissive every frame (parallel across CPU cores) ---
+    // Split into horizontal strips, one per thread. Each strip writes only
+    // to its own slice of the emissive buffer — no synchronization needed.
     input.emissive.fill([0.0; 4]);
     let w_usize = input_w as usize;
     let h_usize = input_h as usize;
     let elapsed = time.elapsed_secs();
 
-    for buf_y in 0..h_usize {
-        let ty = max_ty - buf_y as i32;
+    {
+        let pool = ComputeTaskPool::get();
+        let num_strips = (pool.thread_num() + 1).max(1);
+        let rows_per_strip = h_usize.div_ceil(num_strips);
+        let fg = cache.fg.as_slice();
+        let bg = cache.bg.as_slice();
+        let tr = tile_registry;
 
-        // Fast path: sky above world — full sun emitter for entire row
-        if ty >= height_tiles {
-            let row_start = buf_y * w_usize;
-            for idx in row_start..row_start + w_usize {
-                input.emissive[idx] = [sun[0], sun[1], sun[2], 1.0];
+        let emissive = input.emissive.as_mut_slice();
+        pool.scope(|s| {
+            for (strip_idx, strip) in emissive
+                .chunks_mut(rows_per_strip * w_usize)
+                .enumerate()
+            {
+                s.spawn(async move {
+                    let strip_start = strip_idx * rows_per_strip;
+                    let strip_rows = strip.len() / w_usize;
+
+                    for local_row in 0..strip_rows {
+                        let buf_y = strip_start + local_row;
+                        let ty = max_ty - buf_y as i32;
+                        let row_start = local_row * w_usize;
+
+                        // Fast path: sky above world — full sun row
+                        if ty >= height_tiles {
+                            for i in 0..w_usize {
+                                strip[row_start + i] = [sun[0], sun[1], sun[2], 1.0];
+                            }
+                            continue;
+                        }
+
+                        // Fast path: bedrock below world — stays zeroed
+                        if ty < 0 {
+                            continue;
+                        }
+
+                        // In-world tiles: sun emitters + tile-specific emissive
+                        for buf_x in 0..w_usize {
+                            let local_idx = row_start + buf_x;
+                            let global_idx = buf_y * w_usize + buf_x;
+                            let fg_id = fg[global_idx];
+
+                            if tr.is_solid(fg_id) {
+                                // Tile emissive (torches, lava, etc.)
+                                let emission = tr.light_emission(fg_id);
+                                if emission != [0, 0, 0] {
+                                    let tx = min_tx + buf_x as i32;
+                                    let def = tr.get(fg_id);
+                                    let flicker = flicker_multiplier(
+                                        tx,
+                                        ty,
+                                        elapsed,
+                                        def.flicker_speed,
+                                        def.flicker_strength,
+                                        def.flicker_min,
+                                    );
+                                    strip[local_idx] = [
+                                        emission[0] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
+                                        emission[1] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
+                                        emission[2] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
+                                        1.0,
+                                    ];
+                                }
+                            } else {
+                                // FG is air: sun emitter if BG is also air
+                                let bg_id = bg[global_idx];
+                                let bg_air = !tr.is_solid(bg_id);
+                                if bg_air {
+                                    let open = count_open_neighbors_grid(
+                                        buf_x, buf_y, w_usize, h_usize, fg, bg, tr,
+                                    );
+                                    let intensity = (1 + open) as f32 / 5.0;
+                                    strip[local_idx] = [
+                                        sun[0] * intensity,
+                                        sun[1] * intensity,
+                                        sun[2] * intensity,
+                                        1.0,
+                                    ];
+                                }
+                            }
+                        }
+                    }
+                });
             }
-            continue;
-        }
-
-        // Fast path: bedrock below world — no emissive (fully opaque)
-        if ty < 0 {
-            continue;
-        }
-
-        // In-world tiles: sun emitters + tile-specific emissive
-        let row_start = buf_y * w_usize;
-        for buf_x in 0..w_usize {
-            let idx = row_start + buf_x;
-            let fg_id = cache.fg[idx];
-
-            if tile_registry.is_solid(fg_id) {
-                // Tile-specific emissive (torches, lava, etc.)
-                // Boosted by POINT_LIGHT_BOOST to compensate for small angular
-                // coverage — a single-tile emitter is hit by far fewer RC rays
-                // than area emitters like the sky band.
-                let emission = tile_registry.light_emission(fg_id);
-                if emission != [0, 0, 0] {
-                    let tx = min_tx + buf_x as i32;
-                    let def = tile_registry.get(fg_id);
-                    let flicker = flicker_multiplier(
-                        tx,
-                        ty,
-                        elapsed,
-                        def.flicker_speed,
-                        def.flicker_strength,
-                        def.flicker_min,
-                    );
-                    input.emissive[idx] = [
-                        emission[0] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
-                        emission[1] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
-                        emission[2] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
-                        1.0,
-                    ];
-                }
-            } else {
-                // FG is air: place sun emitter only if BG is also air.
-                // Intensity scales with opening size (open neighbor count).
-                let bg_id = cache.bg[idx];
-                let bg_air = !tile_registry.is_solid(bg_id);
-                if bg_air {
-                    let open = count_open_neighbors_grid(
-                        buf_x,
-                        buf_y,
-                        w_usize,
-                        h_usize,
-                        &cache.fg,
-                        &cache.bg,
-                        tile_registry,
-                    );
-                    let intensity = (1 + open) as f32 / 5.0;
-                    input.emissive[idx] = [
-                        sun[0] * intensity,
-                        sun[1] * intensity,
-                        sun[2] * intensity,
-                        1.0,
-                    ];
-                }
-            }
-        }
+        });
     }
 
     // --- Object emissive (iterate by chunk, not per-tile HashMap) ---
@@ -682,15 +696,6 @@ fn extract_lighting_data(
         let base = wt.sun_color * wt.sun_intensity;
         config.sun_color = base.max(Vec3::splat(ambient_min));
     }
-
-    // DEBUG: временный замер производительности
-    warn!(
-        "RC extract: {:.2}ms | rebuild={} | grid={}x{}",
-        _t0.elapsed().as_secs_f64() * 1000.0,
-        need_rebuild,
-        input_w,
-        input_h,
-    );
 }
 
 /// Update the tile material lightmap handles to point to the current RC lightmap

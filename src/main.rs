@@ -7,8 +7,8 @@ pub mod inventory;
 pub mod item;
 pub mod math;
 pub mod object;
-pub mod physics;
 mod parallax;
+pub mod physics;
 mod player;
 mod registry;
 pub mod sets;
@@ -32,6 +32,7 @@ fn main() {
                     primary_window: Some(Window {
                         title: "Starbeam".into(),
                         resolution: (1280, 720).into(),
+                        present_mode: bevy::window::PresentMode::AutoNoVsync,
                         ..default()
                     }),
                     ..default()
