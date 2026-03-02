@@ -300,7 +300,7 @@ pub(crate) fn check_biomes_loaded(
         // Load each biome asset
         for id in &biome_ids {
             let handle =
-                asset_server.load::<BiomeAsset>(format!("world/biomes/{id}/{id}.biome.ron"));
+                asset_server.load::<BiomeAsset>(format!("content/biomes/{id}/{id}.biome.ron"));
             loading.biomes.push((id.clone(), handle));
         }
 

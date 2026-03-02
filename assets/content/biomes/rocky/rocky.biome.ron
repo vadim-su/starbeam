@@ -5,5 +5,5 @@
     subsurface_depth: 2,
     fill_block: "stone",
     cave_threshold: 0.3,
-    parallax: Some("world/biomes/rocky/rocky.parallax.ron"),
+    parallax: Some("content/biomes/rocky/rocky.parallax.ron"),
 )
