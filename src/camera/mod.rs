@@ -1,9 +1,12 @@
 pub mod follow;
+pub mod snap;
 
 use bevy::ecs::message::MessageReader;
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 
+use crate::player::respawn_player_on_warp;
+use crate::registry::AppState;
 use crate::sets::GameSet;
 
 const CAMERA_SCALE: f32 = 1.0;
@@ -16,15 +19,20 @@ pub struct CameraPlugin;
 
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_camera).add_systems(
-            Update,
-            (
-                camera_zoom.in_set(GameSet::Camera),
-                follow::camera_follow_player
-                    .after(camera_zoom)
-                    .in_set(GameSet::Camera),
-            ),
-        );
+        app.add_systems(Startup, spawn_camera)
+            .add_systems(
+                OnEnter(AppState::InGame),
+                snap::snap_camera_to_player.after(respawn_player_on_warp),
+            )
+            .add_systems(
+                Update,
+                (
+                    camera_zoom.in_set(GameSet::Camera),
+                    follow::camera_follow_player
+                        .after(camera_zoom)
+                        .in_set(GameSet::Camera),
+                ),
+            );
     }
 }
 

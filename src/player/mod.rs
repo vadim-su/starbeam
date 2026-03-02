@@ -124,7 +124,10 @@ fn spawn_player(
 
 /// After a warp, teleport the existing player to the new world's surface.
 /// Runs on `OnEnter(InGame)` — only acts when `NeedsRespawn` marker exists.
-fn respawn_player_on_warp(
+///
+/// `pub(crate)` so that other plugins can order their `OnEnter` systems
+/// after this one (e.g. `snap_camera_to_player`).
+pub(crate) fn respawn_player_on_warp(
     mut commands: Commands,
     needs_respawn: Option<Res<NeedsRespawn>>,
     world_config: Res<ActiveWorld>,

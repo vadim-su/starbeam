@@ -13,6 +13,7 @@ use crate::registry::world::ActiveWorld;
 use crate::registry::AppState;
 use crate::world::chunk::{ChunkCoord, LoadedChunks, WorldMap};
 use crate::world::day_night::WorldTime;
+use crate::world::rc_lighting::{RcInputData, RcLightingConfig};
 use crate::world::terrain_gen::TerrainNoiseCache;
 
 use crate::registry::loading::LoadingBiomeAssets;
@@ -41,6 +42,8 @@ pub fn handle_warp(
     parallax_tiles: Query<Entity, With<ParallaxTile>>,
     asset_server: Res<AssetServer>,
     mut next_state: ResMut<NextState<AppState>>,
+    mut rc_config: ResMut<RcLightingConfig>,
+    mut rc_input: ResMut<RcInputData>,
 ) {
     let Some(warp) = warp_events.read().last() else {
         return;
@@ -110,10 +113,19 @@ pub fn handle_warp(
         parallax_configs: Vec::new(),
     });
 
-    // --- 7. Mark player for respawn on new world surface ---
+    // --- 7. Reset RC lighting state ---
+    // Zero the input dimensions so the GPU compute node and prepare systems
+    // skip during loading (they check input_w/h != 0).  When InGame resumes,
+    // extract_lighting_data fills new dimensions and resize_gpu_textures
+    // recreates all textures (including fresh white lightmaps), eliminating
+    // stale lighting from the previous planet.
+    *rc_config = RcLightingConfig::default();
+    *rc_input = RcInputData::default();
+
+    // --- 8. Mark player for respawn on new world surface ---
     commands.insert_resource(NeedsRespawn);
 
-    // --- 8. Transition to LoadingBiomes state ---
+    // --- 9. Transition to LoadingBiomes state ---
     next_state.set(AppState::LoadingBiomes);
 
     info!(

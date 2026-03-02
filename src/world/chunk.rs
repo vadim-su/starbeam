@@ -485,6 +485,32 @@ pub fn despawn_chunk(
     }
 }
 
+/// Remove stale chunk data and entities left by the warp-frame race condition.
+///
+/// During the warp frame, `handle_warp` clears `world_map` and sets
+/// `next_state(LoadingBiomes)`, but the new `ActiveWorld` is inserted via
+/// deferred commands.  Systems that run later in the **same** frame
+/// (`chunk_loading_system`, `extract_lighting_data`) still see the OLD
+/// `ActiveWorld` and re-populate `world_map` with chunks generated from the
+/// previous planet's seed.  These stale chunks persist through loading and
+/// corrupt both the rendered terrain and the lightmap density data.
+///
+/// Registered on `OnEnter(LoadingBiomes)` — at this point deferred commands
+/// have been applied, so the new `ActiveWorld` is in effect and anything left
+/// in `world_map` / `loaded_chunks` is guaranteed stale.
+pub fn clear_stale_chunks(
+    mut commands: Commands,
+    mut world_map: ResMut<WorldMap>,
+    mut loaded_chunks: ResMut<LoadedChunks>,
+    chunk_entities: Query<Entity, With<ChunkCoord>>,
+) {
+    world_map.chunks.clear();
+    loaded_chunks.map.clear();
+    for entity in &chunk_entities {
+        commands.entity(entity).despawn();
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn chunk_loading_system(
     mut commands: Commands,

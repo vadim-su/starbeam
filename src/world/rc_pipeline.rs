@@ -248,6 +248,10 @@ fn prepare_rc_textures(
     let h = config.input_size.y;
 
     if w == 0 || h == 0 {
+        // Zero meta so RcComputeNode and prepare_rc_bind_groups also bail
+        // during loading (they check meta.input_w/h != 0).
+        meta.input_w = 0;
+        meta.input_h = 0;
         return;
     }
 
@@ -759,11 +763,16 @@ pub(crate) fn resize_gpu_textures(
         return;
     }
 
-    // Check if density texture needs resize by comparing with config
-    let needs_resize = images.get(&gpu_images.density).is_none_or(|img| {
-        img.texture_descriptor.size.width != input_w
-            || img.texture_descriptor.size.height != input_h
-    });
+    // Check if density texture needs resize by comparing with config.
+    // Also force resize when lightmap_size is zero — this happens after a
+    // warp reset (OnEnter(LoadingBiomes) zeros the config). Without this,
+    // two planets with the same viewport dimensions would skip resize and
+    // keep stale lightmap data from the previous planet.
+    let needs_resize = config.lightmap_size == UVec2::ZERO
+        || images.get(&gpu_images.density).is_none_or(|img| {
+            img.texture_descriptor.size.width != input_w
+                || img.texture_descriptor.size.height != input_h
+        });
 
     if !needs_resize {
         return;

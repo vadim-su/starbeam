@@ -96,6 +96,18 @@ pub struct RcInputData {
 
 // `Default` derived: all Vecs empty, numerics 0, dirty false.
 
+/// Reset RC lighting state to defaults.
+///
+/// Registered on `OnEnter(LoadingBiomes)` to ensure that any stale data
+/// written by `extract_lighting_data` on the warp frame (race condition:
+/// extract may run after `handle_warp` in the same Update) is zeroed before
+/// `ExtractResource` copies it to the render world. Without this, the GPU
+/// compute node would keep dispatching with old-planet data during loading.
+fn reset_rc_on_loading(mut config: ResMut<RcLightingConfig>, mut input: ResMut<RcInputData>) {
+    *config = RcLightingConfig::default();
+    *input = RcInputData::default();
+}
+
 /// Plugin that registers RC lighting resources and the per-frame extract system.
 pub struct RcLightingPlugin;
 
@@ -114,24 +126,33 @@ impl Plugin for RcLightingPlugin {
                 ExtractResourcePlugin::<RcInputData>::default(),
                 ExtractResourcePlugin::<rc_pipeline::RcGpuImages>::default(),
             ))
+            // Definitive RC state reset: fires before the first Update of the
+            // loading phase, guaranteeing the render world sees zeroed config.
+            .add_systems(OnEnter(AppState::LoadingBiomes), reset_rc_on_loading)
             .add_systems(
                 Update,
                 (
                     // Lighting runs AFTER Camera so it sees the current frame's
                     // camera position, not the previous frame's. This prevents
                     // the lightmap from being misaligned with the rendered tiles.
+                    //
+                    // ALL four systems are gated on InGame to prevent stale data
+                    // from corrupting lightmaps during loading after a warp.
                     extract_lighting_data
                         .after(GameSet::Camera)
                         .run_if(in_state(AppState::InGame)),
                     rc_pipeline::resize_gpu_textures
                         .after(extract_lighting_data)
-                        .after(GameSet::Camera),
+                        .after(GameSet::Camera)
+                        .run_if(in_state(AppState::InGame)),
                     rc_pipeline::swap_lightmap_handles
                         .after(rc_pipeline::resize_gpu_textures)
-                        .after(GameSet::Camera),
+                        .after(GameSet::Camera)
+                        .run_if(in_state(AppState::InGame)),
                     update_tile_lightmap
                         .after(rc_pipeline::swap_lightmap_handles)
-                        .after(GameSet::Camera),
+                        .after(GameSet::Camera)
+                        .run_if(in_state(AppState::InGame)),
                 ),
             );
 

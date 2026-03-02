@@ -32,6 +32,7 @@ impl Plugin for WorldPlugin {
             .init_resource::<LoadedChunks>()
             .init_resource::<MeshBuildBuffers>()
             .add_message::<day_night::DayPhaseChanged>()
+            .add_systems(OnEnter(AppState::LoadingBiomes), chunk::clear_stale_chunks)
             .add_systems(
                 OnEnter(AppState::InGame),
                 lit_sprite::init_lit_sprite_resources,
