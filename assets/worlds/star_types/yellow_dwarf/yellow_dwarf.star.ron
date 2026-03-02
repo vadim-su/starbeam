@@ -1,0 +1,11 @@
+(
+    id: "yellow_dwarf",
+    orbit_count: (3, 8),
+    luminosity: (0.8, 1.2),
+    sun_color: (1.0, 0.98, 0.90),
+    zones: [
+        (orbits: (0, 1), temperature: "hot",  types: ["barren"]),
+        (orbits: (2, 4), temperature: "warm", types: ["garden"]),
+        (orbits: (5, 9), temperature: "cold", types: ["barren"]),
+    ],
+)
