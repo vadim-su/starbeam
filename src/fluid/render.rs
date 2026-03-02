@@ -29,11 +29,16 @@ fn is_liquid_surface(
     local_y: u32,
     chunk_size: u32,
     fluid_id: super::cell::FluidId,
+    neighbor_above_row: Option<&[FluidCell]>,
 ) -> bool {
     let above_y = local_y + 1;
     if above_y >= chunk_size {
-        // At chunk boundary: assume fluid continues into neighbor chunk.
-        // Better to miss a wave than to show waves underwater at chunk seams.
+        // At chunk boundary: check neighbor chunk's bottom row if available.
+        if let Some(row) = neighbor_above_row {
+            let above = &row[local_x as usize];
+            return above.is_empty() || above.fluid_id != fluid_id;
+        }
+        // No neighbor data: assume fluid continues (no waves at seam).
         return false;
     }
     let above_idx = (above_y * chunk_size + local_x) as usize;
@@ -51,10 +56,15 @@ fn is_gas_surface(
     local_y: u32,
     chunk_size: u32,
     fluid_id: super::cell::FluidId,
+    neighbor_below_row: Option<&[FluidCell]>,
 ) -> bool {
     if local_y == 0 {
-        // At chunk boundary: assume gas continues into neighbor chunk.
-        // Better to miss a wave than to show waves inside gas at chunk seams.
+        // At chunk boundary: check neighbor chunk's top row if available.
+        if let Some(row) = neighbor_below_row {
+            let below = &row[local_x as usize];
+            return below.is_empty() || below.fluid_id != fluid_id;
+        }
+        // No neighbor data: assume gas continues (no waves at seam).
         return false;
     }
     let below_idx = ((local_y - 1) * chunk_size + local_x) as usize;
@@ -141,6 +151,8 @@ pub fn build_fluid_mesh(
     chunk_size: u32,
     tile_size: f32,
     fluid_registry: &FluidRegistry,
+    neighbor_above_row: Option<&[FluidCell]>,
+    neighbor_below_row: Option<&[FluidCell]>,
 ) -> Option<Mesh> {
     let capacity = fluids.len();
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(capacity * 4);
@@ -208,9 +220,23 @@ pub fn build_fluid_mesh(
 
             // Surface detection for wave vertices
             let is_surface = if def.is_gas {
-                is_gas_surface(fluids, local_x, local_y, chunk_size, cell.fluid_id)
+                is_gas_surface(
+                    fluids,
+                    local_x,
+                    local_y,
+                    chunk_size,
+                    cell.fluid_id,
+                    neighbor_below_row,
+                )
             } else {
-                is_liquid_surface(fluids, local_x, local_y, chunk_size, cell.fluid_id)
+                is_liquid_surface(
+                    fluids,
+                    local_x,
+                    local_y,
+                    chunk_size,
+                    cell.fluid_id,
+                    neighbor_above_row,
+                )
             };
 
             let is_gas_flag = if def.is_gas { 2.0 } else { 0.0 };
@@ -318,7 +344,7 @@ mod tests {
     fn empty_chunk_returns_none() {
         let reg = test_fluid_registry();
         let fluids = vec![FluidCell::EMPTY; 4];
-        let result = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg);
+        let result = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None);
         assert!(result.is_none(), "all-empty chunk should return None");
     }
 
@@ -329,7 +355,8 @@ mod tests {
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(1), 0.5); // water, half full
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg).expect("should produce a mesh");
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+            .expect("should produce a mesh");
 
         // 1 quad → 4 vertices, 6 indices
         assert!(mesh.attribute(Mesh::ATTRIBUTE_POSITION).is_some());
@@ -365,7 +392,8 @@ mod tests {
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(2), 0.5); // steam, half full
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg).expect("should produce a mesh");
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+            .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x3(pos)) =
             mesh.attribute(Mesh::ATTRIBUTE_POSITION)
@@ -386,7 +414,8 @@ mod tests {
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(1), 0.5); // water, half full
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg).expect("should produce a mesh");
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+            .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x4(cols)) =
             mesh.attribute(Mesh::ATTRIBUTE_COLOR)
@@ -412,8 +441,8 @@ mod tests {
         let total = (chunk_size * chunk_size) as usize;
         let fluids = vec![FluidCell::new(FluidId(1), 1.0); total];
 
-        let mesh =
-            build_fluid_mesh(&fluids, 0, 0, chunk_size, 8.0, &reg).expect("should produce a mesh");
+        let mesh = build_fluid_mesh(&fluids, 0, 0, chunk_size, 8.0, &reg, None, None)
+            .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x3(pos)) =
             mesh.attribute(Mesh::ATTRIBUTE_POSITION)
@@ -439,7 +468,8 @@ mod tests {
         // chunk at (1, 2), chunk_size=2, tile_size=8
         // base_x = 1*2 = 2, base_y = 2*2 = 4
         // world_x = 2.0 * 8.0 = 16.0, world_y = 4.0 * 8.0 = 32.0
-        let mesh = build_fluid_mesh(&fluids, 1, 2, 2, 8.0, &reg).expect("should produce a mesh");
+        let mesh = build_fluid_mesh(&fluids, 1, 2, 2, 8.0, &reg, None, None)
+            .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x3(pos)) =
             mesh.attribute(Mesh::ATTRIBUTE_POSITION)
@@ -460,7 +490,8 @@ mod tests {
         // Pressurized cell: mass > 1.0 should still fill the full tile
         fluids[0] = FluidCell::new(FluidId(1), 2.5);
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg).expect("should produce a mesh");
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+            .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x3(pos)) =
             mesh.attribute(Mesh::ATTRIBUTE_POSITION)
@@ -481,7 +512,8 @@ mod tests {
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(1), 0.7); // water, 70% full
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg).expect("should produce a mesh");
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+            .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x2(uvs)) =
             mesh.attribute(Mesh::ATTRIBUTE_UV_0)
@@ -511,7 +543,7 @@ mod tests {
         fluids[0] = FluidCell::new(FluidId(1), 1.0); // (0,0) water
 
         assert!(
-            is_liquid_surface(&fluids, 0, 0, 2, FluidId(1)),
+            is_liquid_surface(&fluids, 0, 0, 2, FluidId(1), None),
             "cell (0,0) should be surface: above (0,1) is empty"
         );
     }
@@ -526,7 +558,7 @@ mod tests {
         fluids[2] = FluidCell::new(FluidId(1), 1.0); // (0,1)
 
         assert!(
-            !is_liquid_surface(&fluids, 0, 0, 2, FluidId(1)),
+            !is_liquid_surface(&fluids, 0, 0, 2, FluidId(1), None),
             "cell (0,0) should NOT be surface: same fluid above"
         );
     }
@@ -539,7 +571,7 @@ mod tests {
         fluids[2] = FluidCell::new(FluidId(1), 1.0); // (0,1)
 
         assert!(
-            !is_liquid_surface(&fluids, 0, 1, 2, FluidId(1)),
+            !is_liquid_surface(&fluids, 0, 1, 2, FluidId(1), None),
             "top-edge cell should NOT be surface (assume continuation at chunk boundary)"
         );
     }
@@ -553,7 +585,7 @@ mod tests {
         fluids[2] = FluidCell::new(FluidId(2), 1.0); // (0,1) steam
 
         assert!(
-            is_gas_surface(&fluids, 0, 1, 2, FluidId(2)),
+            is_gas_surface(&fluids, 0, 1, 2, FluidId(2), None),
             "gas cell (0,1) should be surface: below (0,0) is empty"
         );
     }
@@ -568,7 +600,7 @@ mod tests {
         fluids[2] = FluidCell::new(FluidId(2), 1.0); // (0,1)
 
         assert!(
-            !is_gas_surface(&fluids, 0, 1, 2, FluidId(2)),
+            !is_gas_surface(&fluids, 0, 1, 2, FluidId(2), None),
             "gas cell (0,1) should NOT be surface: same fluid below"
         );
     }
@@ -581,7 +613,7 @@ mod tests {
         fluids[0] = FluidCell::new(FluidId(2), 1.0); // (0,0)
 
         assert!(
-            !is_gas_surface(&fluids, 0, 0, 2, FluidId(2)),
+            !is_gas_surface(&fluids, 0, 0, 2, FluidId(2), None),
             "bottom-edge gas cell should NOT be surface (assume continuation at chunk boundary)"
         );
     }
@@ -663,7 +695,8 @@ mod tests {
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(1), 1.0); // water: emission [0,0,0]
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg).expect("should produce a mesh");
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+            .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x4(data)) =
             mesh.attribute(ATTRIBUTE_FLUID_DATA)
@@ -685,7 +718,8 @@ mod tests {
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(3), 1.0); // lava: emission [255, 100, 20]
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg).expect("should produce a mesh");
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+            .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x4(data)) =
             mesh.attribute(ATTRIBUTE_FLUID_DATA)
@@ -717,7 +751,8 @@ mod tests {
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(1), 1.0);
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg).expect("should produce a mesh");
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+            .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x4(data)) =
             mesh.attribute(ATTRIBUTE_FLUID_DATA)
@@ -753,7 +788,8 @@ mod tests {
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[2] = FluidCell::new(FluidId(2), 1.0); // (0,1) steam
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg).expect("should produce a mesh");
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+            .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x4(data)) =
             mesh.attribute(ATTRIBUTE_FLUID_DATA)
@@ -789,7 +825,8 @@ mod tests {
         fluids[0] = FluidCell::new(FluidId(1), 1.0); // (0,0)
         fluids[2] = FluidCell::new(FluidId(1), 1.0); // (0,1)
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg).expect("should produce a mesh");
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+            .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x4(data)) =
             mesh.attribute(ATTRIBUTE_FLUID_DATA)
@@ -814,7 +851,8 @@ mod tests {
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(1), 1.0);
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg).expect("should produce a mesh");
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+            .expect("should produce a mesh");
 
         assert!(
             mesh.attribute(Mesh::ATTRIBUTE_POSITION).is_some(),

@@ -289,6 +289,25 @@ pub fn fluid_rebuild_meshes(
             continue;
         };
 
+        // Extract neighbor boundary rows for cross-chunk surface detection.
+        // Above: bottom row (local_y=0) of chunk at (data_cx, cy+1)
+        let neighbor_above_row: Option<Vec<FluidCell>> =
+            world_map.chunks.get(&(data_cx, cy + 1)).map(|c| {
+                (0..chunk_size)
+                    .map(|x| c.fluids[(0 * chunk_size + x) as usize])
+                    .collect()
+            });
+        // Below: top row (local_y=chunk_size-1) of chunk at (data_cx, cy-1)
+        let neighbor_below_row: Option<Vec<FluidCell>> = if cy > 0 {
+            world_map.chunks.get(&(data_cx, cy - 1)).map(|c| {
+                (0..chunk_size)
+                    .map(|x| c.fluids[((chunk_size - 1) * chunk_size + x) as usize])
+                    .collect()
+            })
+        } else {
+            None
+        };
+
         let Some(mesh) = build_fluid_mesh(
             &chunk.fluids,
             display_cx,
@@ -296,6 +315,8 @@ pub fn fluid_rebuild_meshes(
             chunk_size,
             tile_size,
             &fluid_registry,
+            neighbor_above_row.as_deref(),
+            neighbor_below_row.as_deref(),
         ) else {
             continue;
         };
