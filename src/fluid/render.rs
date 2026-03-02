@@ -111,13 +111,12 @@ fn compute_depth(
         }
     }
 
-    // When we hit a chunk boundary, assume the fluid continues into the
-    // neighbor chunk. Use a mid-depth fallback so there's no bright seam
-    // at chunk borders. This applies even when distance == 0 (cell is at
-    // the very edge of the chunk and scan hits boundary immediately).
+    // When we hit a chunk boundary, assume the fluid continues deep into
+    // the neighbor chunk. Use MAX_DEPTH_SCAN so boundary cells appear as
+    // "deep" — matching the cells just across the border in the neighbor
+    // chunk. This prevents bright seams at chunk edges.
     if hit_chunk_boundary {
-        let min_depth = MAX_DEPTH_SCAN / 2;
-        distance = distance.max(min_depth);
+        distance = MAX_DEPTH_SCAN;
     }
 
     distance as f32 / MAX_DEPTH_SCAN as f32
