@@ -6,7 +6,7 @@ use bevy::prelude::*;
 
 use super::assets::{
     BiomeAsset, CharacterDefAsset, ObjectDefAsset, ParallaxConfigAsset, PlanetTypeAsset,
-    TileRegistryAsset, WorldConfigAsset,
+    TileRegistryAsset,
 };
 use super::biome::{
     BiomeDef, BiomeId, BiomeRegistry, LayerBoundaries, LayerConfig, LayerConfigs, PlanetConfig,
@@ -19,7 +19,6 @@ use crate::object::registry::ObjectRegistry;
 
 use crate::parallax::config::ParallaxConfig;
 use crate::world::biome_map::BiomeMap;
-use crate::world::terrain_gen::TerrainNoiseCache;
 
 /// Keeps biome-related asset handles alive for hot-reload detection.
 #[derive(Resource)]
@@ -53,31 +52,6 @@ pub(crate) fn hot_reload_character(
                 asset.speed, asset.jump_velocity, asset.gravity,
                 config.magnet_radius, config.magnet_strength
             );
-        }
-    }
-}
-
-pub(crate) fn hot_reload_world(
-    mut events: MessageReader<AssetEvent<WorldConfigAsset>>,
-    handles: Res<RegistryHandles>,
-    assets: Res<Assets<WorldConfigAsset>>,
-    mut config: ResMut<ActiveWorld>,
-    mut noise_cache: ResMut<TerrainNoiseCache>,
-) {
-    for event in events.read() {
-        if let AssetEvent::Modified { id } = event
-            && *id == handles.world_config.id()
-            && let Some(asset) = assets.get(&handles.world_config)
-        {
-            config.width_tiles = asset.width_tiles;
-            config.height_tiles = asset.height_tiles;
-            config.chunk_size = asset.chunk_size;
-            config.tile_size = asset.tile_size;
-            config.chunk_load_radius = asset.chunk_load_radius;
-            config.seed = asset.seed;
-            config.planet_type = asset.planet_type.clone();
-            *noise_cache = TerrainNoiseCache::new(asset.seed);
-            info!("Hot-reloaded ActiveWorld + TerrainNoiseCache");
         }
     }
 }

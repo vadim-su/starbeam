@@ -8,7 +8,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use super::assets::{
     AnimationDef, AutotileAsset, BiomeAsset, CharacterDefAsset, ItemDefAsset, ObjectDefAsset,
-    ParallaxConfigAsset, PlanetTypeAsset, TileRegistryAsset, WorldConfigAsset,
+    ParallaxConfigAsset, PlanetTypeAsset, TileRegistryAsset,
 };
 use super::biome::{
     BiomeDef, BiomeId, BiomeRegistry, LayerBoundaries, LayerConfig, LayerConfigs, PlanetConfig,
@@ -18,11 +18,14 @@ use super::player::PlayerConfig;
 use super::tile::TileRegistry;
 use super::world::ActiveWorld;
 use super::{AppState, BiomeParallaxConfigs, RegistryHandles};
-use crate::cosmos::address::{CelestialAddress, CelestialSeeds};
+use crate::cosmos::address::CelestialSeeds;
+use crate::cosmos::assets::{GenerationConfigAsset, StarTypeAsset};
+use crate::cosmos::generation::generate_system;
 use crate::item::definition::ItemDef;
 use crate::item::registry::ItemRegistry;
 use crate::object::definition::ObjectDef;
 use crate::object::registry::ObjectRegistry;
+use crate::world::day_night::WorldTime;
 
 use crate::parallax::config::ParallaxConfig;
 use crate::world::atlas::{build_combined_atlas, AtlasParams, TileAtlas};
@@ -37,7 +40,9 @@ pub(crate) struct LoadingAssets {
     tiles: Handle<TileRegistryAsset>,
     objects: Vec<(String, Handle<ObjectDefAsset>)>,
     character: Handle<CharacterDefAsset>,
-    world_config: Handle<WorldConfigAsset>,
+    generation_config: Handle<GenerationConfigAsset>,
+    star_types: Vec<(String, Handle<StarTypeAsset>)>,
+    planet_types: Vec<(String, Handle<PlanetTypeAsset>)>,
     items: Vec<(String, Handle<ItemDefAsset>)>,
 }
 
@@ -69,7 +74,26 @@ pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServe
     let tiles = asset_server.load::<TileRegistryAsset>("world/tiles.registry.ron");
     let character = asset_server
         .load::<CharacterDefAsset>("content/characters/adventurer/adventurer.character.ron");
-    let world_config = asset_server.load::<WorldConfigAsset>("world/world.config.ron");
+
+    // Load cosmos generation assets
+    let generation_config = asset_server.load::<GenerationConfigAsset>("worlds/generation.ron");
+    let star_types = vec![(
+        "yellow_dwarf".to_string(),
+        asset_server
+            .load::<StarTypeAsset>("worlds/star_types/yellow_dwarf/yellow_dwarf.star.ron"),
+    )];
+    let planet_types = vec![
+        (
+            "garden".to_string(),
+            asset_server
+                .load::<PlanetTypeAsset>("worlds/planet_types/garden/garden.planet.ron"),
+        ),
+        (
+            "barren".to_string(),
+            asset_server
+                .load::<PlanetTypeAsset>("worlds/planet_types/barren/barren.planet.ron"),
+        ),
+    ];
 
     // Load object definitions from individual *.object.ron files.
     // "none" MUST be first — ObjectId(0) == ObjectId::NONE.
@@ -118,7 +142,9 @@ pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServe
         tiles,
         objects,
         character,
-        world_config,
+        generation_config,
+        star_types,
+        planet_types,
         items,
     });
 }
@@ -126,21 +152,39 @@ pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServe
 pub(crate) fn check_loading(
     mut commands: Commands,
     loading: Res<LoadingAssets>,
-    asset_server: Res<AssetServer>,
     tile_assets: Res<Assets<TileRegistryAsset>>,
     object_assets: Res<Assets<ObjectDefAsset>>,
     character_assets: Res<Assets<CharacterDefAsset>>,
-    world_assets: Res<Assets<WorldConfigAsset>>,
+    gen_config_assets: Res<Assets<GenerationConfigAsset>>,
+    star_type_assets: Res<Assets<StarTypeAsset>>,
+    planet_type_assets: Res<Assets<PlanetTypeAsset>>,
     item_assets: Res<Assets<ItemDefAsset>>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
-    let (Some(tiles), Some(character), Some(world_cfg)) = (
+    let (Some(tiles), Some(character)) = (
         tile_assets.get(&loading.tiles),
         character_assets.get(&loading.character),
-        world_assets.get(&loading.world_config),
     ) else {
         return; // not loaded yet
     };
+
+    // Wait for generation config
+    let Some(gen_config) = gen_config_assets.get(&loading.generation_config) else {
+        return;
+    };
+
+    // Wait for all star/planet types
+    let all_stars = loading
+        .star_types
+        .iter()
+        .all(|(_, h)| star_type_assets.contains(h));
+    let all_planets = loading
+        .planet_types
+        .iter()
+        .all(|(_, h)| planet_type_assets.contains(h));
+    if !all_stars || !all_planets {
+        return;
+    }
 
     // Wait for all object assets to load
     let all_objects_loaded = loading
@@ -205,44 +249,102 @@ pub(crate) fn check_loading(
         base_path: "content/characters/adventurer/".to_string(),
     });
 
-    let address = CelestialAddress {
-        galaxy: IVec2::ZERO,
-        system: IVec2::ZERO,
-        orbit: 0,
-        satellite: None,
+    // --- Procedural system generation ---
+
+    // Collect star templates
+    let star_templates: Vec<&StarTypeAsset> = loading
+        .star_types
+        .iter()
+        .filter_map(|(_, h)| star_type_assets.get(h))
+        .collect();
+
+    // Collect planet templates
+    let planet_templates: std::collections::HashMap<String, &PlanetTypeAsset> = loading
+        .planet_types
+        .iter()
+        .filter_map(|(name, h)| planet_type_assets.get(h).map(|a| (name.clone(), a)))
+        .collect();
+
+    // Generate system (hardcoded universe_seed=42, galaxy=(0,0), system=(0,0) for now)
+    let system = generate_system(
+        42, // universe_seed — hardcoded for now
+        IVec2::ZERO,
+        IVec2::ZERO,
+        &star_templates,
+        &planet_templates,
+        gen_config,
+    );
+
+    // Find first garden planet (or first body as fallback)
+    let body = system
+        .bodies
+        .iter()
+        .find(|b| b.planet_type_id == "garden")
+        .or_else(|| system.bodies.first())
+        .expect("system must have at least one body");
+
+    // Build ActiveWorld from generated body
+    let seeds = CelestialSeeds::derive(42, &body.address);
+    let active_world = ActiveWorld {
+        address: body.address.clone(),
+        seeds: seeds.clone(),
+        width_tiles: body.width_tiles,
+        height_tiles: body.height_tiles,
+        chunk_size: gen_config.chunk_size,
+        tile_size: gen_config.tile_size,
+        chunk_load_radius: gen_config.chunk_load_radius,
+        seed: seeds.terrain_seed_u32(),
+        planet_type: body.planet_type_id.clone(),
     };
-    let seeds = CelestialSeeds::derive(world_cfg.seed as u64, &address);
-    commands.insert_resource(ActiveWorld {
-        address,
-        seeds,
-        width_tiles: world_cfg.width_tiles,
-        height_tiles: world_cfg.height_tiles,
-        chunk_size: world_cfg.chunk_size,
-        tile_size: world_cfg.tile_size,
-        chunk_load_radius: world_cfg.chunk_load_radius,
-        seed: world_cfg.seed,
-        planet_type: world_cfg.planet_type.clone(),
-    });
-    commands.insert_resource(TerrainNoiseCache::new(world_cfg.seed));
+    commands.insert_resource(TerrainNoiseCache::new(active_world.seed));
+    commands.insert_resource(active_world);
+
+    // Insert DayNightConfig from generated body
+    let day_night_config = body.day_night.clone();
+    let sum: f32 = day_night_config.phase_ratios().iter().sum();
+    assert!(
+        (sum - 1.0).abs() < 0.01,
+        "Generated day/night ratios must sum to 1.0, got {sum}"
+    );
+    info!(
+        "Generated DayNightConfig: cycle={}s, phases={:.0}/{:.0}/{:.0}/{:.0}%",
+        day_night_config.cycle_duration_secs,
+        day_night_config.dawn_ratio * 100.0,
+        day_night_config.day_ratio * 100.0,
+        day_night_config.sunset_ratio * 100.0,
+        day_night_config.night_ratio * 100.0,
+    );
+    let wt = WorldTime::from_config(&day_night_config);
+    commands.insert_resource(day_night_config);
+    commands.insert_resource(wt);
 
     // Keep handles alive for hot-reload
     commands.insert_resource(RegistryHandles {
         tiles: loading.tiles.clone(),
         objects: loading.objects.clone(),
         character: loading.character.clone(),
-        world_config: loading.world_config.clone(),
     });
 
-    // Start loading the planet type asset for the biome pipeline
-    let planet_handle = asset_server.load::<PlanetTypeAsset>(format!(
-        "world/planet_types/{}.planet.ron",
-        world_cfg.planet_type
-    ));
+    // Find the planet type handle we already loaded for the biome pipeline
+    let planet_handle = loading
+        .planet_types
+        .iter()
+        .find(|(name, _)| name == &body.planet_type_id)
+        .map(|(_, h)| h.clone())
+        .expect("planet type must have been loaded");
     commands.insert_resource(LoadingBiomeAssets {
         planet_type: planet_handle,
         biomes: Vec::new(),
         parallax_configs: Vec::new(),
     });
+
+    info!(
+        "Generated system: star={}, {} bodies, landing on {} (orbit {})",
+        system.star.type_id,
+        system.bodies.len(),
+        body.planet_type_id,
+        body.address.orbit,
+    );
 
     commands.remove_resource::<LoadingAssets>();
     next_state.set(AppState::LoadingBiomes);

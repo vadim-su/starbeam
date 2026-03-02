@@ -217,42 +217,22 @@ pub fn tint_parallax_layers(
     }
 }
 
-/// Loads the day/night config from the embedded RON file and inserts resources.
-pub fn load_day_night_config(mut commands: Commands) {
-    let ron_str = include_str!("../../assets/world/day_night.config.ron");
-    let config: DayNightConfig =
-        ron::from_str(ron_str).expect("Failed to parse day_night.config.ron");
-
-    // Validate phase ratios sum to 1.0
-    let sum: f32 = config.phase_ratios().iter().sum();
-    assert!(
-        (sum - 1.0).abs() < 0.01,
-        "Day/night phase ratios must sum to 1.0, got {sum}"
-    );
-
-    info!(
-        "Loaded DayNightConfig: cycle={}s, phases={:.0}/{:.0}/{:.0}/{:.0}%",
-        config.cycle_duration_secs,
-        config.dawn_ratio * 100.0,
-        config.day_ratio * 100.0,
-        config.sunset_ratio * 100.0,
-        config.night_ratio * 100.0,
-    );
-
-    // Initialize WorldTime with correct values from config (avoid first-frame flash)
-    let mut wt = WorldTime::default();
-    let (phase, progress) = compute_phase_and_progress(wt.time_of_day, &config);
-    wt.phase = phase;
-    wt.phase_progress = progress;
-    wt.sun_color = lerp_phase_color(&config.sun_colors, phase, progress);
-    wt.sun_intensity = lerp_phase_value(&config.sun_intensities, phase, progress);
-    wt.ambient_min = lerp_phase_value(&config.ambient_mins, phase, progress);
-    wt.sky_color = lerp_phase_color4(&config.sky_colors, phase, progress);
-    wt.danger_multiplier = lerp_phase_value(&config.danger_multipliers, phase, progress);
-    wt.temperature_modifier = lerp_phase_value(&config.temperature_modifiers, phase, progress);
-
-    commands.insert_resource(config);
-    commands.insert_resource(wt);
+impl WorldTime {
+    /// Create a `WorldTime` initialized from a `DayNightConfig`, computing all
+    /// derived values to avoid a first-frame flash.
+    pub fn from_config(config: &DayNightConfig) -> Self {
+        let mut wt = Self::default();
+        let (phase, progress) = compute_phase_and_progress(wt.time_of_day, config);
+        wt.phase = phase;
+        wt.phase_progress = progress;
+        wt.sun_color = lerp_phase_color(&config.sun_colors, phase, progress);
+        wt.sun_intensity = lerp_phase_value(&config.sun_intensities, phase, progress);
+        wt.ambient_min = lerp_phase_value(&config.ambient_mins, phase, progress);
+        wt.sky_color = lerp_phase_color4(&config.sky_colors, phase, progress);
+        wt.danger_multiplier = lerp_phase_value(&config.danger_multipliers, phase, progress);
+        wt.temperature_modifier = lerp_phase_value(&config.temperature_modifiers, phase, progress);
+        wt
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -347,12 +327,13 @@ mod tests {
     }
 
     #[test]
-    fn ron_parse_config() {
-        let ron_str = include_str!("../../assets/world/day_night.config.ron");
-        let config: DayNightConfig =
-            ron::from_str(ron_str).expect("Failed to parse day_night.config.ron");
-        assert!((config.cycle_duration_secs - 900.0).abs() < 0.01);
-        assert_eq!(config.sun_colors.len(), 4);
-        assert_eq!(config.sky_colors.len(), 4);
+    fn world_time_from_config() {
+        let config = test_config();
+        let wt = WorldTime::from_config(&config);
+        // Should start at dawn (time_of_day defaults to 0.25)
+        assert_eq!(wt.phase, DayPhase::Dawn);
+        assert!(wt.phase_progress.abs() < 0.01);
+        // Sun intensity should be interpolated from config
+        assert!(wt.sun_intensity > 0.0);
     }
 }

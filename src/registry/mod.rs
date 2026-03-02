@@ -19,7 +19,7 @@ use crate::cosmos::assets::{GenerationConfigAsset, StarTypeAsset};
 use biome::BiomeId;
 use hot_reload::{
     hot_reload_biome_parallax, hot_reload_biomes, hot_reload_character, hot_reload_objects,
-    hot_reload_planet_type, hot_reload_tiles, hot_reload_world,
+    hot_reload_planet_type, hot_reload_tiles,
 };
 use loader::RonLoader;
 use loading::{
@@ -36,7 +36,7 @@ pub struct RegistryHandles {
     /// (base_path, handle) pairs for per-object assets; order matters (index 0 = ObjectId::NONE).
     pub objects: Vec<(String, Handle<ObjectDefAsset>)>,
     pub character: Handle<CharacterDefAsset>,
-    pub world_config: Handle<WorldConfigAsset>,
+    // world_config removed — ActiveWorld is now generated, not loaded from file
 }
 
 /// Application state: Loading waits for assets, InGame runs gameplay.
@@ -97,7 +97,6 @@ impl Plugin for RegistryPlugin {
                 Update,
                 (
                     hot_reload_character,
-                    hot_reload_world,
                     hot_reload_tiles,
                     hot_reload_objects,
                     hot_reload_biomes,

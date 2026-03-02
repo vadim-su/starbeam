@@ -34,10 +34,7 @@ impl Plugin for WorldPlugin {
             .add_message::<day_night::DayPhaseChanged>()
             .add_systems(
                 OnEnter(AppState::InGame),
-                (
-                    lit_sprite::init_lit_sprite_resources,
-                    day_night::load_day_night_config,
-                ),
+                lit_sprite::init_lit_sprite_resources,
             )
             .add_systems(
                 Update,
