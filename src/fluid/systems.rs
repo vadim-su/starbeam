@@ -7,7 +7,7 @@ use bevy::render::render_resource::{
     AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError,
 };
 use bevy::shader::ShaderRef;
-use bevy::sprite_render::{Material2d, Material2dKey, MeshMaterial2d};
+use bevy::sprite_render::{AlphaMode2d, Material2d, Material2dKey, MeshMaterial2d};
 
 use crate::fluid::cell::FluidCell;
 use crate::fluid::reactions::resolve_density_displacement;
@@ -35,6 +35,10 @@ pub struct FluidMaterial {
 }
 
 impl Material2d for FluidMaterial {
+    fn alpha_mode(&self) -> AlphaMode2d {
+        AlphaMode2d::Blend
+    }
+
     fn vertex_shader() -> ShaderRef {
         "engine/shaders/fluid.wgsl".into()
     }

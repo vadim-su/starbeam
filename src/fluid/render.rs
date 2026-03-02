@@ -32,7 +32,9 @@ fn is_liquid_surface(
 ) -> bool {
     let above_y = local_y + 1;
     if above_y >= chunk_size {
-        return true; // out-of-bounds → surface
+        // At chunk boundary: assume fluid continues into neighbor chunk.
+        // Better to miss a wave than to show waves underwater at chunk seams.
+        return false;
     }
     let above_idx = (above_y * chunk_size + local_x) as usize;
     let above = &fluids[above_idx];
@@ -51,7 +53,9 @@ fn is_gas_surface(
     fluid_id: super::cell::FluidId,
 ) -> bool {
     if local_y == 0 {
-        return true; // out-of-bounds → surface
+        // At chunk boundary: assume gas continues into neighbor chunk.
+        // Better to miss a wave than to show waves inside gas at chunk seams.
+        return false;
     }
     let below_idx = ((local_y - 1) * chunk_size + local_x) as usize;
     let below = &fluids[below_idx];
@@ -71,13 +75,15 @@ fn compute_depth(
     is_gas: bool,
 ) -> f32 {
     let mut distance: u32 = 0;
+    let mut hit_chunk_boundary = false;
 
     if is_gas {
         // Scan downward to find surface
         let mut sy = local_y;
         while distance < MAX_DEPTH_SCAN {
             if sy == 0 {
-                break; // hit bottom boundary → this is surface
+                hit_chunk_boundary = true;
+                break; // hit bottom boundary
             }
             sy -= 1;
             let idx = (sy * chunk_size + local_x) as usize;
@@ -93,7 +99,8 @@ fn compute_depth(
         while distance < MAX_DEPTH_SCAN {
             sy += 1;
             if sy >= chunk_size {
-                break; // hit top boundary → this is surface
+                hit_chunk_boundary = true;
+                break; // hit top boundary
             }
             let idx = (sy * chunk_size + local_x) as usize;
             let neighbor = &fluids[idx];
@@ -102,6 +109,16 @@ fn compute_depth(
             }
             distance += 1;
         }
+    }
+
+    // When we hit a chunk boundary and the edge cell still has fluid,
+    // assume the fluid continues into the neighbor chunk. Use a mid-depth
+    // fallback so there's no harsh dark/light seam at chunk borders.
+    if hit_chunk_boundary && distance > 0 {
+        // Fluid extends to chunk edge — assume it keeps going.
+        // Clamp to at least half-depth to avoid a surface-like appearance.
+        let min_depth = MAX_DEPTH_SCAN / 2;
+        distance = distance.max(min_depth);
     }
 
     distance as f32 / MAX_DEPTH_SCAN as f32
@@ -517,14 +534,15 @@ mod tests {
     }
 
     #[test]
-    fn liquid_surface_at_top_edge() {
-        // 2×2 chunk: water at (0,1) — top row, above is out-of-bounds
+    fn liquid_not_surface_at_top_edge() {
+        // 2×2 chunk: water at (0,1) — top row, above is out-of-bounds.
+        // At chunk boundary we assume fluid continues (no waves at seams).
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[2] = FluidCell::new(FluidId(1), 1.0); // (0,1)
 
         assert!(
-            is_liquid_surface(&fluids, 0, 1, 2, FluidId(1)),
-            "top-row cell should be surface (out-of-bounds above)"
+            !is_liquid_surface(&fluids, 0, 1, 2, FluidId(1)),
+            "top-edge cell should NOT be surface (assume continuation at chunk boundary)"
         );
     }
 
@@ -558,14 +576,15 @@ mod tests {
     }
 
     #[test]
-    fn gas_surface_at_bottom_edge() {
-        // 2×2 chunk: steam at (0,0) — bottom row, below is out-of-bounds
+    fn gas_not_surface_at_bottom_edge() {
+        // 2×2 chunk: steam at (0,0) — bottom row, below is out-of-bounds.
+        // At chunk boundary we assume gas continues (no waves at seams).
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(2), 1.0); // (0,0)
 
         assert!(
-            is_gas_surface(&fluids, 0, 0, 2, FluidId(2)),
-            "bottom-row gas cell should be surface (out-of-bounds below)"
+            !is_gas_surface(&fluids, 0, 0, 2, FluidId(2)),
+            "bottom-edge gas cell should NOT be surface (assume continuation at chunk boundary)"
         );
     }
 
@@ -586,55 +605,55 @@ mod tests {
 
     #[test]
     fn depth_increases_for_deeper_liquid() {
-        // 4×4 chunk: column of water at x=0, y=0..3
-        let mut fluids = vec![FluidCell::EMPTY; 16];
-        for y in 0..4u32 {
-            fluids[(y * 4) as usize] = FluidCell::new(FluidId(1), 1.0);
+        // 8×8 chunk: column of water at x=0, y=2..5 (not touching boundaries)
+        let mut fluids = vec![FluidCell::EMPTY; 64];
+        for y in 2..6u32 {
+            fluids[(y * 8) as usize] = FluidCell::new(FluidId(1), 1.0);
         }
 
-        // y=3 is top (surface) → depth = 0
-        let d3 = compute_depth(&fluids, 0, 3, 4, FluidId(1), false);
-        assert!(d3.abs() < 1e-5, "top cell should have depth 0.0");
+        // y=5 is top (surface: above y=6 is empty) → depth = 0
+        let d5 = compute_depth(&fluids, 0, 5, 8, FluidId(1), false);
+        assert!(d5.abs() < 1e-5, "top cell should have depth 0.0");
 
-        // y=2 → 1 cell from surface → depth = 1/16
-        let d2 = compute_depth(&fluids, 0, 2, 4, FluidId(1), false);
+        // y=4 → 1 cell from surface → depth = 1/16
+        let d4 = compute_depth(&fluids, 0, 4, 8, FluidId(1), false);
         assert!(
-            (d2 - 1.0 / 16.0).abs() < 1e-5,
-            "expected depth 1/16, got {d2}"
+            (d4 - 1.0 / 16.0).abs() < 1e-5,
+            "expected depth 1/16, got {d4}"
         );
 
-        // y=0 → 3 cells from surface → depth = 3/16
-        let d0 = compute_depth(&fluids, 0, 0, 4, FluidId(1), false);
+        // y=2 → 3 cells from surface → depth = 3/16
+        let d2 = compute_depth(&fluids, 0, 2, 8, FluidId(1), false);
         assert!(
-            (d0 - 3.0 / 16.0).abs() < 1e-5,
-            "expected depth 3/16, got {d0}"
+            (d2 - 3.0 / 16.0).abs() < 1e-5,
+            "expected depth 3/16, got {d2}"
         );
     }
 
     #[test]
     fn depth_for_gas_scans_downward() {
-        // 4×4 chunk: column of steam at x=0, y=0..3
-        let mut fluids = vec![FluidCell::EMPTY; 16];
-        for y in 0..4u32 {
-            fluids[(y * 4) as usize] = FluidCell::new(FluidId(2), 1.0);
+        // 8×8 chunk: column of steam at x=0, y=2..5 (not touching boundaries)
+        let mut fluids = vec![FluidCell::EMPTY; 64];
+        for y in 2..6u32 {
+            fluids[(y * 8) as usize] = FluidCell::new(FluidId(2), 1.0);
         }
 
-        // y=0 is bottom (surface for gas) → depth = 0
-        let d0 = compute_depth(&fluids, 0, 0, 4, FluidId(2), true);
-        assert!(d0.abs() < 1e-5, "bottom gas cell should have depth 0.0");
+        // y=2 is bottom of gas column (surface for gas: below y=1 is empty) → depth = 0
+        let d2 = compute_depth(&fluids, 0, 2, 8, FluidId(2), true);
+        assert!(d2.abs() < 1e-5, "bottom gas cell should have depth 0.0");
 
-        // y=1 → 1 cell from surface → depth = 1/16
-        let d1 = compute_depth(&fluids, 0, 1, 4, FluidId(2), true);
+        // y=3 → 1 cell from surface → depth = 1/16
+        let d3 = compute_depth(&fluids, 0, 3, 8, FluidId(2), true);
         assert!(
-            (d1 - 1.0 / 16.0).abs() < 1e-5,
-            "expected depth 1/16, got {d1}"
+            (d3 - 1.0 / 16.0).abs() < 1e-5,
+            "expected depth 1/16, got {d3}"
         );
 
-        // y=3 → 3 cells from surface → depth = 3/16
-        let d3 = compute_depth(&fluids, 0, 3, 4, FluidId(2), true);
+        // y=5 → 3 cells from surface → depth = 3/16
+        let d5 = compute_depth(&fluids, 0, 5, 8, FluidId(2), true);
         assert!(
-            (d3 - 3.0 / 16.0).abs() < 1e-5,
-            "expected depth 3/16, got {d3}"
+            (d5 - 3.0 / 16.0).abs() < 1e-5,
+            "expected depth 3/16, got {d5}"
         );
     }
 

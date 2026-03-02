@@ -28,10 +28,10 @@ pub struct FluidSimConfig {
 impl Default for FluidSimConfig {
     fn default() -> Self {
         Self {
-            iterations_per_tick: 3,
+            iterations_per_tick: 6,
             min_mass: MIN_MASS,
             min_flow: MIN_FLOW,
-            max_speed: MAX_SPEED,
+            max_speed: MAX_SPEED * 4.0,
         }
     }
 }

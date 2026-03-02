@@ -39,7 +39,7 @@ fn vertex(in: VertexInput) -> VertexOutput {
     let flags = in.fluid_data.w;
     let is_wave = (flags % 2.0) >= 0.5;
     if is_wave {
-        world_pos.y += sin(world_pos.x * 3.0 + uniforms.time * 2.0) * 0.12;
+        world_pos.y += sin(world_pos.x * 3.0 + uniforms.time * 2.0) * 1.5;
     }
 
     // Reconstruct local position with wave offset applied
@@ -67,7 +67,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let world_y = in.world_pos.y;
 
     // 1. Shimmer: subtle brightness oscillation based on world position and time
-    let shimmer = 1.0 + 0.06 * sin(world_x * 5.0 + world_y * 3.0 + uniforms.time * 1.5);
+    let shimmer = 1.0 + 0.12 * sin(world_x * 5.0 + world_y * 3.0 + uniforms.time * 1.5);
     color = vec4<f32>(color.rgb * shimmer, color.a);
 
     // 2. Depth darkening: deeper fluid is darker
