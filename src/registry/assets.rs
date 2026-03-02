@@ -117,19 +117,6 @@ fn default_pickup_radius() -> f32 {
     20.0
 }
 
-/// Asset loaded from world.config.ron
-#[derive(Asset, TypePath, Debug, Deserialize)]
-pub struct WorldConfigAsset {
-    pub width_tiles: i32,
-    pub height_tiles: i32,
-    pub chunk_size: u32,
-    pub tile_size: f32,
-    pub chunk_load_radius: i32,
-    pub seed: u32,
-    #[serde(default)]
-    pub planet_type: String,
-}
-
 /// Asset loaded from *.parallax.ron
 #[derive(Asset, TypePath, Debug, Deserialize)]
 pub struct ParallaxConfigAsset {

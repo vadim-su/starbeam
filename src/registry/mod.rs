@@ -13,7 +13,7 @@ use bevy::prelude::*;
 
 use assets::{
     AutotileAsset, BiomeAsset, CharacterDefAsset, ItemDefAsset, ObjectDefAsset,
-    ParallaxConfigAsset, PlanetTypeAsset, TileRegistryAsset, WorldConfigAsset,
+    ParallaxConfigAsset, PlanetTypeAsset, TileRegistryAsset,
 };
 use crate::cosmos::assets::{GenerationConfigAsset, StarTypeAsset};
 use biome::BiomeId;
@@ -64,14 +64,12 @@ impl Plugin for RegistryPlugin {
             .init_asset::<ObjectDefAsset>()
             .init_asset::<CharacterDefAsset>()
             .init_asset::<ItemDefAsset>()
-            .init_asset::<WorldConfigAsset>()
             .init_asset::<ParallaxConfigAsset>()
             .init_asset::<AutotileAsset>()
             .register_asset_loader(RonLoader::<TileRegistryAsset>::new(&["registry.ron"]))
             .register_asset_loader(RonLoader::<ObjectDefAsset>::new(&["object.ron"]))
             .register_asset_loader(RonLoader::<CharacterDefAsset>::new(&["character.ron"]))
             .register_asset_loader(RonLoader::<ItemDefAsset>::new(&["item.ron"]))
-            .register_asset_loader(RonLoader::<WorldConfigAsset>::new(&["config.ron"]))
             .register_asset_loader(RonLoader::<ParallaxConfigAsset>::new(&["parallax.ron"]))
             .register_asset_loader(RonLoader::<AutotileAsset>::new(&["autotile.ron"]))
             .init_asset::<PlanetTypeAsset>()

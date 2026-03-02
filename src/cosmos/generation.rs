@@ -516,6 +516,116 @@ mod tests {
         assert_eq!(dn.sun_colors[1], [0.8, 0.3, 0.1]);
     }
 
+    /// End-to-end integration test: loads real RON files from assets/,
+    /// generates a system, and verifies a garden planet exists with valid DayNightConfig.
+    #[test]
+    fn integration_real_assets_garden_planet() {
+        // Load real asset files
+        let gen_ron = include_str!("../../assets/worlds/generation.ron");
+        let gen_config: GenerationConfigAsset =
+            ron::from_str(gen_ron).expect("generation.ron should parse");
+
+        let star_ron =
+            include_str!("../../assets/worlds/star_types/yellow_dwarf/yellow_dwarf.star.ron");
+        let star: StarTypeAsset =
+            ron::from_str(star_ron).expect("yellow_dwarf.star.ron should parse");
+
+        let garden_ron = include_str!("../../assets/worlds/planet_types/garden/garden.planet.ron");
+        let garden: PlanetTypeAsset =
+            ron::from_str(garden_ron).expect("garden.planet.ron should parse");
+
+        let barren_ron = include_str!("../../assets/worlds/planet_types/barren/barren.planet.ron");
+        let barren: PlanetTypeAsset =
+            ron::from_str(barren_ron).expect("barren.planet.ron should parse");
+
+        let mut planet_templates = HashMap::new();
+        planet_templates.insert("garden".to_string(), &garden);
+        planet_templates.insert("barren".to_string(), &barren);
+
+        // Generate system with known seed
+        let system = generate_system(
+            42,
+            IVec2::ZERO,
+            IVec2::ZERO,
+            &[&star],
+            &planet_templates,
+            &gen_config,
+        );
+
+        // System must have bodies
+        assert!(
+            !system.bodies.is_empty(),
+            "generated system must have at least one body"
+        );
+
+        // Must contain at least one garden planet (warm zone covers orbits 2-4)
+        let garden_body = system.bodies.iter().find(|b| b.planet_type_id == "garden");
+        assert!(
+            garden_body.is_some(),
+            "system with yellow dwarf must contain a garden planet"
+        );
+        let garden_body = garden_body.unwrap();
+
+        // Garden planet must have valid dimensions
+        assert!(garden_body.width_tiles > 0);
+        assert!(garden_body.height_tiles > 0);
+
+        // DayNightConfig must have valid ratios that sum to 1.0
+        let dn = &garden_body.day_night;
+        let ratio_sum = dn.dawn_ratio + dn.day_ratio + dn.sunset_ratio + dn.night_ratio;
+        assert!(
+            (ratio_sum - 1.0).abs() < 0.01,
+            "day/night ratios must sum to 1.0, got {ratio_sum}"
+        );
+
+        // All ratios must be positive
+        assert!(dn.dawn_ratio > 0.0, "dawn_ratio must be positive");
+        assert!(dn.day_ratio > 0.0, "day_ratio must be positive");
+        assert!(dn.sunset_ratio > 0.0, "sunset_ratio must be positive");
+        assert!(dn.night_ratio > 0.0, "night_ratio must be positive");
+
+        // Cycle duration must be positive
+        assert!(
+            dn.cycle_duration_secs > 0.0,
+            "cycle_duration_secs must be positive"
+        );
+
+        // Sun intensity during day should be positive
+        assert!(
+            dn.sun_intensities[1] > 0.0,
+            "day sun intensity must be positive"
+        );
+        // Sun intensity at night should be zero
+        assert!(
+            dn.sun_intensities[3] == 0.0,
+            "night sun intensity must be zero"
+        );
+
+        // CelestialAddress must have correct structure
+        assert_eq!(garden_body.address.galaxy, IVec2::ZERO);
+        assert_eq!(garden_body.address.system, IVec2::ZERO);
+        assert!(garden_body.address.satellite.is_none());
+
+        // Generation must be deterministic (same seed → same result)
+        let system2 = generate_system(
+            42,
+            IVec2::ZERO,
+            IVec2::ZERO,
+            &[&star],
+            &planet_templates,
+            &gen_config,
+        );
+        assert_eq!(system.bodies.len(), system2.bodies.len());
+        for (a, b) in system.bodies.iter().zip(system2.bodies.iter()) {
+            assert_eq!(a.planet_type_id, b.planet_type_id);
+            assert_eq!(a.width_tiles, b.width_tiles);
+            assert_eq!(
+                a.day_night.cycle_duration_secs,
+                b.day_night.cycle_duration_secs
+            );
+        }
+    }
+
     #[test]
     fn farther_orbit_longer_cycle() {
         let star = GeneratedStar {

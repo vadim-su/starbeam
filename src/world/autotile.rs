@@ -4,7 +4,7 @@ use bevy::prelude::*;
 
 use crate::registry::assets::{AutotileAsset, SpriteVariant};
 
-/// Chunk dimensions in tiles. Must match `chunk_size` in `world.config.ron`.
+/// Chunk dimensions in tiles. Must match `chunk_size` in `generation.ron`.
 /// Used only for buffer pre-allocation capacity; actual chunk iteration uses
 /// `ActiveWorld.chunk_size` at runtime.
 pub const CHUNK_SIZE: u32 = 32;

@@ -71,7 +71,7 @@ pub struct CharacterAnimConfig {
 }
 
 pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServer>) {
-    let tiles = asset_server.load::<TileRegistryAsset>("world/tiles.registry.ron");
+    let tiles = asset_server.load::<TileRegistryAsset>("worlds/tiles.registry.ron");
     let character = asset_server
         .load::<CharacterDefAsset>("content/characters/adventurer/adventurer.character.ron");
 
