@@ -14,6 +14,7 @@ pub mod tile_renderer;
 use bevy::prelude::*;
 use bevy::sprite_render::Material2dPlugin;
 
+use crate::cosmos::persistence::DirtyChunks;
 use crate::registry::AppState;
 use crate::sets::GameSet;
 use crate::world::chunk::{LoadedChunks, WorldMap};
@@ -30,6 +31,7 @@ impl Plugin for WorldPlugin {
             .add_plugins(rc_lighting::RcLightingPlugin)
             .init_resource::<WorldMap>()
             .init_resource::<LoadedChunks>()
+            .init_resource::<DirtyChunks>()
             .init_resource::<MeshBuildBuffers>()
             .add_message::<day_night::DayPhaseChanged>()
             .add_systems(OnEnter(AppState::LoadingBiomes), chunk::clear_stale_chunks)

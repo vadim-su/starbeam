@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy::sprite_render::MeshMaterial2d;
 use bevy::window::PrimaryWindow;
 
+use crate::cosmos::persistence::DirtyChunks;
 use crate::inventory::{Hotbar, Inventory};
 use crate::item::{calculate_drops, DropDef, DroppedItem, ItemRegistry, SpawnParams};
 use crate::object::placement::{can_place_object, get_object_at, place_object, remove_object};
@@ -101,13 +102,14 @@ pub fn block_interaction_system(
         Res<FallbackLightmap>,
         Res<FallbackItemImage>,
         ResMut<RcGridDirty>,
+        ResMut<DirtyChunks>,
     ),
     mut lit_materials: ResMut<Assets<LitSpriteMaterial>>,
     object_registry: Option<Res<ObjectRegistry>>,
     object_sprites: Option<Res<ObjectSpriteMaterials>>,
     object_entities: Query<(Entity, &PlacedObjectEntity)>,
 ) {
-    let (fallback_lm, fallback_img, mut rc_dirty) = fallbacks;
+    let (fallback_lm, fallback_img, mut rc_dirty, mut dirty_chunks) = fallbacks;
     let left_click = mouse.just_pressed(MouseButton::Left);
     let right_click = mouse.just_pressed(MouseButton::Right);
     if !left_click && !right_click {
@@ -184,6 +186,7 @@ pub fn block_interaction_system(
                     obj_idx,
                     &ctx_ref,
                 );
+                dirty_chunks.0.insert((data_cx, data_cy));
                 return;
             }
         }
@@ -212,6 +215,9 @@ pub fn block_interaction_system(
                 &fallback_img.0,
             );
             world_map.set_tile(tile_x, tile_y, Layer::Fg, TileId::AIR, &ctx_ref);
+            let wrapped_x = ctx_ref.config.wrap_tile_x(tile_x);
+            let (dirty_cx, dirty_cy) = tile_to_chunk(wrapped_x, tile_y, ctx_ref.config.chunk_size);
+            dirty_chunks.0.insert((dirty_cx, dirty_cy));
         } else {
             // Left-click on air = place from left hand (objects then tiles).
             // This is intentional: left-hand items use left-click, right-hand items use right-click.
@@ -235,6 +241,7 @@ pub fn block_interaction_system(
                             let wrapped_x = ctx_ref.config.wrap_tile_x(tile_x);
                             let (data_cx, data_cy) =
                                 tile_to_chunk(wrapped_x, tile_y, ctx_ref.config.chunk_size);
+                            dirty_chunks.0.insert((data_cx, data_cy));
                             let chunk = world_map.chunk(data_cx, data_cy).unwrap();
                             let new_idx = (chunk.objects.len() - 1) as u16;
 
@@ -369,6 +376,9 @@ pub fn block_interaction_system(
             };
 
             world_map.set_tile(tile_x, tile_y, Layer::Fg, place_id, &ctx_ref);
+            let wrapped_x = ctx_ref.config.wrap_tile_x(tile_x);
+            let (dirty_cx, dirty_cy) = tile_to_chunk(wrapped_x, tile_y, ctx_ref.config.chunk_size);
+            dirty_chunks.0.insert((dirty_cx, dirty_cy));
             inventory.remove_item(item_id, 1);
         }
     } else if right_click {
@@ -396,6 +406,9 @@ pub fn block_interaction_system(
                 &fallback_img.0,
             );
             world_map.set_tile(tile_x, tile_y, Layer::Bg, TileId::AIR, &ctx_ref);
+            let wrapped_x = ctx_ref.config.wrap_tile_x(tile_x);
+            let (dirty_cx, dirty_cy) = tile_to_chunk(wrapped_x, tile_y, ctx_ref.config.chunk_size);
+            dirty_chunks.0.insert((dirty_cx, dirty_cy));
         } else {
             // Place bg tile from right hand of active hotbar slot
             let has_neighbor = [(-1, 0), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
@@ -423,6 +436,9 @@ pub fn block_interaction_system(
             }
 
             world_map.set_tile(tile_x, tile_y, Layer::Bg, place_id, &ctx_ref);
+            let wrapped_x = ctx_ref.config.wrap_tile_x(tile_x);
+            let (dirty_cx, dirty_cy) = tile_to_chunk(wrapped_x, tile_y, ctx_ref.config.chunk_size);
+            dirty_chunks.0.insert((dirty_cx, dirty_cy));
             inventory.remove_item(item_id, 1);
         }
     } else {
