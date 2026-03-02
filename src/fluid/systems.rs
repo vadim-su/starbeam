@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use bevy::asset::RenderAssetUsages;
+use bevy::ecs::message::MessageReader;
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::prelude::*;
 use bevy::render::render_resource::{
@@ -10,10 +11,12 @@ use bevy::shader::ShaderRef;
 use bevy::sprite_render::{AlphaMode2d, Material2d, Material2dKey, MeshMaterial2d};
 
 use crate::fluid::cell::FluidCell;
+use crate::fluid::events::{ImpactKind, WaterImpactEvent};
 use crate::fluid::reactions::resolve_density_displacement;
 use crate::fluid::registry::FluidRegistry;
 use crate::fluid::render::{build_fluid_mesh, ATTRIBUTE_FLUID_DATA};
 use crate::fluid::simulation::{reconcile_chunk_boundaries, simulate_grid, FluidSimConfig};
+use crate::fluid::wave::{reconcile_wave_boundaries, WaveBuffer, WaveConfig, WaveState};
 use crate::registry::tile::TileRegistry;
 use crate::registry::world::ActiveWorld;
 use crate::world::chunk::{ChunkCoord, LoadedChunks, WorldMap};
@@ -347,4 +350,81 @@ pub fn fluid_rebuild_meshes(
             ));
         }
     }
+}
+
+/// Consume WaterImpactEvents and apply impulses to wave buffers.
+pub fn wave_consume_events(
+    mut events: MessageReader<WaterImpactEvent>,
+    mut wave_state: ResMut<WaveState>,
+    active_world: Res<ActiveWorld>,
+) {
+    let chunk_size = active_world.chunk_size;
+    let tile_size = active_world.tile_size;
+
+    for event in events.read() {
+        // Convert world position to chunk + local coords
+        let tile_x = (event.position.x / tile_size).floor() as i32;
+        let tile_y = (event.position.y / tile_size).floor() as i32;
+        let data_cx = active_world.wrap_chunk_x(tile_x.div_euclid(chunk_size as i32));
+        let cy = tile_y.div_euclid(chunk_size as i32);
+        let local_x = tile_x.rem_euclid(chunk_size as i32) as u32;
+        let local_y = tile_y.rem_euclid(chunk_size as i32) as u32;
+
+        let impulse = match event.kind {
+            ImpactKind::Splash => event.velocity.y.abs() * 0.02 * event.mass.sqrt(),
+            ImpactKind::Wake => event.velocity.length() * 0.005,
+            ImpactKind::Pour => event.velocity.y.abs() * 0.01,
+        };
+
+        let buf = wave_state
+            .buffers
+            .entry((data_cx, cy))
+            .or_insert_with(|| WaveBuffer::new(chunk_size));
+        buf.apply_impulse(local_x, local_y, impulse);
+
+        // Spread impulse to neighbors for wider splash
+        if matches!(event.kind, ImpactKind::Splash) {
+            let spread = impulse * 0.5;
+            if local_x > 0 {
+                buf.apply_impulse(local_x - 1, local_y, spread);
+            }
+            if local_x + 1 < chunk_size {
+                buf.apply_impulse(local_x + 1, local_y, spread);
+            }
+        }
+    }
+}
+
+/// Step wave simulation for all active wave buffers.
+pub fn wave_simulation(
+    world_map: Res<WorldMap>,
+    active_world: Res<ActiveWorld>,
+    active_fluids: Res<ActiveFluidChunks>,
+    mut wave_state: ResMut<WaveState>,
+    wave_config: Res<WaveConfig>,
+) {
+    let chunk_size = active_world.chunk_size;
+    let width_chunks = active_world.width_chunks();
+
+    // Step each buffer
+    for &(cx, cy) in &active_fluids.chunks {
+        if let Some(buf) = wave_state.buffers.get_mut(&(cx, cy)) {
+            if let Some(chunk) = world_map.chunks.get(&(cx, cy)) {
+                buf.step(&chunk.fluids, &wave_config);
+            }
+        }
+    }
+
+    // Reconcile boundaries
+    reconcile_wave_boundaries(
+        &mut wave_state,
+        &active_fluids.chunks,
+        chunk_size,
+        width_chunks,
+    );
+
+    // Prune calm buffers
+    wave_state
+        .buffers
+        .retain(|_, buf| !buf.is_calm(wave_config.epsilon));
 }

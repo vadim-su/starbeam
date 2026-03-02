@@ -30,10 +30,17 @@ impl Plugin for FluidPlugin {
             .add_plugins(Material2dPlugin::<FluidMaterial>::default())
             .init_resource::<FluidSimConfig>()
             .init_resource::<systems::ActiveFluidChunks>()
+            .init_resource::<wave::WaveConfig>()
+            .init_resource::<wave::WaveState>()
             .add_systems(Startup, systems::init_fluid_material)
             .add_systems(
                 Update,
-                (systems::fluid_simulation, systems::fluid_rebuild_meshes)
+                (
+                    systems::fluid_simulation,
+                    systems::wave_consume_events,
+                    systems::wave_simulation,
+                    systems::fluid_rebuild_meshes,
+                )
                     .chain()
                     .in_set(GameSet::WorldUpdate)
                     .run_if(in_state(AppState::InGame))
