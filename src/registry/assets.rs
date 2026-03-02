@@ -15,10 +15,23 @@ pub struct TileRegistryAsset {
     pub tiles: Vec<TileDef>,
 }
 
-/// Asset loaded from *.objects.ron (monolithic object list)
-#[derive(Asset, TypePath, Debug, Deserialize)]
-pub struct ObjectRegistryAsset {
-    pub objects: Vec<ObjectDef>,
+/// Asset loaded from a single *.object.ron file (per-entity).
+/// Thin wrapper around `ObjectDef` that resolves the sprite path
+/// relative to the entity folder.
+#[derive(Asset, TypePath, Debug, Clone, Deserialize)]
+#[serde(transparent)]
+pub struct ObjectDefAsset(pub ObjectDef);
+
+impl ObjectDefAsset {
+    /// Convert to an `ObjectDef`, resolving the sprite path relative to the
+    /// object.ron file's directory.
+    pub fn to_object_def(&self, base_path: &str) -> ObjectDef {
+        let mut def = self.0.clone();
+        if !def.sprite.is_empty() {
+            def.sprite = format!("{}{}", base_path, def.sprite);
+        }
+        def
+    }
 }
 
 /// Asset loaded from *.character.ron — replaces PlayerDefAsset.
@@ -184,6 +197,28 @@ pub struct PlanetTypeAsset {
     pub region_width_min: u32,
     pub region_width_max: u32,
     pub primary_region_ratio: f64,
+
+    // --- Day/night range fields (Optional — None = derive procedurally) ---
+    #[serde(default)]
+    pub size: Option<(i32, i32)>,
+    #[serde(default)]
+    pub cycle_duration_range: Option<(f32, f32)>,
+    #[serde(default)]
+    pub day_ratio: Option<(f32, f32)>,
+    #[serde(default)]
+    pub night_ratio: Option<(f32, f32)>,
+    #[serde(default)]
+    pub dawn_ratio: Option<(f32, f32)>,
+    #[serde(default)]
+    pub sunset_ratio: Option<(f32, f32)>,
+    #[serde(default)]
+    pub sky_color_palette: Option<[[[f32; 4]; 2]; 4]>,
+    #[serde(default)]
+    pub sun_intensity_modifier: Option<(f32, f32)>,
+    #[serde(default)]
+    pub danger_multipliers: Option<[f32; 4]>,
+    #[serde(default)]
+    pub temperature_modifiers: Option<[f32; 4]>,
 }
 
 /// Asset loaded from *.biome.ron
@@ -222,20 +257,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ron_roundtrip_objects() {
-        let ron_str = std::fs::read_to_string("assets/world/objects.objects.ron")
-            .expect("objects.objects.ron should exist");
-        let asset: ObjectRegistryAsset =
-            ron::from_str(&ron_str).expect("objects.objects.ron should parse");
-        assert!(
-            asset.objects.len() >= 2,
-            "should have at least none + torch"
-        );
-        assert_eq!(asset.objects[0].id, "none");
-        assert_eq!(asset.objects[1].id, "torch_object");
-        assert_eq!(asset.objects[1].light_emission, [255, 170, 40]);
-        assert_eq!(asset.objects[1].sprite_columns, 4);
-        assert_eq!(asset.objects[1].sprite_rows, 4);
+    fn ron_roundtrip_object_def() {
+        let ron_str = std::fs::read_to_string("assets/content/objects/torch/torch.object.ron")
+            .expect("torch.object.ron should exist");
+        let asset: ObjectDefAsset = ron::from_str(&ron_str).expect("torch.object.ron should parse");
+        assert_eq!(asset.0.id, "torch_object");
+        assert_eq!(asset.0.light_emission, [255, 170, 40]);
+        assert_eq!(asset.0.sprite_columns, 4);
+        assert_eq!(asset.0.sprite_rows, 4);
+        // Verify sprite path resolution
+        let def = asset.to_object_def("content/objects/torch/");
+        assert_eq!(def.sprite, "content/objects/torch/torch.png");
     }
 
     #[test]
