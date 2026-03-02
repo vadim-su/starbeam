@@ -132,24 +132,54 @@ fn compute_depth(
     distance as f32 / MAX_DEPTH_SCAN as f32
 }
 
-/// Get the fill level of a horizontal neighbor cell, if it contains the same fluid.
-/// Returns `None` if the neighbor is out of bounds, empty, or a different fluid.
-fn neighbor_fill(
+/// Compute absolute liquid surface height (in local tile units) for each column.
+///
+/// For each column X, scan from top to bottom to find the highest cell with
+/// liquid. The surface height = `row + fill`. Returns `None` for empty columns
+/// or columns with only gas.
+///
+/// For gas: scans bottom-up, surface height = `row + (1.0 - fill)` (top-down fill).
+fn compute_column_surface_heights(
     fluids: &[FluidCell],
-    local_x: i32,
-    local_y: u32,
     chunk_size: u32,
-    fluid_id: super::cell::FluidId,
-) -> Option<f32> {
-    if local_x < 0 || local_x >= chunk_size as i32 {
-        return None;
+    fluid_registry: &FluidRegistry,
+    is_gas_query: bool,
+) -> Vec<Option<f32>> {
+    let mut heights = vec![None; chunk_size as usize];
+
+    for local_x in 0..chunk_size {
+        if is_gas_query {
+            // Gas: scan bottom-up for lowest gas cell
+            for local_y in 0..chunk_size {
+                let idx = (local_y * chunk_size + local_x) as usize;
+                let cell = &fluids[idx];
+                if !cell.is_empty() {
+                    let def = fluid_registry.get(cell.fluid_id);
+                    if def.is_gas {
+                        let fill = cell.mass.min(1.0);
+                        heights[local_x as usize] = Some(local_y as f32 + (1.0 - fill));
+                        break;
+                    }
+                }
+            }
+        } else {
+            // Liquid: scan top-down for highest liquid cell
+            for local_y in (0..chunk_size).rev() {
+                let idx = (local_y * chunk_size + local_x) as usize;
+                let cell = &fluids[idx];
+                if !cell.is_empty() {
+                    let def = fluid_registry.get(cell.fluid_id);
+                    if !def.is_gas {
+                        let fill = cell.mass.min(1.0);
+                        heights[local_x as usize] = Some(local_y as f32 + fill);
+                        break;
+                    }
+                }
+            }
+        }
     }
-    let idx = (local_y * chunk_size + local_x as u32) as usize;
-    let cell = &fluids[idx];
-    if cell.is_empty() || cell.fluid_id != fluid_id {
-        return None;
-    }
-    Some(cell.mass.min(1.0))
+
+    heights
 }
 
 /// Build a Bevy `Mesh` for the fluid layer of a single chunk.
@@ -183,6 +213,10 @@ pub fn build_fluid_mesh(
 
     let base_x = chunk_x * chunk_size as i32;
     let base_y = chunk_y * chunk_size as i32;
+
+    // Pre-compute per-column surface heights for smooth interpolation.
+    let liquid_heights = compute_column_surface_heights(fluids, chunk_size, fluid_registry, false);
+    let gas_heights = compute_column_surface_heights(fluids, chunk_size, fluid_registry, true);
 
     for local_y in 0..chunk_size {
         for local_x in 0..chunk_size {
@@ -277,43 +311,48 @@ pub fn build_fluid_mesh(
                 [0.0, 0.0, 0.0, 0.0]
             };
 
-            // Smooth surface vertices by interpolating fill with horizontal neighbors.
-            // This eliminates the staircase pattern during fluid settling.
+            // Smooth surface vertices by interpolating absolute surface heights
+            // between adjacent columns. This eliminates the staircase pattern
+            // even when neighbors are on different Y rows.
             let (y0_left, y0_right, y1_left, y1_right) = if is_surface {
-                let left_fill = neighbor_fill(
-                    fluids,
-                    local_x as i32 - 1,
-                    local_y,
-                    chunk_size,
-                    cell.fluid_id,
-                );
-                let right_fill = neighbor_fill(
-                    fluids,
-                    local_x as i32 + 1,
-                    local_y,
-                    chunk_size,
-                    cell.fluid_id,
-                );
+                let heights = if def.is_gas {
+                    &gas_heights
+                } else {
+                    &liquid_heights
+                };
+                let this_h = heights[local_x as usize].unwrap_or(0.0);
+                let left_h = if local_x > 0 {
+                    heights[(local_x - 1) as usize]
+                } else {
+                    None
+                };
+                let right_h = if local_x + 1 < chunk_size {
+                    heights[(local_x + 1) as usize]
+                } else {
+                    None
+                };
+
+                let base = base_y as f32;
 
                 if def.is_gas {
-                    // Gas: smooth bottom vertices (surface edge)
-                    let y0_l = match left_fill {
-                        Some(lf) => world_y + (1.0 - (fill + lf) / 2.0) * tile_size,
+                    // Gas surface: smooth bottom vertices
+                    let y0_l = match left_h {
+                        Some(lh) => (base + (this_h + lh) / 2.0) * tile_size,
                         None => y0,
                     };
-                    let y0_r = match right_fill {
-                        Some(rf) => world_y + (1.0 - (fill + rf) / 2.0) * tile_size,
+                    let y0_r = match right_h {
+                        Some(rh) => (base + (this_h + rh) / 2.0) * tile_size,
                         None => y0,
                     };
                     (y0_l, y0_r, y1, y1)
                 } else {
-                    // Liquid: smooth top vertices (surface edge)
-                    let y1_l = match left_fill {
-                        Some(lf) => world_y + ((fill + lf) / 2.0) * tile_size,
+                    // Liquid surface: smooth top vertices
+                    let y1_l = match left_h {
+                        Some(lh) => (base + (this_h + lh) / 2.0) * tile_size,
                         None => y1,
                     };
-                    let y1_r = match right_fill {
-                        Some(rf) => world_y + ((fill + rf) / 2.0) * tile_size,
+                    let y1_r = match right_h {
+                        Some(rh) => (base + (this_h + rh) / 2.0) * tile_size,
                         None => y1,
                     };
                     (y0, y0, y1_l, y1_r)
@@ -939,65 +978,58 @@ mod tests {
     }
 
     #[test]
-    fn surface_vertices_interpolated_with_neighbors() {
+    fn surface_vertices_smoothed_across_rows() {
         let reg = test_fluid_registry();
-        // 4×4 chunk: 3 adjacent surface water cells at y=0 with different fills.
-        //   x=0: fill=0.4, x=1: fill=0.8, x=2: fill=0.6, x=3: empty
-        let mut fluids = vec![FluidCell::EMPTY; 16];
-        fluids[0] = FluidCell::new(FluidId(1), 0.4); // (0,0)
-        fluids[1] = FluidCell::new(FluidId(1), 0.8); // (1,0)
-        fluids[2] = FluidCell::new(FluidId(1), 0.6); // (2,0)
+        // 4×4 chunk: staircase pattern at the surface.
+        //   x=0: row 0 full + row 1 fill=0.4 → surface_height = 1.4
+        //   x=1: row 0 full                   → surface_height = 1.0
+        //   x=2: row 0 fill=0.6               → surface_height = 0.6
+        //   x=3: empty
+        let mut fluids = vec![FluidCell::EMPTY; 16]; // 4×4
+                                                     // Column 0: row 0 full, row 1 partial
+        fluids[0 * 4 + 0] = FluidCell::new(FluidId(1), 1.0); // (0,0)
+        fluids[1 * 4 + 0] = FluidCell::new(FluidId(1), 0.4); // (0,1) surface
+                                                             // Column 1: row 0 full
+        fluids[0 * 4 + 1] = FluidCell::new(FluidId(1), 1.0); // (1,0) surface
+                                                             // Column 2: row 0 partial
+        fluids[0 * 4 + 2] = FluidCell::new(FluidId(1), 0.6); // (2,0) surface
 
         let mesh = build_fluid_mesh(&fluids, 0, 0, 4, 8.0, &reg, None, None)
             .expect("should produce a mesh");
 
+        // Surface heights (in tile units): col0=1.4, col1=1.0, col2=0.6
+        // Interpolation (chunk base_y=0):
+        //   col0 surface cell at (0,1): top-left = no left → 1.4*8=11.2
+        //                                top-right = avg(1.4,1.0)=1.2 → 1.2*8=9.6
+        //   col1 surface cell at (1,0): top-left = avg(1.0,1.4)=1.2 → 1.2*8=9.6
+        //                                top-right = avg(1.0,0.6)=0.8 → 0.8*8=6.4
+        //   col2 surface cell at (2,0): top-left = avg(0.6,1.0)=0.8 → 0.8*8=6.4
+        //                                top-right = no right → 0.6*8=4.8
+
         if let Some(bevy::mesh::VertexAttributeValues::Float32x3(pos)) =
             mesh.attribute(Mesh::ATTRIBUTE_POSITION)
         {
-            // 3 quads × 4 vertices = 12
-            assert_eq!(pos.len(), 12);
+            // Find the surface cell quads by checking Y positions.
+            // With 4 cells total (col0 has 2, col1 has 1, col2 has 1),
+            // quad order: (0,0), (1,0), (2,0), (0,1) — row-major scan.
 
-            // Quad 0: cell (0,0), fill=0.4
-            //   top-left (v3): no left neighbor → y1 = 0.4 * 8 = 3.2
-            //   top-right (v2): right neighbor fill=0.8 → avg = (0.4+0.8)/2 = 0.6 → y = 4.8
-            assert!(
-                (pos[3][1] - 3.2).abs() < 1e-4,
-                "q0 top-left Y: got {}",
-                pos[3][1]
-            );
-            assert!(
-                (pos[2][1] - 4.8).abs() < 1e-4,
-                "q0 top-right Y: got {}",
-                pos[2][1]
-            );
+            // Quad 3 = cell (0,1) surface: vertices 12..15
+            let q3_tl = pos[15][1]; // top-left
+            let q3_tr = pos[14][1]; // top-right
+            assert!((q3_tl - 11.2).abs() < 0.01, "col0 surface TL: got {q3_tl}");
+            assert!((q3_tr - 9.6).abs() < 0.01, "col0 surface TR: got {q3_tr}");
 
-            // Quad 1: cell (1,0), fill=0.8
-            //   top-left (v7): left neighbor fill=0.4 → avg = (0.8+0.4)/2 = 0.6 → y = 4.8
-            //   top-right (v6): right neighbor fill=0.6 → avg = (0.8+0.6)/2 = 0.7 → y = 5.6
-            assert!(
-                (pos[7][1] - 4.8).abs() < 1e-4,
-                "q1 top-left Y: got {}",
-                pos[7][1]
-            );
-            assert!(
-                (pos[6][1] - 5.6).abs() < 1e-4,
-                "q1 top-right Y: got {}",
-                pos[6][1]
-            );
+            // Quad 1 = cell (1,0) surface: vertices 4..7
+            let q1_tl = pos[7][1]; // top-left
+            let q1_tr = pos[6][1]; // top-right
+            assert!((q1_tl - 9.6).abs() < 0.01, "col1 surface TL: got {q1_tl}");
+            assert!((q1_tr - 6.4).abs() < 0.01, "col1 surface TR: got {q1_tr}");
 
-            // Quad 2: cell (2,0), fill=0.6
-            //   top-left (v11): left neighbor fill=0.8 → avg = (0.6+0.8)/2 = 0.7 → y = 5.6
-            //   top-right (v10): no right neighbor → y1 = 0.6 * 8 = 4.8
-            assert!(
-                (pos[11][1] - 5.6).abs() < 1e-4,
-                "q2 top-left Y: got {}",
-                pos[11][1]
-            );
-            assert!(
-                (pos[10][1] - 4.8).abs() < 1e-4,
-                "q2 top-right Y: got {}",
-                pos[10][1]
-            );
+            // Quad 2 = cell (2,0) surface: vertices 8..11
+            let q2_tl = pos[11][1]; // top-left
+            let q2_tr = pos[10][1]; // top-right
+            assert!((q2_tl - 6.4).abs() < 0.01, "col2 surface TL: got {q2_tl}");
+            assert!((q2_tr - 4.8).abs() < 0.01, "col2 surface TR: got {q2_tr}");
         } else {
             panic!("expected Float32x3 positions");
         }

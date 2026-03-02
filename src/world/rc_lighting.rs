@@ -278,6 +278,8 @@ fn extract_lighting_data(
     mut rc_dirty: ResMut<RcGridDirty>,
     mut cache: Local<RcCachedGrid>,
 ) {
+    let _t0 = std::time::Instant::now();
+
     let world_config = &*ctx.config;
     let tile_registry = &*ctx.tile_registry;
     let height_tiles = world_config.height_tiles;
@@ -680,6 +682,15 @@ fn extract_lighting_data(
         let base = wt.sun_color * wt.sun_intensity;
         config.sun_color = base.max(Vec3::splat(ambient_min));
     }
+
+    // DEBUG: временный замер производительности
+    warn!(
+        "RC extract: {:.2}ms | rebuild={} | grid={}x{}",
+        _t0.elapsed().as_secs_f64() * 1000.0,
+        need_rebuild,
+        input_w,
+        input_h,
+    );
 }
 
 /// Update the tile material lightmap handles to point to the current RC lightmap
