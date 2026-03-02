@@ -11,7 +11,7 @@ use crate::object::spawn::{
     despawn_objects_for_chunk, spawn_objects_for_chunk, ObjectDisplayChunk,
 };
 use crate::registry::tile::{TileId, TileRegistry};
-use crate::registry::world::WorldConfig;
+use crate::registry::world::ActiveWorld;
 use crate::world::atlas::TileAtlas;
 use crate::world::autotile::{compute_bitmask, AutotileRegistry};
 use crate::world::ctx::{WorldCtx, WorldCtxRef};
@@ -588,7 +588,7 @@ pub fn rebuild_dirty_chunks(
     query: Query<(Entity, &ChunkCoord, &ChunkLayer), With<ChunkDirty>>,
     mut meshes: ResMut<Assets<Mesh>>,
     world_map: Res<WorldMap>,
-    wc: Res<WorldConfig>,
+    wc: Res<ActiveWorld>,
     registry: Res<TileRegistry>,
     autotile_registry: Res<AutotileRegistry>,
     atlas: Res<TileAtlas>,

@@ -4,7 +4,7 @@ use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 use crate::object::definition::ObjectId;
 use crate::object::registry::ObjectRegistry;
 use crate::registry::tile::{TileId, TileRegistry};
-use crate::registry::world::WorldConfig;
+use crate::registry::world::ActiveWorld;
 use crate::registry::AppState;
 use crate::sets::GameSet;
 use crate::world::chunk::{tile_to_chunk, tile_to_local, world_to_tile, WorldMap};
@@ -146,7 +146,7 @@ fn get_fg_tile(
     world_map: &WorldMap,
     tile_x: i32,
     tile_y: i32,
-    world_config: &WorldConfig,
+    world_config: &ActiveWorld,
     tile_registry: &TileRegistry,
 ) -> Option<TileId> {
     if tile_y < 0 {
@@ -169,7 +169,7 @@ fn get_bg_tile(
     world_map: &WorldMap,
     tile_x: i32,
     tile_y: i32,
-    world_config: &WorldConfig,
+    world_config: &ActiveWorld,
     tile_registry: &TileRegistry,
 ) -> Option<TileId> {
     if tile_y < 0 {
@@ -193,7 +193,7 @@ fn count_open_neighbors(
     world_map: &WorldMap,
     tx: i32,
     ty: i32,
-    world_config: &WorldConfig,
+    world_config: &ActiveWorld,
     tile_registry: &TileRegistry,
 ) -> u32 {
     let mut count = 0u32;

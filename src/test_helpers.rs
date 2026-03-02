@@ -1,19 +1,30 @@
 pub mod fixtures {
+    use bevy::math::IVec2;
     use bevy::prelude::*;
 
+    use crate::cosmos::address::{CelestialAddress, CelestialSeeds};
     use crate::registry::biome::{
         BiomeDef, BiomeRegistry, LayerBoundaries, LayerConfig, LayerConfigs, PlanetConfig,
     };
     use crate::registry::player::PlayerConfig;
     use crate::registry::tile::{TileDef, TileId, TileRegistry};
-    use crate::registry::world::WorldConfig;
+    use crate::registry::world::ActiveWorld;
     use crate::world::biome_map::BiomeMap;
     use crate::world::chunk::WorldMap;
     use crate::world::ctx::WorldCtxRef;
     use crate::world::terrain_gen::TerrainNoiseCache;
 
-    pub fn test_world_config() -> WorldConfig {
-        WorldConfig {
+    pub fn test_active_world() -> ActiveWorld {
+        let address = CelestialAddress {
+            galaxy: IVec2::ZERO,
+            system: IVec2::ZERO,
+            orbit: 2,
+            satellite: None,
+        };
+        let seeds = CelestialSeeds::derive(42, &address);
+        ActiveWorld {
+            address,
+            seeds,
             width_tiles: 2048,
             height_tiles: 1024,
             chunk_size: 32,
@@ -22,6 +33,11 @@ pub mod fixtures {
             seed: 42,
             planet_type: "garden".into(),
         }
+    }
+
+    /// Backward-compatible alias for test_active_world.
+    pub fn test_world_config() -> ActiveWorld {
+        test_active_world()
     }
 
     pub fn test_biome_map(biome_registry: &BiomeRegistry) -> BiomeMap {
@@ -182,7 +198,7 @@ pub mod fixtures {
 
     /// Returns all resources needed to construct a `WorldCtxRef` for tests.
     pub fn test_world_ctx() -> (
-        WorldConfig,
+        ActiveWorld,
         BiomeMap,
         BiomeRegistry,
         TileRegistry,
@@ -192,7 +208,7 @@ pub mod fixtures {
         let br = test_biome_registry();
         let bm = test_biome_map(&br);
         (
-            test_world_config(),
+            test_active_world(),
             bm,
             br,
             test_tile_registry(),
@@ -203,7 +219,7 @@ pub mod fixtures {
 
     /// Convenience constructor for `WorldCtxRef` from individual references.
     pub fn make_ctx<'a>(
-        wc: &'a WorldConfig,
+        wc: &'a ActiveWorld,
         bm: &'a BiomeMap,
         br: &'a BiomeRegistry,
         tr: &'a TileRegistry,
@@ -240,7 +256,7 @@ pub mod fixtures {
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.insert_resource(test_world_config());
+        app.insert_resource(test_active_world());
         app.insert_resource(bm);
         app.insert_resource(br);
         app.insert_resource(test_tile_registry());

@@ -9,7 +9,7 @@ use crate::inventory::{Hotbar, Inventory};
 use crate::physics::{Gravity, TileCollider};
 use crate::registry::biome::PlanetConfig;
 use crate::registry::player::PlayerConfig;
-use crate::registry::world::WorldConfig;
+use crate::registry::world::ActiveWorld;
 use crate::registry::AppState;
 use crate::sets::GameSet;
 use crate::world::lit_sprite::{FallbackLightmap, LitSprite, LitSpriteMaterial, SharedLitQuad};
@@ -50,7 +50,7 @@ impl Plugin for PlayerPlugin {
 fn spawn_player(
     mut commands: Commands,
     player_config: Res<PlayerConfig>,
-    world_config: Res<WorldConfig>,
+    world_config: Res<ActiveWorld>,
     planet_config: Res<PlanetConfig>,
     noise_cache: Res<TerrainNoiseCache>,
     animations: Res<CharacterAnimations>,

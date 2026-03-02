@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::player::Player;
 use crate::registry::biome::BiomeId;
-use crate::registry::world::WorldConfig;
+use crate::registry::world::ActiveWorld;
 use crate::registry::BiomeParallaxConfigs;
 use crate::world::biome_map::BiomeMap;
 use crate::world::chunk::world_to_tile;
@@ -42,7 +42,7 @@ const TRANSITION_DURATION: f32 = 1.5;
 pub fn track_player_biome(
     mut commands: Commands,
     player_query: Query<&Transform, With<Player>>,
-    wc: Res<WorldConfig>,
+    wc: Res<ActiveWorld>,
     biome_map: Res<BiomeMap>,
     current_biome: Option<Res<CurrentBiome>>,
     transition: Option<Res<ParallaxTransition>>,

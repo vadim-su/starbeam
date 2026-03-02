@@ -1,11 +1,11 @@
 use bevy::prelude::*;
 
 use crate::player::Player;
-use crate::registry::world::WorldConfig;
+use crate::registry::world::ActiveWorld;
 
 /// Teleport player when they cross the horizontal world boundary.
 pub fn player_wrap_system(
-    world_config: Res<WorldConfig>,
+    world_config: Res<ActiveWorld>,
     mut query: Query<&mut Transform, With<Player>>,
 ) {
     let world_w = world_config.world_pixel_width();

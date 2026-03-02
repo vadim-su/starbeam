@@ -8,7 +8,7 @@ use crate::player::{Grounded, Player, Velocity};
 use crate::registry::biome::BiomeRegistry;
 use crate::registry::tile::TileId;
 use crate::registry::tile::TileRegistry;
-use crate::registry::world::WorldConfig;
+use crate::registry::world::ActiveWorld;
 use crate::registry::BiomeParallaxConfigs;
 use crate::world::chunk::{tile_to_chunk, tile_to_local, world_to_tile, LoadedChunks, WorldMap};
 use crate::world::day_night::WorldTime;
@@ -39,7 +39,7 @@ pub fn draw_debug_panel(
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
     // World
     world_map: Res<WorldMap>,
-    world_config: Res<WorldConfig>,
+    world_config: Res<ActiveWorld>,
     tile_registry: Res<TileRegistry>,
     loaded_chunks: Res<LoadedChunks>,
     // Performance

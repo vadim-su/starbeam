@@ -2,14 +2,14 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
 use crate::player::Player;
-use crate::registry::world::WorldConfig;
+use crate::registry::world::ActiveWorld;
 
 #[allow(clippy::type_complexity)]
 pub fn camera_follow_player(
     player_query: Query<&Transform, (With<Player>, Without<Camera2d>)>,
     mut camera_query: Query<(&mut Transform, &Projection), (With<Camera2d>, Without<Player>)>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    world_config: Res<WorldConfig>,
+    world_config: Res<ActiveWorld>,
 ) {
     let Ok(player_transform) = player_query.single() else {
         return;

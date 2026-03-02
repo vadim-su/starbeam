@@ -5,7 +5,7 @@ use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
 
 use super::assets::{
-    BiomeAsset, CharacterDefAsset, ObjectRegistryAsset, ParallaxConfigAsset, PlanetTypeAsset,
+    BiomeAsset, CharacterDefAsset, ObjectDefAsset, ParallaxConfigAsset, PlanetTypeAsset,
     TileRegistryAsset, WorldConfigAsset,
 };
 use super::biome::{
@@ -13,7 +13,7 @@ use super::biome::{
 };
 use super::player::PlayerConfig;
 use super::tile::TileRegistry;
-use super::world::WorldConfig;
+use super::world::ActiveWorld;
 use super::{BiomeParallaxConfigs, RegistryHandles};
 use crate::object::registry::ObjectRegistry;
 
@@ -61,7 +61,7 @@ pub(crate) fn hot_reload_world(
     mut events: MessageReader<AssetEvent<WorldConfigAsset>>,
     handles: Res<RegistryHandles>,
     assets: Res<Assets<WorldConfigAsset>>,
-    mut config: ResMut<WorldConfig>,
+    mut config: ResMut<ActiveWorld>,
     mut noise_cache: ResMut<TerrainNoiseCache>,
 ) {
     for event in events.read() {
@@ -77,7 +77,7 @@ pub(crate) fn hot_reload_world(
             config.seed = asset.seed;
             config.planet_type = asset.planet_type.clone();
             *noise_cache = TerrainNoiseCache::new(asset.seed);
-            info!("Hot-reloaded WorldConfig + TerrainNoiseCache");
+            info!("Hot-reloaded ActiveWorld + TerrainNoiseCache");
         }
     }
 }
@@ -100,22 +100,36 @@ pub(crate) fn hot_reload_tiles(
 }
 
 pub(crate) fn hot_reload_objects(
-    mut events: MessageReader<AssetEvent<ObjectRegistryAsset>>,
+    mut events: MessageReader<AssetEvent<ObjectDefAsset>>,
     handles: Res<RegistryHandles>,
-    assets: Res<Assets<ObjectRegistryAsset>>,
+    assets: Res<Assets<ObjectDefAsset>>,
     mut registry: ResMut<ObjectRegistry>,
 ) {
+    let mut changed = false;
     for event in events.read() {
         if let AssetEvent::Modified { id } = event
-            && *id == handles.objects.id()
-            && let Some(asset) = assets.get(&handles.objects)
+            && handles.objects.iter().any(|(_, h)| *id == h.id())
         {
-            *registry = ObjectRegistry::from_defs(asset.objects.clone());
-            info!(
-                "Hot-reloaded ObjectRegistry ({} objects)",
-                asset.objects.len()
-            );
+            changed = true;
         }
+    }
+    if !changed {
+        return;
+    }
+    // Rebuild entire registry from all individual object assets (preserves ordering)
+    let defs: Vec<_> = handles
+        .objects
+        .iter()
+        .filter_map(|(base_path, handle)| {
+            assets.get(handle).map(|a| a.to_object_def(base_path))
+        })
+        .collect();
+    if defs.len() == handles.objects.len() {
+        *registry = ObjectRegistry::from_defs(defs);
+        info!(
+            "Hot-reloaded ObjectRegistry ({} objects)",
+            registry.len()
+        );
     }
 }
 
@@ -157,7 +171,7 @@ pub(crate) fn hot_reload_planet_type(
     mut events: MessageReader<AssetEvent<PlanetTypeAsset>>,
     handles: Res<BiomeHandles>,
     planet_assets: Res<Assets<PlanetTypeAsset>>,
-    world_config: Res<WorldConfig>,
+    world_config: Res<ActiveWorld>,
     biome_registry: Res<BiomeRegistry>,
     mut planet_config: ResMut<PlanetConfig>,
     mut biome_map: ResMut<BiomeMap>,

@@ -3,7 +3,7 @@ use noise::{NoiseFn, Perlin};
 
 use crate::registry::biome::WorldLayer;
 use crate::registry::tile::TileId;
-use crate::registry::world::WorldConfig;
+use crate::registry::world::ActiveWorld;
 use crate::world::ctx::WorldCtxRef;
 
 const SURFACE_BASE: f64 = 0.7;
@@ -27,7 +27,7 @@ impl TerrainNoiseCache {
 pub fn surface_height(
     noise: &TerrainNoiseCache,
     tile_x: i32,
-    wc: &WorldConfig,
+    wc: &ActiveWorld,
     frequency: f64,
     amplitude: f64,
 ) -> i32 {

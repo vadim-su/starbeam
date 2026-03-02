@@ -7,9 +7,8 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use super::assets::{
-    AnimationDef, AutotileAsset, BiomeAsset, CharacterDefAsset, ItemDefAsset,
-    ObjectRegistryAsset, ParallaxConfigAsset, PlanetTypeAsset, TileRegistryAsset,
-    WorldConfigAsset,
+    AnimationDef, AutotileAsset, BiomeAsset, CharacterDefAsset, ItemDefAsset, ObjectDefAsset,
+    ParallaxConfigAsset, PlanetTypeAsset, TileRegistryAsset, WorldConfigAsset,
 };
 use super::biome::{
     BiomeDef, BiomeId, BiomeRegistry, LayerBoundaries, LayerConfig, LayerConfigs, PlanetConfig,
@@ -17,10 +16,12 @@ use super::biome::{
 use super::hot_reload::BiomeHandles;
 use super::player::PlayerConfig;
 use super::tile::TileRegistry;
-use super::world::WorldConfig;
+use super::world::ActiveWorld;
 use super::{AppState, BiomeParallaxConfigs, RegistryHandles};
+use crate::cosmos::address::{CelestialAddress, CelestialSeeds};
 use crate::item::definition::ItemDef;
 use crate::item::registry::ItemRegistry;
+use crate::object::definition::ObjectDef;
 use crate::object::registry::ObjectRegistry;
 
 use crate::parallax::config::ParallaxConfig;
@@ -34,7 +35,7 @@ use crate::world::tile_renderer::{SharedTileMaterial, TileMaterial};
 #[derive(Resource)]
 pub(crate) struct LoadingAssets {
     tiles: Handle<TileRegistryAsset>,
-    objects: Handle<ObjectRegistryAsset>,
+    objects: Vec<(String, Handle<ObjectDefAsset>)>,
     character: Handle<CharacterDefAsset>,
     world_config: Handle<WorldConfigAsset>,
     items: Vec<(String, Handle<ItemDefAsset>)>,
@@ -66,10 +67,32 @@ pub struct CharacterAnimConfig {
 
 pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServer>) {
     let tiles = asset_server.load::<TileRegistryAsset>("world/tiles.registry.ron");
-    let objects = asset_server.load::<ObjectRegistryAsset>("world/objects.objects.ron");
     let character = asset_server
         .load::<CharacterDefAsset>("content/characters/adventurer/adventurer.character.ron");
     let world_config = asset_server.load::<WorldConfigAsset>("world/world.config.ron");
+
+    // Load object definitions from individual *.object.ron files.
+    // "none" MUST be first — ObjectId(0) == ObjectId::NONE.
+    let objects = vec![
+        (
+            "content/objects/none/".to_string(),
+            asset_server.load::<ObjectDefAsset>("content/objects/none/none.object.ron"),
+        ),
+        (
+            "content/objects/torch/".to_string(),
+            asset_server.load::<ObjectDefAsset>("content/objects/torch/torch.object.ron"),
+        ),
+        (
+            "content/objects/wooden_chest/".to_string(),
+            asset_server
+                .load::<ObjectDefAsset>("content/objects/wooden_chest/wooden_chest.object.ron"),
+        ),
+        (
+            "content/objects/wooden_table/".to_string(),
+            asset_server
+                .load::<ObjectDefAsset>("content/objects/wooden_table/wooden_table.object.ron"),
+        ),
+    ];
 
     // Load item definitions from individual *.item.ron files
     let items = vec![
@@ -105,20 +128,28 @@ pub(crate) fn check_loading(
     loading: Res<LoadingAssets>,
     asset_server: Res<AssetServer>,
     tile_assets: Res<Assets<TileRegistryAsset>>,
-    object_assets: Res<Assets<ObjectRegistryAsset>>,
+    object_assets: Res<Assets<ObjectDefAsset>>,
     character_assets: Res<Assets<CharacterDefAsset>>,
     world_assets: Res<Assets<WorldConfigAsset>>,
     item_assets: Res<Assets<ItemDefAsset>>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
-    let (Some(tiles), Some(objects), Some(character), Some(world_cfg)) = (
+    let (Some(tiles), Some(character), Some(world_cfg)) = (
         tile_assets.get(&loading.tiles),
-        object_assets.get(&loading.objects),
         character_assets.get(&loading.character),
         world_assets.get(&loading.world_config),
     ) else {
         return; // not loaded yet
     };
+
+    // Wait for all object assets to load
+    let all_objects_loaded = loading
+        .objects
+        .iter()
+        .all(|(_, h)| object_assets.contains(h));
+    if !all_objects_loaded {
+        return;
+    }
 
     // Wait for all item assets to load
     let all_items_loaded = loading
@@ -128,6 +159,17 @@ pub(crate) fn check_loading(
     if !all_items_loaded {
         return;
     }
+
+    // Build ObjectRegistry from loaded object.ron files (order preserved from start_loading)
+    let object_defs: Vec<ObjectDef> = loading
+        .objects
+        .iter()
+        .filter_map(|(base_path, handle)| {
+            object_assets
+                .get(handle)
+                .map(|asset| asset.to_object_def(base_path))
+        })
+        .collect();
 
     // Build ItemRegistry from loaded item.ron files
     let item_defs: Vec<ItemDef> = loading
@@ -144,7 +186,7 @@ pub(crate) fn check_loading(
     // Build resources from loaded assets
     let registry_ref = TileRegistry::from_defs(tiles.tiles.clone());
     commands.insert_resource(registry_ref);
-    commands.insert_resource(ObjectRegistry::from_defs(objects.objects.clone()));
+    commands.insert_resource(ObjectRegistry::from_defs(object_defs));
     commands.insert_resource(PlayerConfig {
         speed: character.speed,
         jump_velocity: character.jump_velocity,
@@ -163,7 +205,16 @@ pub(crate) fn check_loading(
         base_path: "content/characters/adventurer/".to_string(),
     });
 
-    commands.insert_resource(WorldConfig {
+    let address = CelestialAddress {
+        galaxy: IVec2::ZERO,
+        system: IVec2::ZERO,
+        orbit: 0,
+        satellite: None,
+    };
+    let seeds = CelestialSeeds::derive(world_cfg.seed as u64, &address);
+    commands.insert_resource(ActiveWorld {
+        address,
+        seeds,
         width_tiles: world_cfg.width_tiles,
         height_tiles: world_cfg.height_tiles,
         chunk_size: world_cfg.chunk_size,
@@ -209,7 +260,7 @@ pub(crate) fn check_biomes_loaded(
     biome_assets: Res<Assets<BiomeAsset>>,
     parallax_assets: Res<Assets<ParallaxConfigAsset>>,
     tile_registry: Res<TileRegistry>,
-    world_config: Res<WorldConfig>,
+    world_config: Res<ActiveWorld>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
     // Check for planet type load failure

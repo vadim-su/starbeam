@@ -6,7 +6,7 @@ use crate::registry::assets::{AutotileAsset, SpriteVariant};
 
 /// Chunk dimensions in tiles. Must match `chunk_size` in `world.config.ron`.
 /// Used only for buffer pre-allocation capacity; actual chunk iteration uses
-/// `WorldConfig.chunk_size` at runtime.
+/// `ActiveWorld.chunk_size` at runtime.
 pub const CHUNK_SIZE: u32 = 32;
 /// Total tiles per chunk (CHUNK_SIZE²). Used for buffer pre-allocation.
 pub const CHUNK_TILE_COUNT: usize = (CHUNK_SIZE * CHUNK_SIZE) as usize;

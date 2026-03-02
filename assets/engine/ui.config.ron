@@ -19,13 +19,13 @@
         slots: 6,
         slot_size: 48.0,
         gap: 4.0,
-        anchor: "BottomCenter",
+        anchor: "TopCenter",
         margin_bottom: 16.0,
         border_width: 2.0,
     ),
 
     inventory_screen: (
-        anchor: "Center",
+        anchor: "BottomCenter",
         width: 400.0,
         height: 320.0,
         padding: 16.0,
