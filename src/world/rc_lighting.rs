@@ -475,9 +475,9 @@ fn extract_lighting_data(
             }
         }
 
-        // Rebuild density + albedo from flat grids
-        input.density.fill(0);
-        input.albedo.fill([0, 0, 0, 0]);
+        // Rebuild density + albedo from flat grids (single pass, no fill).
+        // Every element is written — solid tiles get opacity/albedo,
+        // air tiles get explicit zeros.
         for idx in 0..total {
             let fg_id = cache.fg[idx];
             if tile_registry.is_solid(fg_id) {
@@ -485,6 +485,9 @@ fn extract_lighting_data(
                 input.density[idx] = (opacity as f32 / 15.0 * 255.0) as u8;
                 let albedo = tile_registry.albedo(fg_id);
                 input.albedo[idx] = [albedo[0], albedo[1], albedo[2], 255];
+            } else {
+                input.density[idx] = 0;
+                input.albedo[idx] = [0, 0, 0, 0];
             }
         }
 
