@@ -1,8 +1,11 @@
+use std::collections::HashSet;
+
 use bevy::prelude::*;
 
 use crate::fluid::cell::{FluidCell, FluidId};
 use crate::fluid::registry::FluidRegistry;
 use crate::registry::tile::{TileId, TileRegistry};
+use crate::world::chunk::WorldMap;
 
 /// Normal full-cell mass.
 pub const MAX_MASS: f32 = 1.0;
@@ -60,6 +63,7 @@ pub fn get_stable_state(total_mass: f32, max_compress: f32) -> f32 {
 ///
 /// This function processes a single chunk. For cross-chunk flow,
 /// the caller must handle boundary cells separately.
+#[allow(clippy::too_many_arguments)]
 pub fn simulate_grid(
     tiles: &[TileId],
     fluids: &[FluidCell],
@@ -212,6 +216,7 @@ pub fn simulate_grid(
 /// For primary direction: uses get_stable_state to determine target.
 /// For decompression: only flows if mass > MAX_MASS.
 /// Returns remaining mass.
+#[allow(clippy::too_many_arguments)]
 fn try_flow_vertical(
     x: u32,
     y: u32,
@@ -255,20 +260,19 @@ fn try_flow_vertical(
     let neighbor_mass = new_fluids[nidx].mass;
     let total = remaining + neighbor_mass;
 
-    let flow;
-    if is_primary {
+    let flow = if is_primary {
         // Primary direction: use get_stable_state to determine how much
         // should be in the "lower" cell (the one fluid flows toward).
         let target_in_neighbor = get_stable_state(total, max_compress);
-        flow = target_in_neighbor - neighbor_mass;
+        target_in_neighbor - neighbor_mass
     } else {
         // Decompression: only compressed fluid flows in this direction
         if remaining <= MAX_MASS {
             return remaining;
         }
         let target_stay = get_stable_state(total, max_compress);
-        flow = remaining - target_stay;
-    }
+        remaining - target_stay
+    };
 
     if flow <= 0.0 {
         return remaining;
@@ -297,6 +301,7 @@ fn try_flow_vertical(
 
 /// Try to flow horizontally (left and right).
 /// Returns remaining mass.
+#[allow(clippy::too_many_arguments)]
 fn try_flow_horizontal(
     x: u32,
     y: u32,
@@ -356,6 +361,7 @@ fn try_flow_horizontal(
 
 /// Try to flow to a single horizontal neighbor.
 /// Uses equalization: flow = (original_mass - neighbor_mass) / 4.
+#[allow(clippy::too_many_arguments)]
 fn try_flow_side(
     _x: u32,
     y: u32,
@@ -408,6 +414,336 @@ fn try_flow_side(
     }
 
     remaining - flow
+}
+
+// ---------------------------------------------------------------------------
+// Cross-chunk boundary reconciliation
+// ---------------------------------------------------------------------------
+
+/// After running `simulate_grid` on each chunk in isolation, this function
+/// transfers fluid across chunk boundaries.
+///
+/// For every pair of horizontally or vertically adjacent active chunks, we
+/// look at the edge cells and let fluid equalize using the same rules as
+/// `try_flow_side` / `try_flow_vertical`.
+///
+/// `width_chunks` is the number of chunks along the X axis (for wrapping).
+/// `height_chunks` is the number of chunks along the Y axis.
+/// Pass `width_chunks > 0` to enable horizontal wrapping.
+pub fn reconcile_chunk_boundaries(
+    world_map: &mut WorldMap,
+    active_chunks: &HashSet<(i32, i32)>,
+    chunk_size: u32,
+    width_chunks: i32,
+    height_chunks: i32,
+    tile_registry: &TileRegistry,
+    fluid_registry: &FluidRegistry,
+    config: &FluidSimConfig,
+) {
+    // Collect transfers: Vec<(chunk_a, idx_a, chunk_b, idx_b, flow, fluid_id)>
+    // We accumulate them first, then apply, to avoid borrow conflicts.
+    let mut transfers: Vec<((i32, i32), usize, (i32, i32), usize, f32, FluidId)> = Vec::new();
+
+    // Track processed boundary pairs to avoid double-processing when both
+    // chunks in a pair are active.
+    let mut processed: HashSet<((i32, i32), (i32, i32))> = HashSet::new();
+
+    for &(cx, cy) in active_chunks {
+        let Some(chunk) = world_map.chunks.get(&(cx, cy)) else {
+            continue;
+        };
+
+        // --- Horizontal neighbors (left and right) ---
+        for dx in [-1_i32, 1] {
+            let ncx = if width_chunks > 0 {
+                (cx + dx).rem_euclid(width_chunks)
+            } else {
+                cx + dx
+            };
+
+            // Directed key: (left_chunk, right_chunk) to deduplicate.
+            // In a wrapping world, (A-right↔B-left) and (B-right↔A-left)
+            // are distinct physical boundaries, so we must NOT canonicalize.
+            let (left_cx, right_cx) = if dx == 1 { (cx, ncx) } else { (ncx, cx) };
+            let key = ((left_cx, cy), (right_cx, cy));
+            if !processed.insert(key) {
+                continue;
+            }
+
+            if !world_map.chunks.contains_key(&(ncx, cy)) {
+                continue;
+            }
+
+            // left_cx/right_cx already computed above for the dedup key.
+            // Left chunk's right edge (local_x = chunk_size-1) <-> Right chunk's left edge (local_x = 0)
+            let left_chunk = world_map.chunks.get(&(left_cx, cy)).unwrap();
+            let right_chunk = world_map.chunks.get(&(right_cx, cy)).unwrap();
+
+            for local_y in 0..chunk_size {
+                let idx_left = (local_y * chunk_size + (chunk_size - 1)) as usize;
+                let idx_right = (local_y * chunk_size) as usize;
+
+                collect_horizontal_transfer(
+                    &left_chunk.fluids,
+                    &left_chunk.fg.tiles,
+                    idx_left,
+                    (left_cx, cy),
+                    right_chunk,
+                    idx_right,
+                    (right_cx, cy),
+                    tile_registry,
+                    fluid_registry,
+                    config,
+                    &mut transfers,
+                );
+            }
+        }
+
+        // --- Vertical neighbors (bottom and top) ---
+        for dy in [-1_i32, 1] {
+            let ncy = cy + dy;
+            if ncy < 0 || ncy >= height_chunks {
+                continue;
+            }
+
+            // Directed key: (bottom_chunk, top_chunk) to deduplicate.
+            let (bottom_cy, top_cy) = if dy == 1 {
+                (cy, ncy) // current is bottom, neighbor is top
+            } else {
+                (ncy, cy) // neighbor is bottom, current is top
+            };
+            let key = ((cx, bottom_cy), (cx, top_cy));
+            if !processed.insert(key) {
+                continue;
+            }
+
+            if !world_map.chunks.contains_key(&(cx, ncy)) {
+                continue;
+            }
+
+            let bottom_chunk = world_map.chunks.get(&(cx, bottom_cy)).unwrap();
+            let top_chunk = world_map.chunks.get(&(cx, top_cy)).unwrap();
+
+            for local_x in 0..chunk_size {
+                let idx_bottom = ((chunk_size - 1) * chunk_size + local_x) as usize;
+                let idx_top = local_x as usize;
+
+                collect_vertical_transfer(
+                    &bottom_chunk.fluids,
+                    &bottom_chunk.fg.tiles,
+                    idx_bottom,
+                    (cx, bottom_cy),
+                    top_chunk,
+                    idx_top,
+                    (cx, top_cy),
+                    tile_registry,
+                    fluid_registry,
+                    config,
+                    &mut transfers,
+                );
+            }
+        }
+    }
+
+    // Apply all transfers
+    for (chunk_a, idx_a, chunk_b, idx_b, flow, fluid_id) in transfers {
+        if let Some(ca) = world_map.chunks.get_mut(&chunk_a) {
+            ca.fluids[idx_a].mass -= flow;
+            if ca.fluids[idx_a].mass < config.min_mass {
+                ca.fluids[idx_a] = FluidCell::EMPTY;
+            }
+        }
+        if let Some(cb) = world_map.chunks.get_mut(&chunk_b) {
+            cb.fluids[idx_b].mass += flow;
+            if cb.fluids[idx_b].fluid_id == FluidId::NONE {
+                cb.fluids[idx_b].fluid_id = fluid_id;
+            }
+        }
+    }
+}
+
+/// Collect a horizontal (left↔right) transfer between two edge cells in adjacent chunks.
+#[allow(clippy::too_many_arguments)]
+fn collect_horizontal_transfer(
+    src_fluids: &[FluidCell],
+    src_tiles: &[TileId],
+    idx_src: usize,
+    chunk_src: (i32, i32),
+    dst_chunk: &crate::world::chunk::ChunkData,
+    idx_dst: usize,
+    chunk_dst: (i32, i32),
+    tile_registry: &TileRegistry,
+    _fluid_registry: &FluidRegistry,
+    config: &FluidSimConfig,
+    transfers: &mut Vec<((i32, i32), usize, (i32, i32), usize, f32, FluidId)>,
+) {
+    let cell_a = src_fluids[idx_src];
+    let cell_b = dst_chunk.fluids[idx_dst];
+
+    // Skip if source is empty
+    if cell_a.is_empty() && cell_b.is_empty() {
+        return;
+    }
+
+    // Skip if destination tile is solid
+    if !cell_a.is_empty() && tile_registry.is_solid(dst_chunk.fg.tiles[idx_dst]) {
+        // a -> b blocked
+    } else if !cell_a.is_empty() && (cell_b.is_empty() || cell_b.fluid_id == cell_a.fluid_id) {
+        let flow = (cell_a.mass - cell_b.mass) / 4.0;
+        if flow > config.min_flow {
+            let flow = (flow * 0.5).min(config.max_speed).min(cell_a.mass);
+            if flow > 0.0 {
+                transfers.push((
+                    chunk_src,
+                    idx_src,
+                    chunk_dst,
+                    idx_dst,
+                    flow,
+                    cell_a.fluid_id,
+                ));
+            }
+        }
+    }
+
+    // Reverse direction: b -> a
+    if !cell_b.is_empty() && tile_registry.is_solid(src_tiles[idx_src]) {
+        // b -> a blocked
+    } else if !cell_b.is_empty() && (cell_a.is_empty() || cell_a.fluid_id == cell_b.fluid_id) {
+        let flow = (cell_b.mass - cell_a.mass) / 4.0;
+        if flow > config.min_flow {
+            let flow = (flow * 0.5).min(config.max_speed).min(cell_b.mass);
+            if flow > 0.0 {
+                transfers.push((
+                    chunk_dst,
+                    idx_dst,
+                    chunk_src,
+                    idx_src,
+                    flow,
+                    cell_b.fluid_id,
+                ));
+            }
+        }
+    }
+}
+
+/// Collect a vertical (bottom↔top) transfer between two edge cells in adjacent chunks.
+/// `chunk_src` is the bottom chunk, `chunk_dst` is the top chunk.
+#[allow(clippy::too_many_arguments)]
+fn collect_vertical_transfer(
+    src_fluids: &[FluidCell],
+    src_tiles: &[TileId],
+    idx_src: usize,
+    chunk_src: (i32, i32),
+    dst_chunk: &crate::world::chunk::ChunkData,
+    idx_dst: usize,
+    chunk_dst: (i32, i32),
+    tile_registry: &TileRegistry,
+    fluid_registry: &FluidRegistry,
+    config: &FluidSimConfig,
+    transfers: &mut Vec<((i32, i32), usize, (i32, i32), usize, f32, FluidId)>,
+) {
+    let cell_bottom = src_fluids[idx_src]; // top row of bottom chunk
+    let cell_top = dst_chunk.fluids[idx_dst]; // bottom row of top chunk
+
+    // Liquid falls down: top -> bottom (primary)
+    if !cell_top.is_empty() && !tile_registry.is_solid(src_tiles[idx_src]) {
+        let def = fluid_registry.get(cell_top.fluid_id);
+        if !def.is_gas {
+            // Liquid in top chunk wants to fall into bottom chunk
+            if cell_bottom.is_empty() || cell_bottom.fluid_id == cell_top.fluid_id {
+                let neighbor_mass = cell_bottom.mass;
+                let total = cell_top.mass + neighbor_mass;
+                let target_bottom = get_stable_state(total, def.max_compress);
+                let flow = (target_bottom - neighbor_mass).max(0.0);
+                if flow > config.min_flow {
+                    let flow = (flow * 0.5).min(config.max_speed).min(cell_top.mass);
+                    if flow > 0.0 {
+                        transfers.push((
+                            chunk_dst,
+                            idx_dst,
+                            chunk_src,
+                            idx_src,
+                            flow,
+                            cell_top.fluid_id,
+                        ));
+                    }
+                }
+            }
+        } else {
+            // Gas in top chunk: decompression downward (only if compressed)
+            if cell_top.mass > MAX_MASS
+                && (cell_bottom.is_empty() || cell_bottom.fluid_id == cell_top.fluid_id)
+            {
+                let neighbor_mass = cell_bottom.mass;
+                let total = cell_top.mass + neighbor_mass;
+                let target_stay = get_stable_state(total, def.max_compress);
+                let flow = (cell_top.mass - target_stay).max(0.0);
+                if flow > config.min_flow {
+                    let flow = (flow * 0.5).min(config.max_speed).min(cell_top.mass);
+                    if flow > 0.0 {
+                        transfers.push((
+                            chunk_dst,
+                            idx_dst,
+                            chunk_src,
+                            idx_src,
+                            flow,
+                            cell_top.fluid_id,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // Gas rises up: bottom -> top (primary)
+    if !cell_bottom.is_empty() && !tile_registry.is_solid(dst_chunk.fg.tiles[idx_dst]) {
+        let def = fluid_registry.get(cell_bottom.fluid_id);
+        if def.is_gas {
+            // Gas in bottom chunk wants to rise into top chunk
+            if cell_top.is_empty() || cell_top.fluid_id == cell_bottom.fluid_id {
+                let neighbor_mass = cell_top.mass;
+                let total = cell_bottom.mass + neighbor_mass;
+                let target_top = get_stable_state(total, def.max_compress);
+                let flow = (target_top - neighbor_mass).max(0.0);
+                if flow > config.min_flow {
+                    let flow = (flow * 0.5).min(config.max_speed).min(cell_bottom.mass);
+                    if flow > 0.0 {
+                        transfers.push((
+                            chunk_src,
+                            idx_src,
+                            chunk_dst,
+                            idx_dst,
+                            flow,
+                            cell_bottom.fluid_id,
+                        ));
+                    }
+                }
+            }
+        } else {
+            // Liquid decompression upward (only if compressed)
+            if cell_bottom.mass > MAX_MASS
+                && (cell_top.is_empty() || cell_top.fluid_id == cell_bottom.fluid_id)
+            {
+                let neighbor_mass = cell_top.mass;
+                let total = cell_bottom.mass + neighbor_mass;
+                let target_stay = get_stable_state(total, def.max_compress);
+                let flow = (cell_bottom.mass - target_stay).max(0.0);
+                if flow > config.min_flow {
+                    let flow = (flow * 0.5).min(config.max_speed).min(cell_bottom.mass);
+                    if flow > 0.0 {
+                        transfers.push((
+                            chunk_src,
+                            idx_src,
+                            chunk_dst,
+                            idx_dst,
+                            flow,
+                            cell_bottom.fluid_id,
+                        ));
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -704,6 +1040,350 @@ mod tests {
         assert!(
             (initial_mass - final_mass).abs() < 0.01,
             "Mass should be conserved: initial={initial_mass}, final={final_mass}"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Cross-chunk boundary tests
+    // ---------------------------------------------------------------
+
+    use crate::world::chunk::{ChunkData, TileLayer};
+
+    /// Helper: create a minimal ChunkData with all-air tiles and empty fluids.
+    fn make_chunk(chunk_size: u32) -> ChunkData {
+        let len = (chunk_size * chunk_size) as usize;
+        ChunkData {
+            fg: TileLayer::new_air(len),
+            bg: TileLayer::new_air(len),
+            fluids: vec![FluidCell::EMPTY; len],
+            objects: Vec::new(),
+            occupancy: vec![None; len],
+            damage: vec![0; len],
+        }
+    }
+
+    #[test]
+    fn water_flows_horizontally_across_chunk_boundary() {
+        let tr = test_tile_registry();
+        let fr = test_fluid_registry();
+        let config = FluidSimConfig::default();
+        let water_id = fr.by_name("water");
+        let cs: u32 = 4; // small chunk for testing
+
+        // Two horizontally adjacent chunks: (0,0) and (1,0)
+        let mut world_map = WorldMap::default();
+        let mut chunk_a = make_chunk(cs);
+        let chunk_b = make_chunk(cs);
+
+        // Place water at right edge of chunk A (local_x = 3, local_y = 1)
+        chunk_a.fluids[idx(cs - 1, 1, cs)] = FluidCell::new(water_id, 1.0);
+
+        world_map.chunks.insert((0, 0), chunk_a);
+        world_map.chunks.insert((1, 0), chunk_b);
+
+        let mut active = HashSet::new();
+        active.insert((0, 0));
+        active.insert((1, 0));
+
+        // Run reconciliation several times
+        for _ in 0..20 {
+            reconcile_chunk_boundaries(
+                &mut world_map,
+                &active,
+                cs,
+                2, // width_chunks
+                1, // height_chunks
+                &tr,
+                &fr,
+                &config,
+            );
+        }
+
+        // Water should have flowed to the left edge of chunk B (local_x = 0, local_y = 1)
+        let chunk_b = world_map.chunks.get(&(1, 0)).unwrap();
+        assert!(
+            chunk_b.fluids[idx(0, 1, cs)].mass > 0.0,
+            "Water should flow from right edge of chunk A to left edge of chunk B, got mass={}",
+            chunk_b.fluids[idx(0, 1, cs)].mass,
+        );
+        assert_eq!(
+            chunk_b.fluids[idx(0, 1, cs)].fluid_id,
+            water_id,
+            "Transferred fluid should be water"
+        );
+    }
+
+    #[test]
+    fn water_falls_down_across_chunk_boundary() {
+        let tr = test_tile_registry();
+        let fr = test_fluid_registry();
+        let config = FluidSimConfig::default();
+        let water_id = fr.by_name("water");
+        let cs: u32 = 4;
+
+        // Two vertically adjacent chunks: (0,0) bottom, (0,1) top
+        let mut world_map = WorldMap::default();
+        let chunk_bottom = make_chunk(cs);
+        let mut chunk_top = make_chunk(cs);
+
+        // Place water at bottom edge of top chunk (local_y = 0, local_x = 2)
+        chunk_top.fluids[idx(2, 0, cs)] = FluidCell::new(water_id, 1.0);
+
+        world_map.chunks.insert((0, 0), chunk_bottom);
+        world_map.chunks.insert((0, 1), chunk_top);
+
+        let mut active = HashSet::new();
+        active.insert((0, 0));
+        active.insert((0, 1));
+
+        for _ in 0..20 {
+            reconcile_chunk_boundaries(&mut world_map, &active, cs, 1, 2, &tr, &fr, &config);
+        }
+
+        // Water should have fallen to top edge of bottom chunk (local_y = chunk_size-1, local_x = 2)
+        let chunk_bottom = world_map.chunks.get(&(0, 0)).unwrap();
+        assert!(
+            chunk_bottom.fluids[idx(2, cs - 1, cs)].mass > 0.0,
+            "Water should fall from bottom of top chunk to top of bottom chunk, got mass={}",
+            chunk_bottom.fluids[idx(2, cs - 1, cs)].mass,
+        );
+    }
+
+    #[test]
+    fn gas_rises_across_chunk_boundary() {
+        let tr = test_tile_registry();
+        let fr = test_fluid_registry();
+        let config = FluidSimConfig::default();
+        let gas_id = fr.by_name("gas");
+        let cs: u32 = 4;
+
+        let mut world_map = WorldMap::default();
+        let mut chunk_bottom = make_chunk(cs);
+        let chunk_top = make_chunk(cs);
+
+        // Place gas at top edge of bottom chunk (local_y = chunk_size-1, local_x = 2)
+        chunk_bottom.fluids[idx(2, cs - 1, cs)] = FluidCell::new(gas_id, 1.0);
+
+        world_map.chunks.insert((0, 0), chunk_bottom);
+        world_map.chunks.insert((0, 1), chunk_top);
+
+        let mut active = HashSet::new();
+        active.insert((0, 0));
+        active.insert((0, 1));
+
+        for _ in 0..20 {
+            reconcile_chunk_boundaries(&mut world_map, &active, cs, 1, 2, &tr, &fr, &config);
+        }
+
+        // Gas should have risen to bottom edge of top chunk (local_y = 0, local_x = 2)
+        let chunk_top = world_map.chunks.get(&(0, 1)).unwrap();
+        assert!(
+            chunk_top.fluids[idx(2, 0, cs)].mass > 0.0,
+            "Gas should rise from top of bottom chunk to bottom of top chunk, got mass={}",
+            chunk_top.fluids[idx(2, 0, cs)].mass,
+        );
+    }
+
+    #[test]
+    fn cross_chunk_mass_is_conserved() {
+        let tr = test_tile_registry();
+        let fr = test_fluid_registry();
+        let config = FluidSimConfig::default();
+        let water_id = fr.by_name("water");
+        let cs: u32 = 4;
+
+        let mut world_map = WorldMap::default();
+        let mut chunk_a = make_chunk(cs);
+        let chunk_b = make_chunk(cs);
+
+        // Place water at boundary
+        chunk_a.fluids[idx(cs - 1, 1, cs)] = FluidCell::new(water_id, 1.0);
+        chunk_a.fluids[idx(cs - 1, 2, cs)] = FluidCell::new(water_id, 0.7);
+
+        let initial_mass = 1.0 + 0.7;
+
+        world_map.chunks.insert((0, 0), chunk_a);
+        world_map.chunks.insert((1, 0), chunk_b);
+
+        let mut active = HashSet::new();
+        active.insert((0, 0));
+        active.insert((1, 0));
+
+        for _ in 0..50 {
+            reconcile_chunk_boundaries(&mut world_map, &active, cs, 2, 1, &tr, &fr, &config);
+        }
+
+        let final_mass: f32 = world_map
+            .chunks
+            .values()
+            .flat_map(|c| c.fluids.iter())
+            .map(|c| c.mass)
+            .sum();
+
+        assert!(
+            (initial_mass - final_mass).abs() < 0.01,
+            "Cross-chunk mass should be conserved: initial={initial_mass}, final={final_mass}"
+        );
+    }
+
+    #[test]
+    fn cross_chunk_water_blocked_by_solid() {
+        let tr = test_tile_registry();
+        let fr = test_fluid_registry();
+        let config = FluidSimConfig::default();
+        let water_id = fr.by_name("water");
+        let cs: u32 = 4;
+
+        let mut world_map = WorldMap::default();
+        let mut chunk_a = make_chunk(cs);
+        let mut chunk_b = make_chunk(cs);
+
+        // Water at right edge of chunk A
+        chunk_a.fluids[idx(cs - 1, 1, cs)] = FluidCell::new(water_id, 1.0);
+        // Solid wall at left edge of chunk B
+        chunk_b.fg.tiles[idx(0, 1, cs)] = TileId(3); // stone
+
+        world_map.chunks.insert((0, 0), chunk_a);
+        world_map.chunks.insert((1, 0), chunk_b);
+
+        let mut active = HashSet::new();
+        active.insert((0, 0));
+        active.insert((1, 0));
+
+        for _ in 0..20 {
+            reconcile_chunk_boundaries(&mut world_map, &active, cs, 2, 1, &tr, &fr, &config);
+        }
+
+        // Water should NOT enter solid cell
+        let chunk_b = world_map.chunks.get(&(1, 0)).unwrap();
+        assert!(
+            chunk_b.fluids[idx(0, 1, cs)].is_empty(),
+            "Water should not flow into solid tile across chunk boundary"
+        );
+        // Original water should remain
+        let chunk_a = world_map.chunks.get(&(0, 0)).unwrap();
+        assert!(
+            chunk_a.fluids[idx(cs - 1, 1, cs)].mass > 0.9,
+            "Water should remain at source since it's blocked"
+        );
+    }
+
+    #[test]
+    fn horizontal_wrap_around_chunks() {
+        let tr = test_tile_registry();
+        let fr = test_fluid_registry();
+        let config = FluidSimConfig::default();
+        let water_id = fr.by_name("water");
+        let cs: u32 = 4;
+
+        // World is 2 chunks wide — chunk 0 and chunk 1 wrap around
+        let mut world_map = WorldMap::default();
+        let mut chunk_last = make_chunk(cs);
+        let chunk_first = make_chunk(cs);
+
+        // Water at right edge of last chunk (chunk 1)
+        chunk_last.fluids[idx(cs - 1, 1, cs)] = FluidCell::new(water_id, 1.0);
+
+        world_map.chunks.insert((0, 0), chunk_first);
+        world_map.chunks.insert((1, 0), chunk_last);
+
+        let mut active = HashSet::new();
+        active.insert((0, 0));
+        active.insert((1, 0));
+
+        for _ in 0..20 {
+            reconcile_chunk_boundaries(
+                &mut world_map,
+                &active,
+                cs,
+                2, // width_chunks = 2, so chunk 1's right neighbor wraps to chunk 0
+                1,
+                &tr,
+                &fr,
+                &config,
+            );
+        }
+
+        // Water should have wrapped around to left edge of chunk 0
+        let chunk_first = world_map.chunks.get(&(0, 0)).unwrap();
+        assert!(
+            chunk_first.fluids[idx(0, 1, cs)].mass > 0.0,
+            "Water should wrap from right edge of last chunk to left edge of first chunk, got mass={}",
+            chunk_first.fluids[idx(0, 1, cs)].mass,
+        );
+    }
+
+    #[test]
+    fn water_on_left_edge_flows_left() {
+        // Bug regression: only right+top neighbors were checked.
+        // Water on the LEFT edge of an active chunk must also flow to its left neighbor.
+        let tr = test_tile_registry();
+        let fr = test_fluid_registry();
+        let config = FluidSimConfig::default();
+        let water_id = fr.by_name("water");
+        let cs: u32 = 4;
+
+        let mut world_map = WorldMap::default();
+        let chunk_left = make_chunk(cs);
+        let mut chunk_right = make_chunk(cs);
+
+        // Water at LEFT edge of chunk (1,0), only chunk (1,0) is active
+        chunk_right.fluids[idx(0, 1, cs)] = FluidCell::new(water_id, 1.0);
+
+        world_map.chunks.insert((0, 0), chunk_left);
+        world_map.chunks.insert((1, 0), chunk_right);
+
+        // Only the chunk with water is active
+        let mut active = HashSet::new();
+        active.insert((1, 0));
+
+        for _ in 0..20 {
+            reconcile_chunk_boundaries(&mut world_map, &active, cs, 2, 1, &tr, &fr, &config);
+        }
+
+        // Water should have flowed to right edge of chunk (0,0)
+        let chunk_left = world_map.chunks.get(&(0, 0)).unwrap();
+        assert!(
+            chunk_left.fluids[idx(cs - 1, 1, cs)].mass > 0.0,
+            "Water on left edge should flow to right edge of left neighbor, got mass={}",
+            chunk_left.fluids[idx(cs - 1, 1, cs)].mass,
+        );
+    }
+
+    #[test]
+    fn water_on_bottom_edge_falls_to_chunk_below() {
+        // Bug regression: only top neighbor was checked.
+        // Water on the BOTTOM edge of an active chunk must fall into the chunk below.
+        let tr = test_tile_registry();
+        let fr = test_fluid_registry();
+        let config = FluidSimConfig::default();
+        let water_id = fr.by_name("water");
+        let cs: u32 = 4;
+
+        let mut world_map = WorldMap::default();
+        let chunk_below = make_chunk(cs);
+        let mut chunk_above = make_chunk(cs);
+
+        // Water at bottom edge of chunk (0,1)
+        chunk_above.fluids[idx(2, 0, cs)] = FluidCell::new(water_id, 1.0);
+
+        world_map.chunks.insert((0, 0), chunk_below);
+        world_map.chunks.insert((0, 1), chunk_above);
+
+        // Only the chunk with water is active
+        let mut active = HashSet::new();
+        active.insert((0, 1));
+
+        for _ in 0..20 {
+            reconcile_chunk_boundaries(&mut world_map, &active, cs, 1, 2, &tr, &fr, &config);
+        }
+
+        // Water should have fallen to top edge of chunk (0,0)
+        let chunk_below = world_map.chunks.get(&(0, 0)).unwrap();
+        assert!(
+            chunk_below.fluids[idx(2, cs - 1, cs)].mass > 0.0,
+            "Water on bottom edge should fall to top edge of chunk below, got mass={}",
+            chunk_below.fluids[idx(2, cs - 1, cs)].mass,
         );
     }
 }
