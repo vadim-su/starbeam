@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 
+use crate::fluid::systems::{FluidMaterial, SharedFluidMaterial};
 use crate::object::definition::ObjectId;
 use crate::object::registry::ObjectRegistry;
 use crate::registry::tile::{TileId, TileRegistry};
@@ -691,8 +692,10 @@ fn update_tile_lightmap(
     gpu_images: Option<Res<rc_pipeline::RcGpuImages>>,
     config: Option<Res<RcLightingConfig>>,
     shared_material: Option<Res<SharedTileMaterial>>,
+    shared_fluid_material: Option<Res<SharedFluidMaterial>>,
     mut tile_materials: ResMut<Assets<TileMaterial>>,
     mut lit_sprite_materials: ResMut<Assets<LitSpriteMaterial>>,
+    mut fluid_materials: ResMut<Assets<FluidMaterial>>,
 ) {
     let (Some(gpu_images), Some(config), Some(shared_material)) =
         (gpu_images, config, shared_material)
@@ -733,6 +736,14 @@ fn update_tile_lightmap(
     for (_id, mat) in lit_sprite_materials.iter_mut() {
         mat.lightmap = gpu_images.lightmap.clone();
         mat.lightmap_uv_rect = lm_params;
+    }
+
+    // Update fluid material with current lightmap
+    if let Some(shared_fluid) = shared_fluid_material {
+        if let Some(mat) = fluid_materials.get_mut(&shared_fluid.handle) {
+            mat.lightmap = gpu_images.lightmap.clone();
+            mat.lightmap_uv_rect = lm_params;
+        }
     }
 }
 
