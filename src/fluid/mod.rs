@@ -9,6 +9,7 @@ pub mod registry;
 pub mod render;
 pub mod simulation;
 pub mod systems;
+pub mod wave;
 
 pub use cell::{FluidCell, FluidId};
 pub use events::{ImpactKind, WaterImpactEvent};
