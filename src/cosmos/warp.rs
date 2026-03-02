@@ -1,13 +1,19 @@
 //! Planet warp system — switches the active world to a different body in the
 //! current star system.
 //!
-//! Flow: `WarpToBody` event → clear world state → rebuild `ActiveWorld` +
-//! `DayNightConfig` → transition to `LoadingBiomes` to reload biome pipeline.
+//! Flow: `WarpToBody` event → save current world → clear world state → rebuild
+//! `ActiveWorld` + `DayNightConfig` → transition to `LoadingBiomes` to reload
+//! biome pipeline.
 
 use bevy::prelude::*;
 
 use crate::cosmos::address::CelestialSeeds;
 use crate::cosmos::current::CurrentSystem;
+use crate::cosmos::persistence::{
+    save_current_world, DirtyChunks, PendingDroppedItems, SavedDroppedItem, Universe,
+};
+use crate::item::DroppedItem;
+use crate::object::spawn::PlacedObjectEntity;
 use crate::parallax::spawn::{ParallaxLayerConfig, ParallaxTile};
 use crate::registry::world::ActiveWorld;
 use crate::registry::AppState;
@@ -42,8 +48,15 @@ pub fn handle_warp(
     parallax_tiles: Query<Entity, With<ParallaxTile>>,
     asset_server: Res<AssetServer>,
     mut next_state: ResMut<NextState<AppState>>,
-    mut rc_config: ResMut<RcLightingConfig>,
-    mut rc_input: ResMut<RcInputData>,
+    rc_state: (ResMut<RcLightingConfig>, ResMut<RcInputData>),
+    persistence: (ResMut<Universe>, Res<DirtyChunks>),
+    despawn_queries: (
+        Query<Entity, With<PlacedObjectEntity>>,
+        Query<Entity, With<DroppedItem>>,
+    ),
+    dropped_items_for_save: Query<(&DroppedItem, &Transform)>,
+    active_world: Option<Res<ActiveWorld>>,
+    time: Res<Time>,
 ) {
     let Some(warp) = warp_events.read().last() else {
         return;
@@ -67,6 +80,35 @@ pub fn handle_warp(
         body.height_tiles
     );
 
+    let (mut rc_config, mut rc_input) = rc_state;
+    let (mut universe, dirty_chunks) = persistence;
+    let (object_entity_query, dropped_entity_query) = despawn_queries;
+
+    // --- 0. SAVE current world ---
+    let game_time = time.elapsed_secs_f64();
+
+    if let Some(ref current_active) = active_world {
+        let dropped_items_to_save: Vec<SavedDroppedItem> = dropped_items_for_save
+            .iter()
+            .map(|(item, transform)| SavedDroppedItem {
+                item_id: item.item_id.clone(),
+                count: item.count,
+                x: transform.translation.x,
+                y: transform.translation.y,
+                remaining_secs: item.lifetime.remaining_secs(),
+            })
+            .collect();
+
+        save_current_world(
+            &mut universe,
+            &current_active.address,
+            &world_map,
+            &dirty_chunks,
+            dropped_items_to_save,
+            game_time,
+        );
+    }
+
     // --- 1. Despawn all chunk entities ---
     for entity in &chunk_entities {
         commands.entity(entity).despawn();
@@ -78,14 +120,48 @@ pub fn handle_warp(
     for entity in &parallax_entities {
         commands.entity(entity).despawn();
     }
+    // --- 3. Despawn object entities (BUG FIX: these survived warp before) ---
+    for entity in &object_entity_query {
+        commands.entity(entity).despawn();
+    }
+    // --- 4. Despawn dropped item entities ---
+    for entity in &dropped_entity_query {
+        commands.entity(entity).despawn();
+    }
 
-    // --- 3. Clear world data ---
+    // --- 5. Clear world data ---
     world_map.chunks.clear();
     loaded_chunks.map.clear();
 
-    // --- 4. Rebuild ActiveWorld ---
+    // --- 6. Compute pending dropped items for the destination world ---
+    let pending_items = if let Some(save) = universe.planets.get(&body.address) {
+        let elapsed = save
+            .left_at
+            .map(|t| (game_time - t) as f32)
+            .unwrap_or(0.0)
+            .max(0.0);
+        save.dropped_items
+            .iter()
+            .filter_map(|item| {
+                let remaining = item.remaining_secs - elapsed;
+                if remaining > 0.0 {
+                    Some(SavedDroppedItem {
+                        remaining_secs: remaining,
+                        ..item.clone()
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    commands.insert_resource(PendingDroppedItems(pending_items));
+
+    // --- 7. Rebuild ActiveWorld ---
     let seeds = CelestialSeeds::derive(current_system.universe_seed, &body.address);
-    let active_world = ActiveWorld {
+    let new_active_world = ActiveWorld {
         address: body.address.clone(),
         seeds: seeds.clone(),
         width_tiles: body.width_tiles,
@@ -96,16 +172,16 @@ pub fn handle_warp(
         seed: seeds.terrain_seed_u32(),
         planet_type: body.planet_type_id.clone(),
     };
-    commands.insert_resource(TerrainNoiseCache::new(active_world.seed));
-    commands.insert_resource(active_world);
+    commands.insert_resource(TerrainNoiseCache::new(new_active_world.seed));
+    commands.insert_resource(new_active_world);
 
-    // --- 5. Rebuild DayNightConfig + WorldTime ---
+    // --- 8. Rebuild DayNightConfig + WorldTime ---
     let day_night_config = body.day_night.clone();
     let wt = WorldTime::from_config(&day_night_config);
     commands.insert_resource(day_night_config);
     commands.insert_resource(wt);
 
-    // --- 6. Kick off biome loading for the new planet ---
+    // --- 9. Kick off biome loading for the new planet ---
     let planet_handle = asset_server.load::<crate::registry::assets::PlanetTypeAsset>(format!(
         "worlds/planet_types/{0}/{0}.planet.ron",
         body.planet_type_id
@@ -116,19 +192,14 @@ pub fn handle_warp(
         parallax_configs: Vec::new(),
     });
 
-    // --- 7. Reset RC lighting state ---
-    // Zero the input dimensions so the GPU compute node and prepare systems
-    // skip during loading (they check input_w/h != 0).  When InGame resumes,
-    // extract_lighting_data fills new dimensions and resize_gpu_textures
-    // recreates all textures (including fresh white lightmaps), eliminating
-    // stale lighting from the previous planet.
+    // --- 10. Reset RC lighting state ---
     *rc_config = RcLightingConfig::default();
     *rc_input = RcInputData::default();
 
-    // --- 8. Mark player for respawn on new world surface ---
+    // --- 11. Mark player for respawn on new world surface ---
     commands.insert_resource(NeedsRespawn);
 
-    // --- 9. Transition to LoadingBiomes state ---
+    // --- 12. Transition to LoadingBiomes state ---
     next_state.set(AppState::LoadingBiomes);
 
     info!(

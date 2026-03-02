@@ -4,12 +4,14 @@ use std::collections::HashSet;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::cosmos::persistence::{DirtyChunks, Universe};
+use crate::item::DroppedItem;
 use crate::object::definition::ObjectId;
 use crate::object::placed::{OccupancyRef, PlacedObject};
 use crate::object::plugin::ObjectSpriteMaterials;
 use crate::object::registry::ObjectRegistry;
 use crate::object::spawn::{
-    despawn_objects_for_chunk, spawn_objects_for_chunk, ObjectDisplayChunk,
+    despawn_objects_for_chunk, spawn_objects_for_chunk, ObjectDisplayChunk, PlacedObjectEntity,
 };
 use crate::registry::tile::{TileId, TileRegistry};
 use crate::registry::world::ActiveWorld;
@@ -488,7 +490,8 @@ pub fn despawn_chunk(
     }
 }
 
-/// Remove stale chunk data and entities left by the warp-frame race condition.
+/// Remove stale chunk data and entities left by the warp-frame race condition,
+/// then pre-populate WorldMap with saved dirty chunks from Universe.
 ///
 /// During the warp frame, `handle_warp` clears `world_map` and sets
 /// `next_state(LoadingBiomes)`, but the new `ActiveWorld` is inserted via
@@ -506,11 +509,34 @@ pub fn clear_stale_chunks(
     mut world_map: ResMut<WorldMap>,
     mut loaded_chunks: ResMut<LoadedChunks>,
     chunk_entities: Query<Entity, With<ChunkCoord>>,
+    object_entities: Query<Entity, With<PlacedObjectEntity>>,
+    dropped_entities: Query<Entity, With<DroppedItem>>,
+    universe: Option<Res<Universe>>,
+    active_world: Option<Res<ActiveWorld>>,
+    mut dirty_chunks: ResMut<DirtyChunks>,
 ) {
     world_map.chunks.clear();
     loaded_chunks.map.clear();
+    dirty_chunks.0.clear();
+
     for entity in &chunk_entities {
         commands.entity(entity).despawn();
+    }
+    for entity in &object_entities {
+        commands.entity(entity).despawn();
+    }
+    for entity in &dropped_entities {
+        commands.entity(entity).despawn();
+    }
+
+    // Pre-populate WorldMap with saved dirty chunks for the new world
+    if let (Some(universe), Some(active_world)) = (universe, active_world) {
+        if let Some(save) = universe.planets.get(&active_world.address) {
+            for (&coords, chunk_data) in &save.chunks {
+                world_map.chunks.insert(coords, chunk_data.clone());
+                dirty_chunks.0.insert(coords);
+            }
+        }
     }
 }
 
