@@ -111,12 +111,11 @@ fn compute_depth(
         }
     }
 
-    // When we hit a chunk boundary and the edge cell still has fluid,
-    // assume the fluid continues into the neighbor chunk. Use a mid-depth
-    // fallback so there's no harsh dark/light seam at chunk borders.
-    if hit_chunk_boundary && distance > 0 {
-        // Fluid extends to chunk edge — assume it keeps going.
-        // Clamp to at least half-depth to avoid a surface-like appearance.
+    // When we hit a chunk boundary, assume the fluid continues into the
+    // neighbor chunk. Use a mid-depth fallback so there's no bright seam
+    // at chunk borders. This applies even when distance == 0 (cell is at
+    // the very edge of the chunk and scan hits boundary immediately).
+    if hit_chunk_boundary {
         let min_depth = MAX_DEPTH_SCAN / 2;
         distance = distance.max(min_depth);
     }
