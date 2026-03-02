@@ -247,6 +247,8 @@ pub fn respawn_saved_dropped_items(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registry::tile::TileId;
+    use crate::world::chunk::TileLayer;
     use bevy::math::IVec2;
 
     fn test_address() -> CelestialAddress {
@@ -423,5 +425,219 @@ mod tests {
         assert_eq!(universe.planets.len(), 2);
         assert_eq!(universe.planets[&addr1].dropped_items[0].item_id, "dirt");
         assert_eq!(universe.planets[&addr2].dropped_items[0].item_id, "stone");
+    }
+
+    #[test]
+    fn dropped_items_timer_frozen_while_away() {
+        // If elapsed == 0 (load at same game_time as left_at), timer stays intact.
+        let mut universe = Universe::default();
+        let addr = test_address();
+        universe.planets.insert(
+            addr.clone(),
+            WorldSave {
+                chunks: HashMap::new(),
+                dropped_items: vec![SavedDroppedItem {
+                    item_id: "torch".into(),
+                    count: 1,
+                    x: 0.0,
+                    y: 0.0,
+                    remaining_secs: 600.0,
+                }],
+                left_at: Some(1000.0),
+            },
+        );
+
+        let mut world_map = WorldMap::default();
+        let mut dirty = DirtyChunks::default();
+
+        // Return at the exact same game time — no elapsed time
+        let items = load_world_save(&universe, &addr, &mut world_map, &mut dirty, 1000.0);
+        assert_eq!(items.len(), 1);
+        assert!((items[0].remaining_secs - 600.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn dirty_chunks_cleared_and_repopulated_on_load() {
+        let mut universe = Universe::default();
+        let addr = test_address();
+
+        // Pre-populate universe with saved chunks at (3, 4) and (5, 6)
+        let chunk_size = 32;
+        let len = (chunk_size * chunk_size) as usize;
+        let chunk_a = ChunkData {
+            fg: TileLayer::new_air(len),
+            bg: TileLayer::new_air(len),
+            objects: Vec::new(),
+            occupancy: vec![None; len],
+            damage: vec![0; len],
+        };
+        let chunk_b = chunk_a.clone();
+
+        let mut save = WorldSave::default();
+        save.chunks.insert((3, 4), chunk_a);
+        save.chunks.insert((5, 6), chunk_b);
+        save.left_at = Some(100.0);
+        universe.planets.insert(addr.clone(), save);
+
+        let mut world_map = WorldMap::default();
+        let mut dirty = DirtyChunks::default();
+
+        // Dirty chunks initially has unrelated data
+        dirty.0.insert((99, 99));
+
+        load_world_save(&universe, &addr, &mut world_map, &mut dirty, 200.0);
+
+        // Dirty chunks should contain exactly the saved coords, not the old one
+        assert_eq!(dirty.0.len(), 2);
+        assert!(dirty.0.contains(&(3, 4)));
+        assert!(dirty.0.contains(&(5, 6)));
+        assert!(!dirty.0.contains(&(99, 99)));
+    }
+
+    #[test]
+    fn round_trip_chunk_data_preserved() {
+        let mut universe = Universe::default();
+        let addr = test_address();
+        let chunk_size = 32;
+        let len = (chunk_size * chunk_size) as usize;
+
+        // Create a chunk with a non-air tile at position (1, 2)
+        let mut fg = TileLayer::new_air(len);
+        fg.set(1, 2, TileId(42), chunk_size);
+
+        let chunk = ChunkData {
+            fg,
+            bg: TileLayer::new_air(len),
+            objects: Vec::new(),
+            occupancy: vec![None; len],
+            damage: vec![0; len],
+        };
+
+        let mut world_map = WorldMap::default();
+        world_map.chunks.insert((0, 0), chunk);
+
+        let mut dirty = DirtyChunks::default();
+        dirty.0.insert((0, 0));
+
+        // Save
+        save_current_world(&mut universe, &addr, &world_map, &dirty, vec![], 100.0);
+
+        // Clear world state
+        world_map.chunks.clear();
+        dirty.0.clear();
+        assert!(world_map.chunk(0, 0).is_none());
+
+        // Load
+        load_world_save(&universe, &addr, &mut world_map, &mut dirty, 200.0);
+
+        // Verify chunk data was restored with the modified tile
+        let restored = world_map.chunk(0, 0).expect("chunk should be restored");
+        assert_eq!(restored.fg.get(1, 2, chunk_size), TileId(42));
+        assert_eq!(restored.fg.get(0, 0, chunk_size), TileId::AIR);
+    }
+
+    #[test]
+    fn save_overwrites_previous_save() {
+        let mut universe = Universe::default();
+        let addr = test_address();
+        let world_map = WorldMap::default();
+        let dirty = DirtyChunks::default();
+
+        let items_v1 = vec![SavedDroppedItem {
+            item_id: "dirt".into(),
+            count: 1,
+            x: 0.0,
+            y: 0.0,
+            remaining_secs: 500.0,
+        }];
+        save_current_world(&mut universe, &addr, &world_map, &dirty, items_v1, 100.0);
+        assert_eq!(universe.planets[&addr].dropped_items.len(), 1);
+        assert_eq!(universe.planets[&addr].left_at, Some(100.0));
+
+        // Save again with different data — should overwrite
+        let items_v2 = vec![
+            SavedDroppedItem {
+                item_id: "stone".into(),
+                count: 2,
+                x: 10.0,
+                y: 10.0,
+                remaining_secs: 300.0,
+            },
+            SavedDroppedItem {
+                item_id: "wood".into(),
+                count: 5,
+                x: 20.0,
+                y: 20.0,
+                remaining_secs: 200.0,
+            },
+        ];
+        save_current_world(&mut universe, &addr, &world_map, &dirty, items_v2, 500.0);
+
+        assert_eq!(universe.planets[&addr].dropped_items.len(), 2);
+        assert_eq!(universe.planets[&addr].dropped_items[0].item_id, "stone");
+        assert_eq!(universe.planets[&addr].left_at, Some(500.0));
+    }
+
+    #[test]
+    fn load_with_no_left_at_treats_elapsed_as_zero() {
+        let mut universe = Universe::default();
+        let addr = test_address();
+        universe.planets.insert(
+            addr.clone(),
+            WorldSave {
+                chunks: HashMap::new(),
+                dropped_items: vec![SavedDroppedItem {
+                    item_id: "coal".into(),
+                    count: 3,
+                    x: 0.0,
+                    y: 0.0,
+                    remaining_secs: 900.0,
+                }],
+                left_at: None, // no departure time recorded
+            },
+        );
+
+        let mut world_map = WorldMap::default();
+        let mut dirty = DirtyChunks::default();
+
+        let items = load_world_save(&universe, &addr, &mut world_map, &mut dirty, 99999.0);
+        assert_eq!(items.len(), 1);
+        // With no left_at, elapsed is 0, so remaining should be unchanged
+        assert!((items[0].remaining_secs - 900.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn save_only_dirty_chunks_not_all() {
+        let mut universe = Universe::default();
+        let addr = test_address();
+        let chunk_size = 32;
+        let len = (chunk_size * chunk_size) as usize;
+
+        let chunk = ChunkData {
+            fg: TileLayer::new_air(len),
+            bg: TileLayer::new_air(len),
+            objects: Vec::new(),
+            occupancy: vec![None; len],
+            damage: vec![0; len],
+        };
+
+        let mut world_map = WorldMap::default();
+        // WorldMap has chunks at (0,0), (1,0), (2,0)
+        world_map.chunks.insert((0, 0), chunk.clone());
+        world_map.chunks.insert((1, 0), chunk.clone());
+        world_map.chunks.insert((2, 0), chunk);
+
+        // But only (1, 0) is dirty
+        let mut dirty = DirtyChunks::default();
+        dirty.0.insert((1, 0));
+
+        save_current_world(&mut universe, &addr, &world_map, &dirty, vec![], 100.0);
+
+        // Only the dirty chunk should be saved
+        let save = &universe.planets[&addr];
+        assert_eq!(save.chunks.len(), 1);
+        assert!(save.chunks.contains_key(&(1, 0)));
+        assert!(!save.chunks.contains_key(&(0, 0)));
+        assert!(!save.chunks.contains_key(&(2, 0)));
     }
 }
