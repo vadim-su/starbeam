@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::sprite_render::MeshMaterial2d;
 use bevy::window::PrimaryWindow;
 
-use crate::cosmos::persistence::DirtyChunks;
+use crate::cosmos::persistence::{DirtyChunks, DROPPED_ITEM_LIFETIME_SECS};
 use crate::inventory::{Hotbar, Inventory};
 use crate::item::{calculate_drops, DropDef, DroppedItem, ItemRegistry, SpawnParams};
 use crate::object::placement::{can_place_object, get_object_at, place_object, remove_object};
@@ -63,7 +63,7 @@ fn spawn_tile_drops(
             DroppedItem {
                 item_id,
                 count,
-                lifetime: Timer::from_seconds(300.0, TimerMode::Once),
+                lifetime: Timer::from_seconds(DROPPED_ITEM_LIFETIME_SECS, TimerMode::Once),
             },
             LitSprite,
             Velocity { x: vel.x, y: vel.y },
