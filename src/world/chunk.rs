@@ -50,7 +50,7 @@ pub enum Layer {
 }
 
 /// Tile and bitmask data for a single layer within a chunk.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TileLayer {
     pub tiles: Vec<TileId>,
     pub bitmasks: Vec<u8>,
@@ -75,7 +75,7 @@ impl TileLayer {
 }
 
 /// Tile data for a single chunk. Row-major: index = local_y * chunk_size + local_x.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ChunkData {
     pub fg: TileLayer,
     pub bg: TileLayer,
