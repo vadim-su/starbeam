@@ -223,8 +223,12 @@ fn fix_adjacent_duplicates(ids: &mut [String], all_biomes: &[String], rng: &mut 
                     .iter()
                     .filter(|b| *b != prev && *b != next)
                     .collect();
-                if let Some(&replacement) = candidates.get(rng.next() as usize % candidates.len()) {
-                    ids[i] = replacement.clone();
+                if !candidates.is_empty() {
+                    if let Some(&replacement) =
+                        candidates.get(rng.next() as usize % candidates.len())
+                    {
+                        ids[i] = replacement.clone();
+                    }
                 }
             }
         }
@@ -262,8 +266,10 @@ fn fix_wrap(ids: &mut [String], all_biomes: &[String], rng: &mut SplitMix64) {
             .iter()
             .filter(|b| *b != first && *b != second_to_last)
             .collect();
-        if let Some(&replacement) = candidates.get(rng.next() as usize % candidates.len()) {
-            ids[len - 1] = replacement.clone();
+        if !candidates.is_empty() {
+            if let Some(&replacement) = candidates.get(rng.next() as usize % candidates.len()) {
+                ids[len - 1] = replacement.clone();
+            }
         }
     }
 }
