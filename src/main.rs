@@ -1,4 +1,5 @@
 mod camera;
+pub mod cosmos;
 pub mod crafting;
 mod interaction;
 pub mod inventory;
