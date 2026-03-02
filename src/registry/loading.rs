@@ -20,6 +20,7 @@ use super::world::ActiveWorld;
 use super::{AppState, BiomeParallaxConfigs, RegistryHandles};
 use crate::cosmos::address::CelestialSeeds;
 use crate::cosmos::assets::{GenerationConfigAsset, StarTypeAsset};
+use crate::cosmos::current::CurrentSystem;
 use crate::cosmos::generation::generate_system;
 use crate::item::definition::ItemDef;
 use crate::item::registry::ItemRegistry;
@@ -55,10 +56,10 @@ pub(crate) struct LoadingAutotileAssets {
 
 /// Intermediate resource holding handles during biome loading phase.
 #[derive(Resource)]
-pub(crate) struct LoadingBiomeAssets {
-    planet_type: Handle<PlanetTypeAsset>,
-    biomes: Vec<(String, Handle<BiomeAsset>)>,
-    parallax_configs: Vec<(String, Handle<ParallaxConfigAsset>)>,
+pub struct LoadingBiomeAssets {
+    pub(crate) planet_type: Handle<PlanetTypeAsset>,
+    pub(crate) biomes: Vec<(String, Handle<BiomeAsset>)>,
+    pub(crate) parallax_configs: Vec<(String, Handle<ParallaxConfigAsset>)>,
 }
 
 /// Character animation configuration built from CharacterDefAsset.
@@ -336,6 +337,15 @@ pub(crate) fn check_loading(
         planet_type: planet_handle,
         biomes: Vec::new(),
         parallax_configs: Vec::new(),
+    });
+
+    // Store system for star-map UI and planet warping
+    commands.insert_resource(CurrentSystem {
+        system: system.clone(),
+        universe_seed: 42,
+        chunk_size: gen_config.chunk_size,
+        tile_size: gen_config.tile_size,
+        chunk_load_radius: gen_config.chunk_load_radius,
     });
 
     info!(
