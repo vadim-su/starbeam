@@ -7,10 +7,17 @@
 use std::collections::{HashMap, HashSet};
 
 use bevy::prelude::*;
+use bevy::sprite_render::MeshMaterial2d;
 use serde::{Deserialize, Serialize};
 
 use super::address::CelestialAddress;
+use crate::item::{DroppedItem, ItemRegistry};
+use crate::physics::{Bounce, Friction, Gravity, Grounded, TileCollider, Velocity};
+use crate::ui::game_ui::icon_registry::ItemIconRegistry;
 use crate::world::chunk::{ChunkData, WorldMap};
+use crate::world::lit_sprite::{
+    FallbackItemImage, FallbackLightmap, LitSprite, LitSpriteMaterial, SharedLitQuad,
+};
 
 // ---------------------------------------------------------------------------
 // Saved dropped item
@@ -157,6 +164,80 @@ pub fn load_world_save(
             }
         })
         .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Respawn saved dropped items
+// ---------------------------------------------------------------------------
+
+/// Dropped item display size in pixels (icons are 16×16).
+const DROPPED_ITEM_SIZE: f32 = 16.0;
+/// Fallback size for items without an icon.
+const DROPPED_ITEM_FALLBACK_SIZE: f32 = 8.0;
+
+/// Respawn saved dropped items after arriving on a world via warp.
+///
+/// Runs on `OnEnter(InGame)`. Consumes [`PendingDroppedItems`] and spawns
+/// grounded [`DroppedItem`] entities with their remaining lifetime timers.
+/// Items are spawned at their saved positions with no velocity (already
+/// grounded), using the same `LitSpriteMaterial` setup as fresh tile drops.
+#[allow(clippy::too_many_arguments)]
+pub fn respawn_saved_dropped_items(
+    mut commands: Commands,
+    pending: Res<PendingDroppedItems>,
+    item_registry: Res<ItemRegistry>,
+    icon_registry: Res<ItemIconRegistry>,
+    quad: Res<SharedLitQuad>,
+    fallback_lm: Res<FallbackLightmap>,
+    fallback_img: Res<FallbackItemImage>,
+    mut lit_materials: ResMut<Assets<LitSpriteMaterial>>,
+) {
+    if pending.0.is_empty() {
+        commands.remove_resource::<PendingDroppedItems>();
+        return;
+    }
+
+    info!("Respawning {} saved dropped items", pending.0.len());
+
+    for saved in &pending.0 {
+        // Resolve sprite texture from icon registry
+        let (sprite_image, size) = item_registry
+            .by_name(&saved.item_id)
+            .and_then(|id| icon_registry.get(id).cloned())
+            .map(|img| (img, DROPPED_ITEM_SIZE))
+            .unwrap_or_else(|| (fallback_img.0.clone(), DROPPED_ITEM_FALLBACK_SIZE));
+
+        let material = lit_materials.add(LitSpriteMaterial {
+            sprite: sprite_image,
+            lightmap: fallback_lm.0.clone(),
+            lightmap_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
+            sprite_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
+        });
+
+        commands.spawn((
+            DroppedItem {
+                item_id: saved.item_id.clone(),
+                count: saved.count,
+                lifetime: Timer::from_seconds(saved.remaining_secs, TimerMode::Once),
+            },
+            LitSprite,
+            Velocity::default(),
+            Gravity(400.0),
+            Grounded(true),
+            TileCollider {
+                width: 4.0,
+                height: 4.0,
+            },
+            Friction(0.9),
+            Bounce(0.3),
+            Mesh2d(quad.0.clone()),
+            MeshMaterial2d(material),
+            Transform::from_translation(Vec3::new(saved.x, saved.y, 1.0))
+                .with_scale(Vec3::new(size, size, 1.0)),
+        ));
+    }
+
+    commands.remove_resource::<PendingDroppedItems>();
 }
 
 // ---------------------------------------------------------------------------

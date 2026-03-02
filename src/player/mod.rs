@@ -1,6 +1,5 @@
 pub mod animation;
 pub mod movement;
-pub mod wrap;
 
 use bevy::prelude::*;
 use bevy::sprite_render::MeshMaterial2d;
@@ -42,11 +41,7 @@ impl Plugin for PlayerPlugin {
         )
         .add_systems(
             Update,
-            (
-                movement::player_input,
-                wrap::player_wrap_system,
-                animation::animate_player,
-            )
+            (movement::player_input, animation::animate_player)
                 .chain()
                 .in_set(GameSet::Physics),
         );

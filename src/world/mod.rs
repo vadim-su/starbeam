@@ -14,7 +14,7 @@ pub mod tile_renderer;
 use bevy::prelude::*;
 use bevy::sprite_render::Material2dPlugin;
 
-use crate::cosmos::persistence::{DirtyChunks, Universe};
+use crate::cosmos::persistence::{self, DirtyChunks, Universe};
 use crate::registry::AppState;
 use crate::sets::GameSet;
 use crate::world::chunk::{LoadedChunks, WorldMap};
@@ -39,6 +39,11 @@ impl Plugin for WorldPlugin {
             .add_systems(
                 OnEnter(AppState::InGame),
                 lit_sprite::init_lit_sprite_resources,
+            )
+            .add_systems(
+                OnEnter(AppState::InGame),
+                persistence::respawn_saved_dropped_items
+                    .run_if(resource_exists::<persistence::PendingDroppedItems>),
             )
             .add_systems(
                 Update,
