@@ -7,6 +7,7 @@ pub mod inventory;
 pub mod item;
 pub mod math;
 pub mod object;
+pub mod particles;
 mod parallax;
 pub mod physics;
 mod player;
@@ -45,6 +46,7 @@ fn main() {
         .add_plugins(player::PlayerPlugin)
         .add_plugins(physics::PhysicsPlugin)
         .add_plugins(fluid::FluidPlugin)
+        .add_plugins(particles::ParticlePlugin)
         .add_plugins(camera::CameraPlugin)
         .add_plugins(parallax::ParallaxPlugin)
         .add_plugins(interaction::InteractionPlugin)
