@@ -70,11 +70,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let shimmer = 1.0 + 0.12 * sin(world_x * 5.0 + world_y * 3.0 + uniforms.time * 1.5);
     color = vec4<f32>(color.rgb * shimmer, color.a);
 
-    // 2. Depth darkening: deeper fluid is darker
-    let depth_factor = 1.0 - depth * 0.35;
-    color = vec4<f32>(color.rgb * depth_factor, color.a);
-
-    // 3. Lightmap: multiply by lightmap sample at world position
+    // 2. Lightmap: multiply by lightmap sample at world position
     let lm_scale = uniforms.lightmap_uv_rect.xy;
     let lm_offset = uniforms.lightmap_uv_rect.zw;
     let lightmap_uv = in.world_pos * lm_scale + lm_offset;
