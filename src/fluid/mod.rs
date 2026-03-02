@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::sprite_render::Material2dPlugin;
 
 pub mod cell;
 pub mod debug;
@@ -13,24 +14,19 @@ pub use reactions::{FluidReactionDef, FluidReactionRegistry};
 pub use registry::{FluidDef, FluidRegistry};
 pub use render::build_fluid_mesh;
 pub use simulation::FluidSimConfig;
-pub use systems::ActiveFluidChunks;
+pub use systems::{ActiveFluidChunks, FluidMaterial};
 
 use crate::registry::AppState;
 use crate::sets::GameSet;
 
 pub struct FluidPlugin;
 
-fn init_fluid_material(mut commands: Commands, mut color_materials: ResMut<Assets<ColorMaterial>>) {
-    commands.insert_resource(systems::SharedFluidMaterial {
-        handle: color_materials.add(ColorMaterial::default()),
-    });
-}
-
 impl Plugin for FluidPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<FluidSimConfig>()
+        app.add_plugins(Material2dPlugin::<FluidMaterial>::default())
+            .init_resource::<FluidSimConfig>()
             .init_resource::<systems::ActiveFluidChunks>()
-            .add_systems(Startup, init_fluid_material)
+            .add_systems(Startup, systems::init_fluid_material)
             .add_systems(
                 Update,
                 (systems::fluid_simulation, systems::fluid_rebuild_meshes)
@@ -38,6 +34,13 @@ impl Plugin for FluidPlugin {
                     .in_set(GameSet::WorldUpdate)
                     .run_if(in_state(AppState::InGame))
                     .run_if(resource_exists::<FluidRegistry>)
+                    .run_if(resource_exists::<systems::SharedFluidMaterial>),
+            )
+            .add_systems(
+                Update,
+                systems::update_fluid_time
+                    .in_set(GameSet::WorldUpdate)
+                    .run_if(in_state(AppState::InGame))
                     .run_if(resource_exists::<systems::SharedFluidMaterial>),
             )
             .add_systems(
