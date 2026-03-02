@@ -14,7 +14,7 @@ use crate::fluid::cell::FluidCell;
 use crate::fluid::events::{ImpactKind, WaterImpactEvent};
 use crate::fluid::reactions::resolve_density_displacement;
 use crate::fluid::registry::FluidRegistry;
-use crate::fluid::render::{build_fluid_mesh, ATTRIBUTE_FLUID_DATA};
+use crate::fluid::render::{build_fluid_mesh, ATTRIBUTE_FLUID_DATA, ATTRIBUTE_WAVE_HEIGHT};
 use crate::fluid::simulation::{reconcile_chunk_boundaries, simulate_grid, FluidSimConfig};
 use crate::fluid::wave::{reconcile_wave_boundaries, WaveBuffer, WaveConfig, WaveState};
 use crate::registry::tile::TileRegistry;
@@ -60,6 +60,7 @@ impl Material2d for FluidMaterial {
             Mesh::ATTRIBUTE_COLOR.at_shader_location(1),
             Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
             ATTRIBUTE_FLUID_DATA.at_shader_location(3),
+            ATTRIBUTE_WAVE_HEIGHT.at_shader_location(4),
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         Ok(())
@@ -256,6 +257,7 @@ pub fn fluid_rebuild_meshes(
     loaded_chunks: Res<LoadedChunks>,
     fluid_material: Res<SharedFluidMaterial>,
     existing_fluid_meshes: Query<(Entity, &ChunkCoord), With<FluidMeshEntity>>,
+    wave_state: Res<WaveState>,
 ) {
     // Uses MeshMaterial2d<FluidMaterial> for custom shader rendering.
     let chunk_size = active_world.chunk_size;
@@ -311,6 +313,11 @@ pub fn fluid_rebuild_meshes(
             None
         };
 
+        let wave_heights = wave_state
+            .buffers
+            .get(&(data_cx, cy))
+            .map(|buf| buf.height.as_slice());
+
         let Some(mesh) = build_fluid_mesh(
             &chunk.fluids,
             display_cx,
@@ -320,6 +327,7 @@ pub fn fluid_rebuild_meshes(
             &fluid_registry,
             neighbor_above_row.as_deref(),
             neighbor_below_row.as_deref(),
+            wave_heights,
         ) else {
             continue;
         };

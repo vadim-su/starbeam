@@ -7,6 +7,7 @@ struct VertexInput {
     @location(1) color: vec4<f32>,
     @location(2) uv: vec2<f32>,        // [fill_level, depth_in_fluid]
     @location(3) fluid_data: vec4<f32>, // [emission_r, emission_g, emission_b, flags]
+    @location(4) wave_height: f32,
 }
 
 struct VertexOutput {
@@ -43,7 +44,7 @@ fn vertex(in: VertexInput) -> VertexOutput {
         let base   = sin(world_pos.x * 1.5 + uniforms.time * 1.0) * 1.2;
         let mid    = sin(world_pos.x * 4.0 + world_pos.y * 0.5 + uniforms.time * 1.8) * 0.5;
         let detail = sin(world_pos.x * 9.0 - world_pos.y * 1.2 + uniforms.time * 3.0) * 0.2;
-        world_pos.y += base + mid + detail;
+        world_pos.y += base + mid + detail + in.wave_height;
     }
 
     // Reconstruct local position with wave offset applied

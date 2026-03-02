@@ -19,6 +19,10 @@ const MAX_DEPTH_SCAN: u32 = 16;
 pub const ATTRIBUTE_FLUID_DATA: MeshVertexAttribute =
     MeshVertexAttribute::new("FluidData", 982301567, VertexFormat::Float32x4);
 
+/// Per-vertex dynamic wave height from wave propagation simulation.
+pub const ATTRIBUTE_WAVE_HEIGHT: MeshVertexAttribute =
+    MeshVertexAttribute::new("WaveHeight", 982301568, VertexFormat::Float32);
+
 /// Determine whether a liquid cell is at the surface (exposed to air above).
 ///
 /// A liquid cell at `(local_x, local_y)` is "surface" when the cell directly
@@ -203,12 +207,14 @@ pub fn build_fluid_mesh(
     fluid_registry: &FluidRegistry,
     neighbor_above_row: Option<&[FluidCell]>,
     neighbor_below_row: Option<&[FluidCell]>,
+    wave_heights: Option<&[f32]>,
 ) -> Option<Mesh> {
     let capacity = fluids.len();
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(capacity * 4);
     let mut colors: Vec<[f32; 4]> = Vec::with_capacity(capacity * 4);
     let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(capacity * 4);
     let mut fluid_data: Vec<[f32; 4]> = Vec::with_capacity(capacity * 4);
+    let mut wave_data: Vec<f32> = Vec::with_capacity(capacity * 4);
     let mut indices: Vec<u32> = Vec::with_capacity(capacity * 6);
 
     let base_x = chunk_x * chunk_size as i32;
@@ -380,6 +386,10 @@ pub fn build_fluid_mesh(
                 fluid_data.push([emission[0], emission[1], emission[2], flags]);
             }
 
+            // WAVE_HEIGHT: dynamic wave displacement from wave propagation simulation
+            let wave_h = wave_heights.map(|wh| wh[idx]).unwrap_or(0.0);
+            wave_data.extend_from_slice(&[wave_h, wave_h, wave_h, wave_h]);
+
             indices.extend_from_slice(&[vi, vi + 1, vi + 2, vi, vi + 2, vi + 3]);
         }
     }
@@ -396,6 +406,7 @@ pub fn build_fluid_mesh(
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.insert_attribute(ATTRIBUTE_FLUID_DATA, fluid_data);
+    mesh.insert_attribute(ATTRIBUTE_WAVE_HEIGHT, wave_data);
     mesh.insert_indices(Indices::U32(indices));
     Some(mesh)
 }
@@ -448,7 +459,7 @@ mod tests {
     fn empty_chunk_returns_none() {
         let reg = test_fluid_registry();
         let fluids = vec![FluidCell::EMPTY; 4];
-        let result = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None);
+        let result = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None, None);
         assert!(result.is_none(), "all-empty chunk should return None");
     }
 
@@ -459,7 +470,7 @@ mod tests {
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(1), 0.5); // water, half full
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None, None)
             .expect("should produce a mesh");
 
         // 1 quad → 4 vertices, 6 indices
@@ -496,7 +507,7 @@ mod tests {
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(2), 0.5); // steam, half full
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None, None)
             .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x3(pos)) =
@@ -518,7 +529,7 @@ mod tests {
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(1), 0.5); // water, half full
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None, None)
             .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x4(cols)) =
@@ -545,7 +556,7 @@ mod tests {
         let total = (chunk_size * chunk_size) as usize;
         let fluids = vec![FluidCell::new(FluidId(1), 1.0); total];
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, chunk_size, 8.0, &reg, None, None)
+        let mesh = build_fluid_mesh(&fluids, 0, 0, chunk_size, 8.0, &reg, None, None, None)
             .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x3(pos)) =
@@ -572,7 +583,7 @@ mod tests {
         // chunk at (1, 2), chunk_size=2, tile_size=8
         // base_x = 1*2 = 2, base_y = 2*2 = 4
         // world_x = 2.0 * 8.0 = 16.0, world_y = 4.0 * 8.0 = 32.0
-        let mesh = build_fluid_mesh(&fluids, 1, 2, 2, 8.0, &reg, None, None)
+        let mesh = build_fluid_mesh(&fluids, 1, 2, 2, 8.0, &reg, None, None, None)
             .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x3(pos)) =
@@ -594,7 +605,7 @@ mod tests {
         // Pressurized cell: mass > 1.0 should still fill the full tile
         fluids[0] = FluidCell::new(FluidId(1), 2.5);
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None, None)
             .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x3(pos)) =
@@ -616,7 +627,7 @@ mod tests {
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(1), 0.7); // water, 70% full
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None, None)
             .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x2(uvs)) =
@@ -799,7 +810,7 @@ mod tests {
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(1), 1.0); // water: emission [0,0,0]
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None, None)
             .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x4(data)) =
@@ -822,7 +833,7 @@ mod tests {
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(3), 1.0); // lava: emission [255, 100, 20]
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None, None)
             .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x4(data)) =
@@ -855,7 +866,7 @@ mod tests {
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(1), 1.0);
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None, None)
             .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x4(data)) =
@@ -892,7 +903,7 @@ mod tests {
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[2] = FluidCell::new(FluidId(2), 1.0); // (0,1) steam
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None, None)
             .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x4(data)) =
@@ -929,7 +940,7 @@ mod tests {
         fluids[0] = FluidCell::new(FluidId(1), 1.0); // (0,0)
         fluids[2] = FluidCell::new(FluidId(1), 1.0); // (0,1)
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None, None)
             .expect("should produce a mesh");
 
         if let Some(bevy::mesh::VertexAttributeValues::Float32x4(data)) =
@@ -955,7 +966,7 @@ mod tests {
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(1), 1.0);
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None)
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None, None)
             .expect("should produce a mesh");
 
         assert!(
@@ -994,7 +1005,7 @@ mod tests {
                                                              // Column 2: row 0 partial
         fluids[0 * 4 + 2] = FluidCell::new(FluidId(1), 0.6); // (2,0) surface
 
-        let mesh = build_fluid_mesh(&fluids, 0, 0, 4, 8.0, &reg, None, None)
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 4, 8.0, &reg, None, None, None)
             .expect("should produce a mesh");
 
         // Surface heights (in tile units): col0=1.4, col1=1.0, col2=0.6
@@ -1033,5 +1044,21 @@ mod tests {
         } else {
             panic!("expected Float32x3 positions");
         }
+    }
+
+    #[test]
+    fn wave_height_attribute_present() {
+        let reg = test_fluid_registry();
+        let mut fluids = vec![FluidCell::EMPTY; 4];
+        fluids[0] = FluidCell::new(FluidId(1), 1.0);
+        let wave = vec![0.5; 4];
+
+        let mesh = build_fluid_mesh(&fluids, 0, 0, 2, 8.0, &reg, None, None, Some(&wave))
+            .expect("should produce a mesh");
+
+        assert!(
+            mesh.attribute(ATTRIBUTE_WAVE_HEIGHT).is_some(),
+            "mesh should have WAVE_HEIGHT attribute"
+        );
     }
 }
