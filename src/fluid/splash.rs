@@ -30,10 +30,10 @@ pub struct SplashConfig {
 impl Default for SplashConfig {
     fn default() -> Self {
         Self {
-            splash_displacement: 0.15,
-            particles_per_mass: 25.0,
-            particle_lifetime: 1.5,
-            particle_size: 4.0,
+            splash_displacement: 0.25, // was 0.15 — more mass for particles
+            particles_per_mass: 40.0,  // was 25.0 — many more visible droplets
+            particle_lifetime: 1.2,
+            particle_size: 5.0, // was 4.0 — slightly larger drops
             min_splash_velocity: 5.0,
         }
     }

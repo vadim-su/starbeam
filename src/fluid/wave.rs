@@ -156,10 +156,10 @@ impl Default for WaveConfig {
             speed: 0.4,
             damping: 0.98,
             epsilon: 0.001,
-            max_height: 1.5,
-            max_impulse: 2.0,
-            high_wave_threshold: 0.7,
-            high_wave_damping: 0.90,
+            max_height: 0.5,          // ~4px displacement (half a tile)
+            max_impulse: 1.0,         // tighter clamp on input impulse
+            high_wave_threshold: 0.6, // kick in extra damping earlier
+            high_wave_damping: 0.85,  // more aggressive large-wave damping
         }
     }
 }

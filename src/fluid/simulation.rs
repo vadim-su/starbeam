@@ -28,10 +28,10 @@ pub struct FluidSimConfig {
 impl Default for FluidSimConfig {
     fn default() -> Self {
         Self {
-            iterations_per_tick: 6,
+            iterations_per_tick: 3, // was 6 — calmer water flow
             min_mass: MIN_MASS,
             min_flow: MIN_FLOW,
-            max_speed: MAX_SPEED * 4.0,
+            max_speed: MAX_SPEED * 2.0, // was *4.0 — less aggressive flow
         }
     }
 }

@@ -84,10 +84,10 @@ fn vertex(in: VertexInput) -> VertexOutput {
         let world_x = (world_from_local * vec4<f32>(pos, 1.0)).x;
         // Physics-driven displacement from wave propagation simulation
         pos.y += in.wave_height;
-        // Procedural 2-octave sine waves
-        let w1 = sin(world_x * 0.10 + uniforms.time * 1.2 * speed) * 0.5;
-        let w2 = sin(world_x * 0.22 - uniforms.time * 1.7 * speed) * 0.3;
-        pos.y += (w1 + w2) * amp * 2.0;
+        // Procedural 2-octave sine waves (subtle ambient ripple)
+        let w1 = sin(world_x * 0.10 + uniforms.time * 1.2 * speed) * 0.3;
+        let w2 = sin(world_x * 0.22 - uniforms.time * 1.7 * speed) * 0.15;
+        pos.y += (w1 + w2) * amp;
     }
 
     let world_pos = (world_from_local * vec4<f32>(pos, 1.0)).xy;
