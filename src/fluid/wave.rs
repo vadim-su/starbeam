@@ -174,10 +174,10 @@ pub struct WaveState {
 
 // ---- Cross-chunk boundary reconciliation ----
 
-/// Reconcile wave heights at boundaries between horizontally adjacent active chunks.
+/// Reconcile wave heights and velocities at boundaries between horizontally adjacent active chunks.
 ///
 /// For each pair of horizontally adjacent active chunks, averages the wave heights
-/// at the shared boundary column (right edge of left chunk ↔ left edge of right chunk).
+/// and velocities at the shared boundary column (right edge of left chunk ↔ left edge of right chunk).
 /// Uses wrapping via `rem_euclid(width_chunks)`.
 pub fn reconcile_wave_boundaries(
     wave_state: &mut WaveState,
@@ -186,8 +186,8 @@ pub fn reconcile_wave_boundaries(
     width_chunks: i32,
 ) {
     // Collect boundary averages first to avoid borrow conflicts.
-    // Each entry: (left_chunk, right_chunk, row, averaged_height)
-    let mut updates: Vec<((i32, i32), (i32, i32), u32, f32)> = Vec::new();
+    // Each entry: (left_chunk, right_chunk, row, averaged_height, averaged_velocity)
+    let mut updates: Vec<((i32, i32), (i32, i32), u32, f32, f32)> = Vec::new();
 
     let mut processed: HashSet<((i32, i32), (i32, i32))> = HashSet::new();
 
@@ -218,21 +218,24 @@ pub fn reconcile_wave_boundaries(
             let left_idx = (local_y * chunk_size + (chunk_size - 1)) as usize;
             let right_idx = (local_y * chunk_size) as usize;
 
-            let avg = (left_buf.height[left_idx] + right_buf.height[right_idx]) * 0.5;
-            updates.push((left_key, right_key, local_y, avg));
+            let avg_h = (left_buf.height[left_idx] + right_buf.height[right_idx]) * 0.5;
+            let avg_v = (left_buf.velocity[left_idx] + right_buf.velocity[right_idx]) * 0.5;
+            updates.push((left_key, right_key, local_y, avg_h, avg_v));
         }
     }
 
     // Apply all collected averages
-    for (left_key, right_key, local_y, avg) in updates {
+    for (left_key, right_key, local_y, avg_h, avg_v) in updates {
         let left_idx = (local_y * chunk_size + (chunk_size - 1)) as usize;
         let right_idx = (local_y * chunk_size) as usize;
 
         if let Some(buf) = wave_state.buffers.get_mut(&left_key) {
-            buf.height[left_idx] = avg;
+            buf.height[left_idx] = avg_h;
+            buf.velocity[left_idx] = avg_v;
         }
         if let Some(buf) = wave_state.buffers.get_mut(&right_key) {
-            buf.height[right_idx] = avg;
+            buf.height[right_idx] = avg_h;
+            buf.velocity[right_idx] = avg_v;
         }
     }
 }
@@ -381,6 +384,41 @@ mod tests {
             (buf.velocity[idx] - 3.0).abs() < 1e-5,
             "impulse should be clamped to max_impulse=3.0, got {}",
             buf.velocity[idx]
+        );
+    }
+
+    #[test]
+    fn reconcile_averages_velocity_at_boundary() {
+        let chunk_size = 4u32;
+        let mut wave_state = WaveState::default();
+        let mut active = HashSet::new();
+
+        active.insert((0, 0));
+        active.insert((1, 0));
+
+        let mut left = WaveBuffer::new(chunk_size);
+        let mut right = WaveBuffer::new(chunk_size);
+
+        // Set velocity at boundary: left's right edge has vel=2.0, right's left edge has vel=0.0
+        let left_idx = (0 * chunk_size + (chunk_size - 1)) as usize;
+        let right_idx = (0 * chunk_size + 0) as usize;
+        left.velocity[left_idx] = 2.0;
+        right.velocity[right_idx] = 0.0;
+
+        wave_state.buffers.insert((0, 0), left);
+        wave_state.buffers.insert((1, 0), right);
+
+        reconcile_wave_boundaries(&mut wave_state, &active, chunk_size, 2);
+
+        let left_vel = wave_state.buffers[&(0, 0)].velocity[left_idx];
+        let right_vel = wave_state.buffers[&(1, 0)].velocity[right_idx];
+        assert!(
+            (left_vel - 1.0).abs() < 1e-5,
+            "left boundary velocity should be averaged to 1.0, got {left_vel}"
+        );
+        assert!(
+            (right_vel - 1.0).abs() < 1e-5,
+            "right boundary velocity should be averaged to 1.0, got {right_vel}"
         );
     }
 }

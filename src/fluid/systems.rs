@@ -529,20 +529,51 @@ pub fn wave_consume_events(
             ImpactKind::Pour => event.velocity.y.abs() * 0.04,
         };
 
-        let buf = wave_state
+        let max_imp = wave_config.max_impulse;
+
+        // Main impulse
+        wave_state
             .buffers
             .entry((data_cx, cy))
-            .or_insert_with(|| WaveBuffer::new(chunk_size));
-        buf.apply_impulse(local_x, local_y, impulse, wave_config.max_impulse);
+            .or_insert_with(|| WaveBuffer::new(chunk_size))
+            .apply_impulse(local_x, local_y, impulse, max_imp);
 
         // Spread impulse to neighbors for wider splash
         if matches!(event.kind, ImpactKind::Splash) {
             let spread = impulse * 0.5;
+
+            // Left spread
             if local_x > 0 {
-                buf.apply_impulse(local_x - 1, local_y, spread, wave_config.max_impulse);
+                wave_state
+                    .buffers
+                    .entry((data_cx, cy))
+                    .or_insert_with(|| WaveBuffer::new(chunk_size))
+                    .apply_impulse(local_x - 1, local_y, spread, max_imp);
+            } else {
+                // Cross-chunk: left neighbor's rightmost column
+                let left_cx = active_world.wrap_chunk_x(data_cx - 1);
+                wave_state
+                    .buffers
+                    .entry((left_cx, cy))
+                    .or_insert_with(|| WaveBuffer::new(chunk_size))
+                    .apply_impulse(chunk_size - 1, local_y, spread, max_imp);
             }
+
+            // Right spread
             if local_x + 1 < chunk_size {
-                buf.apply_impulse(local_x + 1, local_y, spread, wave_config.max_impulse);
+                wave_state
+                    .buffers
+                    .entry((data_cx, cy))
+                    .or_insert_with(|| WaveBuffer::new(chunk_size))
+                    .apply_impulse(local_x + 1, local_y, spread, max_imp);
+            } else {
+                // Cross-chunk: right neighbor's leftmost column
+                let right_cx = active_world.wrap_chunk_x(data_cx + 1);
+                wave_state
+                    .buffers
+                    .entry((right_cx, cy))
+                    .or_insert_with(|| WaveBuffer::new(chunk_size))
+                    .apply_impulse(0, local_y, spread, max_imp);
             }
         }
     }
