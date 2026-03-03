@@ -103,6 +103,8 @@ pub fn detect_entity_water_entry(
 pub fn detect_entity_swimming(
     mut events: MessageWriter<WaterImpactEvent>,
     query: Query<(&Transform, &Velocity, &FluidContactState)>,
+    world_map: Res<WorldMap>,
+    active_world: Res<ActiveWorld>,
     time: Res<Time>,
     mut throttle: ResMut<SwimThrottle>,
 ) {
@@ -112,6 +114,9 @@ pub fn detect_entity_swimming(
         return;
     }
     throttle.0 = 0.0;
+
+    let tile_size = active_world.tile_size;
+    let chunk_size = active_world.chunk_size;
 
     for (transform, velocity, contact) in &query {
         // Only emit for entities currently in fluid
@@ -126,6 +131,40 @@ pub fn detect_entity_swimming(
         }
 
         let pos = transform.translation.truncate();
+
+        // Only emit wake if entity is near the surface (within 2 tiles).
+        // Deep underwater movement should not create surface waves.
+        let tile_y = (pos.y / tile_size).floor() as i32;
+        let tile_x = (pos.x / tile_size).floor() as i32;
+        let data_cx = active_world.wrap_chunk_x(tile_x.div_euclid(chunk_size as i32));
+        let cy = tile_y.div_euclid(chunk_size as i32);
+        let local_x = tile_x.rem_euclid(chunk_size as i32) as u32;
+        let local_y = tile_y.rem_euclid(chunk_size as i32) as u32;
+
+        let near_surface = world_map
+            .chunks
+            .get(&(data_cx, cy))
+            .map(|chunk| {
+                // Check if the cell above (or 2 above) is empty — meaning we're near surface
+                for dy in 1..=2u32 {
+                    let check_y = local_y + dy;
+                    if check_y >= chunk_size {
+                        // At top of chunk — could be near surface
+                        return true;
+                    }
+                    let idx = (check_y * chunk_size + local_x) as usize;
+                    if idx < chunk.fluids.len() && chunk.fluids[idx].is_empty() {
+                        return true;
+                    }
+                }
+                false
+            })
+            .unwrap_or(false);
+
+        if !near_surface {
+            continue;
+        }
+
         events.write(WaterImpactEvent {
             position: pos,
             velocity: Vec2::new(velocity.x, velocity.y),
