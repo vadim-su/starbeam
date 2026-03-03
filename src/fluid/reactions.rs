@@ -142,8 +142,10 @@ pub const MAX_REACTIONS_PER_CHUNK: u32 = 8;
 pub fn resolve_density_displacement_global(world: &mut FluidWorld, active_chunks: &[(i32, i32)]) {
     let cs = world.chunk_size as i32;
 
-    // Phase 1: Vertical bubble sort
-    for _pass in 0..(cs * 2) {
+    // Phase 1: Vertical bubble sort — limited to 2 passes per tick
+    // for smooth settling instead of instant teleportation.
+    // Heavy fluids sink ~2 cells/tick; at 60 ticks/sec that's 120 cells/sec.
+    for _pass in 0..2 {
         let mut any_swap = false;
         for &(cx, cy) in active_chunks {
             let base_gx = cx * cs;

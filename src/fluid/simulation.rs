@@ -27,11 +27,11 @@ pub struct FluidSimConfig {
 impl Default for FluidSimConfig {
     fn default() -> Self {
         Self {
-            tick_rate: 20.0,
-            max_ticks_per_frame: 3,
+            tick_rate: 60.0,
+            max_ticks_per_frame: 4,
             min_mass: MIN_MASS,
             min_flow: MIN_FLOW,
-            max_speed: MAX_SPEED,
+            max_speed: 2.0,
         }
     }
 }
