@@ -5,10 +5,11 @@ struct VertexInput {
     @builtin(instance_index) instance_index: u32,
     @location(0) position: vec3<f32>,
     @location(1) color: vec4<f32>,
-    @location(2) uv: vec2<f32>,          // [fill_level, depth_in_fluid]
-    @location(3) fluid_data: vec4<f32>,  // [emission_r, emission_g, emission_b, flags]
+    @location(2) uv: vec2<f32>,           // [fill_level, depth_in_fluid]
+    @location(3) fluid_data: vec4<f32>,   // [emission_r, emission_g, emission_b, flags]
     @location(4) wave_height: f32,
-    @location(5) wave_params: vec2<f32>, // [amplitude_multiplier, speed_multiplier]
+    @location(5) wave_params: vec2<f32>,  // [amplitude_multiplier, speed_multiplier]
+    @location(6) edge_flags: f32,
 }
 
 struct VertexOutput {
@@ -18,6 +19,7 @@ struct VertexOutput {
     @location(2) uv: vec2<f32>,
     @location(3) fluid_data: vec4<f32>,
     @location(4) wave_params: vec2<f32>,
+    @location(5) edge_flags: f32,
 }
 
 struct FluidUniforms {
@@ -29,27 +31,81 @@ struct FluidUniforms {
 @group(2) @binding(1) var lightmap_sampler: sampler;
 @group(2) @binding(2) var<uniform> uniforms: FluidUniforms;
 
+// ------------------------------------------------------------------ //
+// Voronoi noise helpers for caustics
+// ------------------------------------------------------------------ //
+
+fn hash2(p: vec2<f32>) -> vec2<f32> {
+    var q = p * vec2<f32>(0.3183099, 0.3678794) + vec2<f32>(0.3678794, 0.3183099);
+    q = fract(q * 715.836) * 2.0 - 1.0;
+    return fract(q * vec2<f32>(349.572, 574.213));
+}
+
+fn voronoi_dist(uv: vec2<f32>) -> f32 {
+    let cell = floor(uv);
+    let f = fract(uv);
+    var min_dist: f32 = 8.0;
+    for (var j: i32 = -1; j <= 1; j++) {
+        for (var i: i32 = -1; i <= 1; i++) {
+            let nb = vec2<f32>(f32(i), f32(j));
+            let pt = hash2(cell + nb);
+            let diff = nb + pt - f;
+            min_dist = min(min_dist, dot(diff, diff));
+        }
+    }
+    return sqrt(min_dist);
+}
+
+fn caustic(uv: vec2<f32>, t: f32) -> f32 {
+    let PIXEL_DENSITY: f32 = 8.0;
+    let puv = floor(uv * PIXEL_DENSITY) / PIXEL_DENSITY;
+    let c1 = voronoi_dist(puv * 3.0 + vec2<f32>(t * 0.4, t * 0.3));
+    let c2 = voronoi_dist(puv * 5.0 - vec2<f32>(t * 0.2, t * 0.5));
+    return smoothstep(0.3, 0.0, min(c1, c2));
+}
+
+// ------------------------------------------------------------------ //
+// Vertex shader
+// ------------------------------------------------------------------ //
+
 @vertex
 fn vertex(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     let world_from_local = mesh_functions::get_world_from_local(in.instance_index);
 
-    // No sine-wave vertex displacement — waves are drawn in the fragment shader
-    // to avoid geometry appearing above the fill level.
-    // Physics-based wave_height is also applied in the fragment shader.
-    let world_pos = (world_from_local * vec4<f32>(in.position, 1.0)).xy;
+    let flags = in.fluid_data.w;
+    let is_wave_vertex = (flags % 2.0) >= 0.5;
+    let amp = in.wave_params.x;
+    let speed = in.wave_params.y;
 
+    var pos = in.position;
+
+    if is_wave_vertex {
+        let world_x = (world_from_local * vec4<f32>(pos, 1.0)).x;
+        // Physics-driven displacement from wave propagation simulation
+        pos.y += in.wave_height;
+        // Procedural 2-octave sine waves
+        let w1 = sin(world_x * 0.10 + uniforms.time * 1.2 * speed) * 0.5;
+        let w2 = sin(world_x * 0.22 - uniforms.time * 1.7 * speed) * 0.3;
+        pos.y += (w1 + w2) * amp * 2.0;
+    }
+
+    let world_pos = (world_from_local * vec4<f32>(pos, 1.0)).xy;
     out.clip_position = mesh_functions::mesh2d_position_local_to_clip(
-        world_from_local,
-        vec4<f32>(in.position, 1.0),
+        world_from_local, vec4<f32>(pos, 1.0),
     );
     out.color = in.color;
     out.world_pos = world_pos;
     out.uv = in.uv;
     out.fluid_data = in.fluid_data;
     out.wave_params = in.wave_params;
+    out.edge_flags = in.edge_flags;
     return out;
 }
+
+// ------------------------------------------------------------------ //
+// Fragment shader
+// ------------------------------------------------------------------ //
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
@@ -59,66 +115,54 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let is_surface = (flags % 2.0) >= 0.5;
     let is_gas     = flags >= 1.5;
     let emission   = in.fluid_data.xyz;
-    let world_x    = in.world_pos.x;
-    let world_y    = in.world_pos.y;
-    let fill       = in.uv.x;
     let amp        = in.wave_params.x;
     let speed      = in.wave_params.y;
+    let depth      = in.uv.y; // depth_in_fluid: 0=surface, up to 1.0
+    let edge       = u32(in.edge_flags);
 
     // ------------------------------------------------------------------ //
-    // 1. Animated wave edge — liquid surface only.
-    //
-    // UV_0.y carries a per-vertex local gradient interpolated by the GPU:
-    //   bottom vertices → 0.0
-    //   top vertices    → fill
-    // This gives a smooth 0→fill ramp with no discontinuity (unlike fract).
-    //
-    // Two low-frequency octaves shift the water line up/down. Fragments
-    // above the threshold are discarded, carving a wavy edge into the quad
-    // without moving any geometry.
-    //
-    // Frequencies chosen so each wave has a period of 25–63 world units
-    // (3–8 tiles at tile_size=8), giving visible rolling swells rather than
-    // a high-frequency zigzag.
+    // 1. Depth darkening (liquids only, not gas)
+    // ------------------------------------------------------------------ //
+    if !is_gas {
+        let darken = clamp(depth * 0.4, 0.0, 0.65);
+        color = vec4<f32>(color.rgb * (1.0 - darken), color.a);
+    }
+
+    // ------------------------------------------------------------------ //
+    // 2. Caustics (liquids only, depth < 0.5)
+    // ------------------------------------------------------------------ //
+    if !is_gas && depth < 0.5 {
+        let tile_pixels: f32 = 32.0;
+        let PIXEL_DENSITY: f32 = 8.0;
+        let pix_uv = floor(in.world_pos / tile_pixels * PIXEL_DENSITY) / PIXEL_DENSITY;
+        let c = caustic(pix_uv, uniforms.time);
+        let caustic_strength = clamp(1.0 - depth * 2.0, 0.0, 0.35);
+        color = vec4<f32>(color.rgb + c * caustic_strength * vec3<f32>(0.6, 0.8, 1.0), color.a);
+    }
+
+    // ------------------------------------------------------------------ //
+    // 3. Shimmer (all fluids)
+    // ------------------------------------------------------------------ //
+    let shimmer = 1.0 + 0.05 * sin(in.world_pos.x * 0.5 + uniforms.time * 0.8);
+    color = vec4<f32>(color.rgb * shimmer, color.a);
+
+    // ------------------------------------------------------------------ //
+    // 4. Surface effects (only surface && !gas)
     // ------------------------------------------------------------------ //
     if is_surface && !is_gas {
-        let local_y = in.uv.y; // 0.0 at bottom vertex, fill at top vertex (per-vertex UV)
+        // Surface glint
+        color = vec4<f32>(min(color.rgb + amp * 0.3, vec3<f32>(1.0)), color.a);
 
-        // Two-octave wave — low spatial frequencies to avoid sawtooth
-        // w1: period ≈ 63 world units (8 tiles), slow
-        // w2: period ≈ 29 world units (4 tiles), slightly faster
-        let w1 = sin(world_x * 0.10 + uniforms.time * 1.2 * speed) * 0.5 + 0.5;
-        let w2 = sin(world_x * 0.22 - uniforms.time * 1.7 * speed) * 0.3 + 0.3;
-        let wave_f = clamp((w1 + w2) / 1.6, 0.0, 1.0); // 0 = trough, 1 = crest
-
-        // Max dip: 25% of fill height × amplitude multiplier.
-        // Since local_y is in fill-space (0..fill), dip is also in fill-space.
-        let max_dip   = 0.25 * amp * fill;
-        let threshold = fill - max_dip * (1.0 - wave_f);
-
-        // Discard fragments above the animated water line.
-        if local_y > threshold {
-            discard;
-        }
-
-        // Surface glint: thin bright band just below the wave crest.
-        let glint_zone = max(max_dip * 0.35, 0.002);
-        let dist = threshold - local_y;
-        if dist < glint_zone {
-            let glint = (1.0 - dist / glint_zone) * 0.35 * amp;
-            color = vec4<f32>(min(color.rgb + glint, vec3(1.0)), color.a);
+        // Shore foam where solid neighbors exist (bit 0=left, bit 1=right, bit 3=below)
+        let has_solid = (edge & 1u) != 0u || (edge & 2u) != 0u || (edge & 8u) != 0u;
+        if has_solid {
+            let foam_t = 0.15 + 0.05 * sin(in.world_pos.x * 2.0 + uniforms.time * 1.5);
+            color = vec4<f32>(mix(color.rgb, vec3<f32>(0.9, 0.95, 1.0), foam_t), color.a);
         }
     }
 
     // ------------------------------------------------------------------ //
-    // 2. Subtle shimmer — very low frequency to avoid diagonal stripe banding.
-    // Amplitude 0.06 (was 0.18), spatial frequency 0.5 (was 4.0).
-    // ------------------------------------------------------------------ //
-    let shimmer = 1.0 + 0.06 * sin(world_x * 0.5 + uniforms.time * 0.8);
-    color = vec4<f32>(color.rgb * shimmer, color.a);
-
-    // ------------------------------------------------------------------ //
-    // 3. Lightmap
+    // 5. Lightmap (all fluids)
     // ------------------------------------------------------------------ //
     let lm_scale  = uniforms.lightmap_uv_rect.xy;
     let lm_offset = uniforms.lightmap_uv_rect.zw;
@@ -127,7 +171,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     color = vec4<f32>(color.rgb * light, color.a);
 
     // ------------------------------------------------------------------ //
-    // 4. Emission glow
+    // 6. Emission glow (all fluids)
     // ------------------------------------------------------------------ //
     color = vec4<f32>(max(color.rgb, emission), color.a);
 
