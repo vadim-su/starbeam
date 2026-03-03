@@ -205,14 +205,29 @@ pub fn reconcile_wave_boundaries(
             continue;
         }
 
-        let left_buf = match wave_state.buffers.get(&left_key) {
-            Some(b) => b,
-            None => continue,
-        };
-        let right_buf = match wave_state.buffers.get(&right_key) {
-            Some(b) => b,
-            None => continue,
-        };
+        let left_has = wave_state.buffers.contains_key(&left_key);
+        let right_has = wave_state.buffers.contains_key(&right_key);
+
+        // Skip if neither side has a buffer.
+        if !left_has && !right_has {
+            continue;
+        }
+
+        // Create buffer for the side that doesn't have one yet,
+        // so waves propagate across the boundary.
+        if !left_has {
+            wave_state
+                .buffers
+                .insert(left_key, WaveBuffer::new(chunk_size));
+        }
+        if !right_has {
+            wave_state
+                .buffers
+                .insert(right_key, WaveBuffer::new(chunk_size));
+        }
+
+        let left_buf = wave_state.buffers.get(&left_key).unwrap();
+        let right_buf = wave_state.buffers.get(&right_key).unwrap();
 
         for local_y in 0..chunk_size {
             let left_idx = (local_y * chunk_size + (chunk_size - 1)) as usize;
