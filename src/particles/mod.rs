@@ -1,4 +1,5 @@
 pub mod particle;
+pub mod physics;
 pub mod pool;
 pub mod render;
 
@@ -20,7 +21,8 @@ impl Plugin for ParticlePlugin {
             .add_systems(Startup, render::init_particle_render)
             .add_systems(
                 Update,
-                render::rebuild_particle_mesh
+                (physics::particle_physics, render::rebuild_particle_mesh)
+                    .chain()
                     .in_set(GameSet::WorldUpdate)
                     .run_if(in_state(AppState::InGame))
                     .run_if(resource_exists::<render::SharedParticleMaterial>),
