@@ -101,7 +101,7 @@ fn spawn_player(
             width: player_config.width,
             height: player_config.height,
         },
-        crate::fluid::FluidContactState::default(),
+        crate::fluid::cell::FluidContactState::default(),
         AnimationState {
             kind: AnimationKind::Idle,
             frame: 0,
