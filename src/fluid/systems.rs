@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use bevy::asset::RenderAssetUsages;
-use bevy::ecs::message::MessageReader;
+use bevy::ecs::message::{MessageReader, MessageWriter};
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::prelude::*;
 use bevy::render::render_resource::{
@@ -11,8 +11,9 @@ use bevy::shader::ShaderRef;
 use bevy::sprite_render::{AlphaMode2d, Material2d, Material2dKey, MeshMaterial2d};
 
 use crate::fluid::cell::FluidCell;
-use crate::fluid::events::{ImpactKind, WaterImpactEvent};
-use crate::fluid::reactions::resolve_density_displacement;
+use crate::fluid::events::{FluidReactionEvent, ImpactKind, WaterImpactEvent};
+use crate::fluid::reactions::FluidReactionRegistry;
+use crate::fluid::reactions::{execute_fluid_reactions, resolve_density_displacement};
 use crate::fluid::registry::FluidRegistry;
 use crate::fluid::render::{
     build_fluid_mesh, ATTRIBUTE_EDGE_FLAGS, ATTRIBUTE_FLUID_DATA, ATTRIBUTE_WAVE_HEIGHT,
@@ -137,6 +138,8 @@ pub fn fluid_simulation(
     active_world: Res<ActiveWorld>,
     mut active_fluids: ResMut<ActiveFluidChunks>,
     config: Res<FluidSimConfig>,
+    reaction_registry: Option<Res<FluidReactionRegistry>>,
+    mut reaction_events: MessageWriter<FluidReactionEvent>,
 ) {
     let chunk_size = active_world.chunk_size;
     let len = (chunk_size * chunk_size) as usize;
@@ -159,7 +162,7 @@ pub fn fluid_simulation(
             };
 
             // Clone current state because simulate_grid reads the old state
-            let tiles = chunk.fg.tiles.clone();
+            let mut tiles = chunk.fg.tiles.clone();
             let fluids = chunk.fluids.clone();
             let mut new_fluids = vec![FluidCell::EMPTY; len];
 
@@ -177,9 +180,28 @@ pub fn fluid_simulation(
             // Apply density displacement (heavier fluids sink)
             resolve_density_displacement(&mut new_fluids, chunk_size, chunk_size, &fluid_registry);
 
+            // Apply fluid reactions (e.g. lava + water → stone + steam)
+            if let Some(ref rr) = reaction_registry {
+                let tile_size = active_world.tile_size;
+                let events = execute_fluid_reactions(
+                    &mut new_fluids,
+                    &mut tiles,
+                    chunk_size,
+                    chunk_size,
+                    rr,
+                    cx,
+                    cy,
+                    tile_size,
+                );
+                for evt in events {
+                    reaction_events.write(evt);
+                }
+            }
+
             // Write back
             if let Some(chunk) = world_map.chunks.get_mut(&(cx, cy)) {
                 chunk.fluids = new_fluids;
+                chunk.fg.tiles = tiles;
             }
         }
 

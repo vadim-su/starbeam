@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use crate::fluid::cell::FluidId;
+use crate::registry::tile::TileId;
 
 /// Kind of water interaction that occurred.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -30,6 +31,17 @@ pub struct WaterImpactEvent {
     pub fluid_id: FluidId,
     /// Mass of the impacting object (affects splash strength).
     pub mass: f32,
+}
+
+/// Emitted when a fluid reaction occurs, for VFX systems to consume.
+#[derive(Message, Debug, Clone)]
+pub struct FluidReactionEvent {
+    /// World-space position of the reaction.
+    pub position: Vec2,
+    pub fluid_a: FluidId,
+    pub fluid_b: FluidId,
+    pub result_tile: Option<TileId>,
+    pub result_fluid: Option<FluidId>,
 }
 
 #[cfg(test)]

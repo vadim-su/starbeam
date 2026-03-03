@@ -15,7 +15,7 @@ pub mod wave;
 
 pub use cell::{FluidCell, FluidId};
 pub use detectors::FluidContactState;
-pub use events::{ImpactKind, WaterImpactEvent};
+pub use events::{FluidReactionEvent, ImpactKind, WaterImpactEvent};
 pub use reactions::{FluidReactionDef, FluidReactionRegistry};
 pub use registry::{FluidDef, FluidRegistry};
 pub use render::build_fluid_mesh;
@@ -30,6 +30,7 @@ pub struct FluidPlugin;
 impl Plugin for FluidPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<events::WaterImpactEvent>()
+            .add_message::<events::FluidReactionEvent>()
             .add_plugins(Material2dPlugin::<FluidMaterial>::default())
             .init_resource::<FluidSimConfig>()
             .init_resource::<systems::ActiveFluidChunks>()
