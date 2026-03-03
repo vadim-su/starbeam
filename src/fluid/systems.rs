@@ -14,7 +14,9 @@ use crate::fluid::cell::FluidCell;
 use crate::fluid::events::{ImpactKind, WaterImpactEvent};
 use crate::fluid::reactions::resolve_density_displacement;
 use crate::fluid::registry::FluidRegistry;
-use crate::fluid::render::{build_fluid_mesh, ATTRIBUTE_FLUID_DATA, ATTRIBUTE_WAVE_HEIGHT};
+use crate::fluid::render::{
+    build_fluid_mesh, ATTRIBUTE_FLUID_DATA, ATTRIBUTE_WAVE_HEIGHT, ATTRIBUTE_WAVE_PARAMS,
+};
 use crate::fluid::simulation::{reconcile_chunk_boundaries, simulate_grid, FluidSimConfig};
 use crate::fluid::wave::{reconcile_wave_boundaries, WaveBuffer, WaveConfig, WaveState};
 use crate::registry::tile::TileRegistry;
@@ -61,6 +63,7 @@ impl Material2d for FluidMaterial {
             Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
             ATTRIBUTE_FLUID_DATA.at_shader_location(3),
             ATTRIBUTE_WAVE_HEIGHT.at_shader_location(4),
+            ATTRIBUTE_WAVE_PARAMS.at_shader_location(5),
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         Ok(())

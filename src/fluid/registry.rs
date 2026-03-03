@@ -21,6 +21,14 @@ fn default_color() -> [u8; 4] {
     [128, 128, 255, 180]
 }
 
+fn default_wave_amplitude() -> f32 {
+    1.0
+}
+
+fn default_wave_speed() -> f32 {
+    1.0
+}
+
 /// Properties of a single fluid/gas type, deserialized from RON.
 #[derive(Debug, Clone, Deserialize)]
 pub struct FluidDef {
@@ -41,6 +49,12 @@ pub struct FluidDef {
     pub light_emission: [u8; 3],
     #[serde(default)]
     pub effects: Vec<String>,
+    /// Multiplier for the shader ripple amplitude (default 1.0).
+    #[serde(default = "default_wave_amplitude")]
+    pub wave_amplitude: f32,
+    /// Multiplier for the shader ripple speed (default 1.0).
+    #[serde(default = "default_wave_speed")]
+    pub wave_speed: f32,
 }
 
 /// Runtime registry of all fluid types. Index 0 is reserved for NONE.
@@ -107,6 +121,8 @@ mod tests {
                 damage_on_contact: 0.0,
                 light_emission: [0, 0, 0],
                 effects: vec![],
+                wave_amplitude: 1.0,
+                wave_speed: 1.0,
             },
             FluidDef {
                 id: "lava".to_string(),
@@ -118,6 +134,8 @@ mod tests {
                 damage_on_contact: 10.0,
                 light_emission: [255, 100, 20],
                 effects: vec![],
+                wave_amplitude: 0.4,
+                wave_speed: 0.3,
             },
             FluidDef {
                 id: "steam".to_string(),
@@ -129,6 +147,8 @@ mod tests {
                 damage_on_contact: 0.0,
                 light_emission: [0, 0, 0],
                 effects: vec![],
+                wave_amplitude: 0.6,
+                wave_speed: 1.5,
             },
         ]
     }

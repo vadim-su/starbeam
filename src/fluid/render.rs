@@ -23,6 +23,11 @@ pub const ATTRIBUTE_FLUID_DATA: MeshVertexAttribute =
 pub const ATTRIBUTE_WAVE_HEIGHT: MeshVertexAttribute =
     MeshVertexAttribute::new("WaveHeight", 982301568, VertexFormat::Float32);
 
+/// Per-vertex wave parameters from FluidDef: `[amplitude, speed]`.
+/// Used by the shader to customise ripple strength and frequency per fluid.
+pub const ATTRIBUTE_WAVE_PARAMS: MeshVertexAttribute =
+    MeshVertexAttribute::new("WaveParams", 982301569, VertexFormat::Float32x2);
+
 /// Determine whether a liquid cell is at the surface (exposed to air above).
 ///
 /// A liquid cell at `(local_x, local_y)` is "surface" when the cell directly
@@ -215,6 +220,7 @@ pub fn build_fluid_mesh(
     let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(capacity * 4);
     let mut fluid_data: Vec<[f32; 4]> = Vec::with_capacity(capacity * 4);
     let mut wave_data: Vec<f32> = Vec::with_capacity(capacity * 4);
+    let mut wave_params_data: Vec<[f32; 2]> = Vec::with_capacity(capacity * 4);
     let mut indices: Vec<u32> = Vec::with_capacity(capacity * 6);
 
     let base_x = chunk_x * chunk_size as i32;
@@ -390,6 +396,10 @@ pub fn build_fluid_mesh(
             let wave_h = wave_heights.map(|wh| wh[idx]).unwrap_or(0.0);
             wave_data.extend_from_slice(&[wave_h, wave_h, wave_h, wave_h]);
 
+            // WAVE_PARAMS: per-fluid amplitude and speed multipliers from FluidDef
+            let wp = [def.wave_amplitude, def.wave_speed];
+            wave_params_data.extend_from_slice(&[wp, wp, wp, wp]);
+
             indices.extend_from_slice(&[vi, vi + 1, vi + 2, vi, vi + 2, vi + 3]);
         }
     }
@@ -407,6 +417,7 @@ pub fn build_fluid_mesh(
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.insert_attribute(ATTRIBUTE_FLUID_DATA, fluid_data);
     mesh.insert_attribute(ATTRIBUTE_WAVE_HEIGHT, wave_data);
+    mesh.insert_attribute(ATTRIBUTE_WAVE_PARAMS, wave_params_data);
     mesh.insert_indices(Indices::U32(indices));
     Some(mesh)
 }
@@ -429,6 +440,8 @@ mod tests {
                 damage_on_contact: 0.0,
                 light_emission: [0, 0, 0],
                 effects: vec![],
+                wave_amplitude: 1.0,
+                wave_speed: 1.0,
             },
             FluidDef {
                 id: "steam".to_string(),
@@ -440,6 +453,8 @@ mod tests {
                 damage_on_contact: 0.0,
                 light_emission: [0, 0, 0],
                 effects: vec![],
+                wave_amplitude: 0.6,
+                wave_speed: 1.5,
             },
             FluidDef {
                 id: "lava".to_string(),
@@ -451,6 +466,8 @@ mod tests {
                 damage_on_contact: 10.0,
                 light_emission: [255, 100, 20],
                 effects: vec![],
+                wave_amplitude: 0.4,
+                wave_speed: 0.3,
             },
         ])
     }
@@ -984,6 +1001,10 @@ mod tests {
         assert!(
             mesh.attribute(ATTRIBUTE_FLUID_DATA).is_some(),
             "missing FLUID_DATA"
+        );
+        assert!(
+            mesh.attribute(ATTRIBUTE_WAVE_PARAMS).is_some(),
+            "missing WAVE_PARAMS"
         );
         assert!(mesh.indices().is_some(), "missing indices");
     }

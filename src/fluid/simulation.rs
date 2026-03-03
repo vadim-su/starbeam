@@ -833,6 +833,8 @@ mod tests {
                 damage_on_contact: 0.0,
                 light_emission: [0, 0, 0],
                 effects: vec![],
+                wave_amplitude: 1.0,
+                wave_speed: 1.0,
             },
             FluidDef {
                 id: "gas".to_string(),
@@ -844,6 +846,8 @@ mod tests {
                 damage_on_contact: 0.0,
                 light_emission: [0, 0, 0],
                 effects: vec![],
+                wave_amplitude: 1.0,
+                wave_speed: 1.0,
             },
         ])
     }

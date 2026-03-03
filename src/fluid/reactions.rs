@@ -184,6 +184,8 @@ mod tests {
                 damage_on_contact: 0.0,
                 light_emission: [0, 0, 0],
                 effects: vec![],
+                wave_amplitude: 1.0,
+                wave_speed: 1.0,
             },
             FluidDef {
                 id: "lava".to_string(),
@@ -195,6 +197,8 @@ mod tests {
                 damage_on_contact: 10.0,
                 light_emission: [255, 100, 20],
                 effects: vec![],
+                wave_amplitude: 0.4,
+                wave_speed: 0.3,
             },
             FluidDef {
                 id: "steam".to_string(),
@@ -206,6 +210,8 @@ mod tests {
                 damage_on_contact: 0.0,
                 light_emission: [0, 0, 0],
                 effects: vec![],
+                wave_amplitude: 0.6,
+                wave_speed: 1.5,
             },
         ])
     }
