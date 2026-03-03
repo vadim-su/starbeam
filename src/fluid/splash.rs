@@ -30,8 +30,8 @@ pub struct SplashConfig {
 impl Default for SplashConfig {
     fn default() -> Self {
         Self {
-            splash_displacement: 0.3,
-            particles_per_mass: 15.0,
+            splash_displacement: 0.15,
+            particles_per_mass: 25.0,
             particle_lifetime: 1.5,
             particle_size: 4.0,
             min_splash_velocity: 5.0,
@@ -92,7 +92,7 @@ pub fn spawn_splash_particles(
                 let displaced = raw.min(cell.mass - 0.01).max(0.0);
                 let count = (displaced * splash_config.particles_per_mass)
                     .round()
-                    .clamp(4.0, 20.0) as u32;
+                    .clamp(4.0, 30.0) as u32;
                 (displaced, count)
             }
             ImpactKind::Wake => {
@@ -142,17 +142,51 @@ pub fn spawn_splash_particles(
             let vx = angle.cos() * speed;
             let vy = angle.sin() * speed;
 
+            // Vary particle size: smaller at edges, larger in center
+            let size = splash_config.particle_size * (0.5 + t * 0.8); // range: 50% to 130% of base
+
             pool.spawn(
                 event.position,
                 Vec2::new(vx, vy),
                 mass_per_particle,
                 event.fluid_id,
                 splash_config.particle_lifetime,
-                splash_config.particle_size,
+                size,
                 color,
                 1.0,  // normal gravity
                 true, // fade out as splash lands
             );
+        }
+
+        // Ripple ring: small horizontal particles that spread outward on the surface.
+        // These create the visual effect of expanding rings on impact.
+        if matches!(event.kind, ImpactKind::Splash) {
+            let ripple_count = (particle_count / 3).clamp(2, 8);
+            let ripple_color = [
+                (color[0] * 1.3).min(1.0),
+                (color[1] * 1.3).min(1.0),
+                (color[2] * 1.3).min(1.0),
+                color[3] * 0.6,
+            ];
+            for j in 0..ripple_count {
+                let t = j as f32 / ripple_count as f32;
+                let direction = if t < 0.5 { -1.0 } else { 1.0 };
+                let spread_speed = speed * 0.6 * (0.5 + t.fract());
+                let vx = direction * spread_speed;
+                let vy = speed * 0.1;
+
+                pool.spawn(
+                    event.position,
+                    Vec2::new(vx, vy),
+                    0.0,                               // visual only, no CA mass
+                    FluidId::NONE,                     // no reabsorption
+                    0.4,                               // short lifetime
+                    splash_config.particle_size * 0.5, // small
+                    ripple_color,
+                    0.3,  // low gravity — stays near surface
+                    true, // fade out
+                );
+            }
         }
     }
 }
