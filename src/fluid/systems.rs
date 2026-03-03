@@ -466,51 +466,6 @@ pub fn fluid_rebuild_meshes(
                     .collect()
             });
 
-        // Compute per-column emission coverage seed by walking upward through
-        // chunks above.  For each column, if the neighbour-above row has an
-        // emissive fluid of the same type as cells in this chunk, we keep
-        // walking up to see if a *different* fluid sits on top of that body.
-        // If so, the column enters "covered" state from the very top of this
-        // chunk, suppressing lava glow under water across chunk boundaries.
-        let emission_cover_seed: Vec<bool> = (0..chunk_size)
-            .map(|x| {
-                let Some(ref nar) = neighbor_above_row else {
-                    return false;
-                };
-                let nar_cell = nar[x as usize];
-                if nar_cell.is_empty() {
-                    return false;
-                }
-                let emissive_fluid = nar_cell.fluid_id;
-                let def = fluid_registry.get(emissive_fluid);
-                if def.light_emission == [0, 0, 0] {
-                    return false;
-                }
-                // Walk upward from row 1 of chunk (data_cx, cy+1).
-                // Row 0 is the neighbor_above_row we already have.
-                let mut check_cy = cy + 1;
-                let mut check_ly: u32 = 1;
-                loop {
-                    if check_ly >= chunk_size {
-                        check_cy += 1;
-                        check_ly = 0;
-                    }
-                    let Some(check_chunk) = world_map.chunks.get(&(data_cx, check_cy)) else {
-                        return false;
-                    };
-                    let cidx = (check_ly * chunk_size + x) as usize;
-                    let c = check_chunk.fluids[cidx];
-                    if c.is_empty() {
-                        return false; // hit air → not covered
-                    }
-                    if c.fluid_id != emissive_fluid {
-                        return true; // different fluid above → covered!
-                    }
-                    check_ly += 1;
-                }
-            })
-            .collect();
-
         let Some(mesh) = build_fluid_mesh(
             &chunk.fluids,
             chunk.fg.tiles.as_slice(),
@@ -528,7 +483,7 @@ pub fn fluid_rebuild_meshes(
             left_edge_gas_h,
             right_edge_gas_h,
             above_surface_world_ys.as_deref(),
-            Some(&emission_cover_seed),
+            None,
         ) else {
             continue;
         };
