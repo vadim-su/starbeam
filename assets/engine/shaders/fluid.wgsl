@@ -45,11 +45,15 @@ fn vertex(in: VertexInput) -> VertexOutput {
         let amp   = in.wave_params.x;
         let speed = in.wave_params.y;
         // Multi-octave ripple: base (slow, large) + mid + detail (fast, small)
-        // Amplitudes in world units (tile_size=8.0), so 3.0 ≈ 0.375 tiles.
-        let base   = sin(world_pos.x * 1.5 + uniforms.time * 1.0  * speed) * 3.0 * amp;
-        let mid    = sin(world_pos.x * 4.0 + world_pos.y * 0.5 + uniforms.time * 1.8 * speed) * 1.2 * amp;
-        let detail = sin(world_pos.x * 9.0 - world_pos.y * 1.2 + uniforms.time * 3.0 * speed) * 0.5 * amp;
-        world_pos.y += base + mid + detail + in.wave_height;
+        // Amplitudes in world units (tile_size=8.0). Keep small so surface doesn't
+        // pop above neighbouring empty cells and create visible geometry in air.
+        let base   = sin(world_pos.x * 1.5 + uniforms.time * 1.0  * speed) * 1.0 * amp;
+        let mid    = sin(world_pos.x * 4.0 + world_pos.y * 0.5 + uniforms.time * 1.8 * speed) * 0.4 * amp;
+        let detail = sin(world_pos.x * 9.0 - world_pos.y * 1.2 + uniforms.time * 3.0 * speed) * 0.15 * amp;
+        // Clamp to only displace downward: peaks stay at the fill-level, troughs
+        // dip below — this prevents water geometry from appearing above the surface.
+        let raw_disp = base + mid + detail + in.wave_height;
+        world_pos.y += min(raw_disp, 0.0);
     }
 
     // Reconstruct local position with wave offset applied
