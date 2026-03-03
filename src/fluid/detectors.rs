@@ -97,20 +97,18 @@ pub fn detect_entity_water_entry(
 
 /// Emit wake events for entities moving through fluid.
 ///
-/// Throttled to every 0.15 seconds via a `SwimThrottle` resource accumulator.
+/// Throttled to every 0.05 seconds via a `SwimThrottle` resource accumulator.
 /// Only fires for entities currently submerged in fluid and moving faster than
-/// 10.0 px/s.
+/// 20.0 px/s. Fires frequently with small impulses for smooth wave response.
 pub fn detect_entity_swimming(
     mut events: MessageWriter<WaterImpactEvent>,
     query: Query<(&Transform, &Velocity, &FluidContactState)>,
     time: Res<Time>,
     mut throttle: ResMut<SwimThrottle>,
 ) {
-    // Throttle: only run every ~0.15 seconds.
-    // Uses an accumulator rather than elapsed_secs() % interval to avoid
-    // float precision loss at large elapsed times.
+    // Throttle: run every ~0.05 seconds (frequent, small impulses = smooth waves).
     throttle.0 += time.delta_secs();
-    if throttle.0 < 0.15 {
+    if throttle.0 < 0.05 {
         return;
     }
     throttle.0 = 0.0;
@@ -123,7 +121,7 @@ pub fn detect_entity_swimming(
 
         // Only emit for entities moving fast enough
         let speed = (velocity.x * velocity.x + velocity.y * velocity.y).sqrt();
-        if speed <= 10.0 {
+        if speed <= 20.0 {
             continue;
         }
 
