@@ -3,6 +3,7 @@ use bevy::sprite_render::Material2dPlugin;
 
 pub mod cell;
 pub mod debug;
+pub mod detectors;
 pub mod events;
 pub mod reactions;
 pub mod registry;
@@ -13,6 +14,7 @@ pub mod systems;
 pub mod wave;
 
 pub use cell::{FluidCell, FluidId};
+pub use detectors::FluidContactState;
 pub use events::{ImpactKind, WaterImpactEvent};
 pub use reactions::{FluidReactionDef, FluidReactionRegistry};
 pub use registry::{FluidDef, FluidRegistry};
@@ -34,10 +36,13 @@ impl Plugin for FluidPlugin {
             .init_resource::<wave::WaveConfig>()
             .init_resource::<wave::WaveState>()
             .init_resource::<splash::SplashConfig>()
+            .init_resource::<detectors::SwimThrottle>()
             .add_systems(Startup, systems::init_fluid_material)
             .add_systems(
                 Update,
                 (
+                    detectors::detect_entity_water_entry,
+                    detectors::detect_entity_swimming,
                     systems::fluid_simulation,
                     systems::wave_consume_events,
                     systems::wave_simulation,
