@@ -39,10 +39,11 @@ pub struct RegistryHandles {
     // world_config removed — ActiveWorld is now generated, not loaded from file
 }
 
-/// Application state: Loading waits for assets, InGame runs gameplay.
+/// Application state: MainMenu shows title screen, Loading waits for assets, InGame runs gameplay.
 #[derive(States, Default, Debug, Clone, Eq, PartialEq, Hash)]
 pub enum AppState {
     #[default]
+    MainMenu,
     Loading,
     LoadingBiomes,
     LoadingAutotile,
@@ -82,7 +83,7 @@ impl Plugin for RegistryPlugin {
             .register_asset_loader(RonLoader::<BiomeAsset>::new(&["biome.ron"]))
             .register_asset_loader(RonLoader::<GenerationConfigAsset>::new(&["generation.ron"]))
             .register_asset_loader(RonLoader::<StarTypeAsset>::new(&["star.ron"]))
-            .add_systems(Startup, start_loading)
+            .add_systems(OnEnter(AppState::Loading), start_loading)
             .add_systems(Update, check_loading.run_if(in_state(AppState::Loading)))
             .add_systems(
                 Update,

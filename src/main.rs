@@ -6,6 +6,7 @@ mod interaction;
 pub mod inventory;
 pub mod item;
 pub mod math;
+mod menu;
 pub mod object;
 pub mod particles;
 mod parallax;
@@ -41,6 +42,7 @@ fn main() {
         )
         .add_plugins(EguiPlugin::default())
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
+        .add_plugins(menu::MenuPlugin)
         .add_plugins(registry::RegistryPlugin)
         .add_plugins(world::WorldPlugin)
         .add_plugins(player::PlayerPlugin)
