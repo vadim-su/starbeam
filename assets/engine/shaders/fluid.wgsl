@@ -87,13 +87,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         let w2 = sin(world_x * 3.5 - uniforms.time * 2.2 * speed) * 0.3 + 0.3;
         let wave_f = clamp((w1 + w2) / 1.6, 0.0, 1.0); // 0 = trough, 1 = crest
 
-        // Physics ripple: convert wave_height to a fraction of tile height and
-        // shift the threshold.  Clamped so it can only deepen the trough, never
-        // push the surface above fill level.
-        let physics_dip = clamp(-in.wave_height / tile_size, 0.0, 0.4);
-
-        // Max dip: 28% of tile height × amplitude multiplier, plus physics.
-        let max_dip   = 0.28 * amp + physics_dip;
+        // Max dip: 28% of tile height × amplitude multiplier.
+        let max_dip   = 0.28 * amp;
         let threshold = fill - max_dip * (1.0 - wave_f);
 
         // Discard fragments that are above the animated water line.
