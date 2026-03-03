@@ -497,6 +497,68 @@ fn extract_lighting_data(
         cache.size = new_size;
     }
 
+    // --- Overlay fluid density on top of tile density (every frame) ---
+    // Fluids move each tick so this cannot be cached inside `need_rebuild`.
+    // Only increases density for air tiles (fluids don't make solid tiles darker).
+    if let Some(ref fluid_reg) = fluid_registry {
+        let cs = world_config.chunk_size as i32;
+        let cs_u = world_config.chunk_size;
+        let clamp_min_ty = min_ty.max(0);
+        let clamp_max_ty = max_ty.min(height_tiles - 1);
+        if clamp_min_ty <= clamp_max_ty {
+            let fl_min_cy = clamp_min_ty.div_euclid(cs);
+            let fl_max_cy = clamp_max_ty.div_euclid(cs);
+            let fl_min_cx = min_tx.div_euclid(cs);
+            let fl_max_cx = max_tx.div_euclid(cs);
+
+            for cy in fl_min_cy..=fl_max_cy {
+                for cx in fl_min_cx..=fl_max_cx {
+                    let data_cx = world_config.wrap_chunk_x(cx);
+                    let Some(chunk) = world_map.chunk(data_cx, cy) else {
+                        continue;
+                    };
+
+                    let chunk_tx0 = cx * cs;
+                    let chunk_ty0 = cy * cs;
+                    let tx0 = chunk_tx0.max(min_tx);
+                    let tx1 = (chunk_tx0 + cs).min(max_tx + 1);
+                    let ty0 = chunk_ty0.max(clamp_min_ty);
+                    let ty1 = (chunk_ty0 + cs).min(clamp_max_ty + 1);
+
+                    for ty in ty0..ty1 {
+                        let ly = (ty - chunk_ty0) as u32;
+                        for tx in tx0..tx1 {
+                            let lx = (tx - chunk_tx0) as u32;
+                            let fidx = (ly * cs_u + lx) as usize;
+                            let cell = chunk.fluids[fidx];
+                            if cell.is_empty() {
+                                continue;
+                            }
+                            let def = fluid_reg.get(cell.fluid_id);
+                            if def.light_absorption <= 0.0 {
+                                continue;
+                            }
+
+                            let buf_x = (tx - min_tx) as u32;
+                            let buf_y = (max_ty - ty) as u32;
+                            let idx = (buf_y * input_w + buf_x) as usize;
+
+                            // Skip solid tiles — fluids don't make them more opaque
+                            if input.density[idx] >= 255 {
+                                continue;
+                            }
+
+                            let absorption =
+                                cell.mass.min(1.0) * def.light_absorption;
+                            let fluid_density = (absorption * 255.0) as u8;
+                            input.density[idx] = input.density[idx].max(fluid_density);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // --- Compute effective sun color from day/night cycle ---
     // Bake ambient_min into sun emitters: each channel is at least ambient_min.
     // This ensures sky-visible tiles always emit some light (even at night),
