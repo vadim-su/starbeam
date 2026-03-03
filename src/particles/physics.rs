@@ -2,14 +2,22 @@ use bevy::prelude::*;
 
 use super::pool::ParticlePool;
 use crate::particles::ParticleConfig;
+use crate::registry::tile::TileRegistry;
+use crate::registry::world::ActiveWorld;
+use crate::world::chunk::WorldMap;
 
-/// Update particle physics: move, age, apply gravity.
+/// Update particle physics: move, age, apply gravity, kill on solid tile.
 pub fn particle_physics(
     mut pool: ResMut<ParticlePool>,
     config: Res<ParticleConfig>,
     time: Res<Time>,
+    world_map: Res<WorldMap>,
+    tile_registry: Res<TileRegistry>,
+    active_world: Res<ActiveWorld>,
 ) {
     let dt = time.delta_secs();
+    let tile_size = active_world.tile_size;
+    let chunk_size = active_world.chunk_size;
 
     for p in &mut pool.particles {
         if p.is_dead() {
@@ -30,6 +38,25 @@ pub fn particle_physics(
         // Mark dead if lifetime exceeded
         if p.age >= p.lifetime {
             p.alive = false;
+            continue;
+        }
+
+        // Kill particle if it entered a solid tile
+        let tile_x = (p.position.x / tile_size).floor() as i32;
+        let tile_y = (p.position.y / tile_size).floor() as i32;
+        let data_cx = active_world.wrap_chunk_x(tile_x.div_euclid(chunk_size as i32));
+        let cy = tile_y.div_euclid(chunk_size as i32);
+        let local_x = tile_x.rem_euclid(chunk_size as i32) as u32;
+        let local_y = tile_y.rem_euclid(chunk_size as i32) as u32;
+
+        if let Some(chunk) = world_map.chunks.get(&(data_cx, cy)) {
+            let idx = (local_y * chunk_size + local_x) as usize;
+            if idx < chunk.fg.tiles.len() {
+                let tile_id = chunk.fg.tiles[idx];
+                if tile_registry.is_solid(tile_id) {
+                    p.alive = false;
+                }
+            }
         }
     }
 }
