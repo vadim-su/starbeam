@@ -29,6 +29,10 @@ fn default_wave_speed() -> f32 {
     1.0
 }
 
+fn default_light_absorption() -> f32 {
+    0.0
+}
+
 /// Properties of a single fluid/gas type, deserialized from RON.
 #[derive(Debug, Clone, Deserialize)]
 pub struct FluidDef {
@@ -55,6 +59,10 @@ pub struct FluidDef {
     /// Multiplier for the shader ripple speed (default 1.0).
     #[serde(default = "default_wave_speed")]
     pub wave_speed: f32,
+    /// How much this fluid blocks light (0.0 = transparent, 1.0 = opaque).
+    /// Used by RC lighting to attenuate light through fluid.
+    #[serde(default = "default_light_absorption")]
+    pub light_absorption: f32,
 }
 
 /// Runtime registry of all fluid types. Index 0 is reserved for NONE.
@@ -123,6 +131,7 @@ mod tests {
                 effects: vec![],
                 wave_amplitude: 1.0,
                 wave_speed: 1.0,
+                light_absorption: 0.3,
             },
             FluidDef {
                 id: "lava".to_string(),
@@ -136,6 +145,7 @@ mod tests {
                 effects: vec![],
                 wave_amplitude: 0.4,
                 wave_speed: 0.3,
+                light_absorption: 0.8,
             },
             FluidDef {
                 id: "steam".to_string(),
@@ -149,6 +159,7 @@ mod tests {
                 effects: vec![],
                 wave_amplitude: 0.6,
                 wave_speed: 1.5,
+                light_absorption: 0.05,
             },
         ]
     }

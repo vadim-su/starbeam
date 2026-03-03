@@ -835,6 +835,7 @@ mod tests {
                 effects: vec![],
                 wave_amplitude: 1.0,
                 wave_speed: 1.0,
+                light_absorption: 0.3,
             },
             FluidDef {
                 id: "gas".to_string(),
@@ -848,6 +849,7 @@ mod tests {
                 effects: vec![],
                 wave_amplitude: 1.0,
                 wave_speed: 1.0,
+                light_absorption: 0.05,
             },
         ])
     }

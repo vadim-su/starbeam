@@ -532,6 +532,7 @@ mod tests {
                 effects: vec![],
                 wave_amplitude: 1.0,
                 wave_speed: 1.0,
+                light_absorption: 0.3,
             },
             FluidDef {
                 id: "steam".to_string(),
@@ -545,6 +546,7 @@ mod tests {
                 effects: vec![],
                 wave_amplitude: 0.6,
                 wave_speed: 1.5,
+                light_absorption: 0.05,
             },
             FluidDef {
                 id: "lava".to_string(),
@@ -558,6 +560,7 @@ mod tests {
                 effects: vec![],
                 wave_amplitude: 0.4,
                 wave_speed: 0.3,
+                light_absorption: 0.8,
             },
         ])
     }

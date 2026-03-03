@@ -12,6 +12,7 @@ FluidRegistryAsset(
             effects: [],
             wave_amplitude: 1.0,
             wave_speed: 1.0,
+            light_absorption: 0.3,
         ),
         (
             id: "lava",
@@ -25,6 +26,7 @@ FluidRegistryAsset(
             effects: [],
             wave_amplitude: 0.4,
             wave_speed: 0.3,
+            light_absorption: 0.8,
         ),
         (
             id: "steam",
@@ -38,6 +40,7 @@ FluidRegistryAsset(
             effects: [],
             wave_amplitude: 0.6,
             wave_speed: 1.5,
+            light_absorption: 0.05,
         ),
         (
             id: "toxic_gas",
@@ -51,6 +54,7 @@ FluidRegistryAsset(
             effects: ["breathing_damage"],
             wave_amplitude: 0.5,
             wave_speed: 1.2,
+            light_absorption: 0.1,
         ),
         (
             id: "smoke",
@@ -64,6 +68,7 @@ FluidRegistryAsset(
             effects: ["reduce_visibility"],
             wave_amplitude: 0.3,
             wave_speed: 0.8,
+            light_absorption: 0.4,
         ),
     ],
 )
