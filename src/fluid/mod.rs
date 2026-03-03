@@ -5,6 +5,7 @@ pub mod cell;
 pub mod debug;
 pub mod detectors;
 pub mod events;
+pub mod fluid_world;
 pub mod reactions;
 pub mod registry;
 pub mod render;

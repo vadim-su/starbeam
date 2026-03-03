@@ -1513,7 +1513,7 @@ mod tests {
 
         let mesh = build_fluid_mesh(
             &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
-            None, None,
+            None, None, None,
         )
         .expect("should produce a mesh");
 
@@ -1561,7 +1561,7 @@ mod tests {
 
         let mesh = build_fluid_mesh(
             &fluids, &tiles, 0, 0, 4, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
-            None, None,
+            None, None, None,
         )
         .expect("should produce a mesh");
 
@@ -1629,6 +1629,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .expect("should produce a mesh");
 
@@ -1678,7 +1679,7 @@ mod tests {
 
         let mesh = build_fluid_mesh(
             &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
-            None, None,
+            None, None, None,
         )
         .expect("should produce mesh");
         assert!(
