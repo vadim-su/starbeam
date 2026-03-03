@@ -19,6 +19,10 @@ pub struct Particle {
     /// RGBA colour.
     pub color: [f32; 4],
     pub alive: bool,
+    /// Gravity multiplier: 1.0 = normal, -0.3 = bubbles float up slowly.
+    pub gravity_scale: f32,
+    /// Whether alpha fades to 0 as particle ages.
+    pub fade_out: bool,
 }
 
 impl Particle {

@@ -52,6 +52,8 @@ impl ParticlePool {
         lifetime: f32,
         size: f32,
         color: [f32; 4],
+        gravity_scale: f32,
+        fade_out: bool,
     ) -> Option<usize> {
         let len = self.particles.len();
         let capacity = self.particles.capacity();
@@ -62,7 +64,16 @@ impl ParticlePool {
                 let idx = (self.next_free + i) % len;
                 if self.particles[idx].is_dead() {
                     self.init_particle(
-                        idx, position, velocity, mass, fluid_id, lifetime, size, color,
+                        idx,
+                        position,
+                        velocity,
+                        mass,
+                        fluid_id,
+                        lifetime,
+                        size,
+                        color,
+                        gravity_scale,
+                        fade_out,
                     );
                     self.next_free = (idx + 1) % len.max(1);
                     return Some(idx);
@@ -74,7 +85,15 @@ impl ParticlePool {
         if len < capacity {
             let idx = len;
             self.particles.push(Self::make_particle(
-                position, velocity, mass, fluid_id, lifetime, size, color,
+                position,
+                velocity,
+                mass,
+                fluid_id,
+                lifetime,
+                size,
+                color,
+                gravity_scale,
+                fade_out,
             ));
             self.next_free = (idx + 1) % self.particles.len().max(1);
             return Some(idx);
@@ -97,7 +116,16 @@ impl ParticlePool {
             .unwrap();
 
         self.init_particle(
-            oldest_idx, position, velocity, mass, fluid_id, lifetime, size, color,
+            oldest_idx,
+            position,
+            velocity,
+            mass,
+            fluid_id,
+            lifetime,
+            size,
+            color,
+            gravity_scale,
+            fade_out,
         );
         self.next_free = (oldest_idx + 1) % len.max(1);
         Some(oldest_idx)
@@ -118,6 +146,8 @@ impl ParticlePool {
         lifetime: f32,
         size: f32,
         color: [f32; 4],
+        gravity_scale: f32,
+        fade_out: bool,
     ) -> Particle {
         Particle {
             position,
@@ -129,6 +159,8 @@ impl ParticlePool {
             size,
             color,
             alive: true,
+            gravity_scale,
+            fade_out,
         }
     }
 
@@ -142,6 +174,8 @@ impl ParticlePool {
         lifetime: f32,
         size: f32,
         color: [f32; 4],
+        gravity_scale: f32,
+        fade_out: bool,
     ) {
         let p = &mut self.particles[idx];
         p.position = position;
@@ -153,6 +187,8 @@ impl ParticlePool {
         p.size = size;
         p.color = color;
         p.alive = true;
+        p.gravity_scale = gravity_scale;
+        p.fade_out = fade_out;
     }
 }
 
@@ -164,7 +200,17 @@ mod tests {
     #[test]
     fn spawn_and_count() {
         let mut pool = ParticlePool::new(10);
-        pool.spawn(Vec2::ZERO, Vec2::ZERO, 0.1, FluidId(1), 1.0, 2.0, [0.0; 4]);
+        pool.spawn(
+            Vec2::ZERO,
+            Vec2::ZERO,
+            0.1,
+            FluidId(1),
+            1.0,
+            2.0,
+            [0.0; 4],
+            1.0,
+            false,
+        );
         assert_eq!(pool.alive_count(), 1);
     }
 
@@ -172,11 +218,31 @@ mod tests {
     fn dead_particles_recycled() {
         let mut pool = ParticlePool::new(2);
         let idx0 = pool
-            .spawn(Vec2::ZERO, Vec2::ZERO, 0.1, FluidId(1), 1.0, 2.0, [0.0; 4])
+            .spawn(
+                Vec2::ZERO,
+                Vec2::ZERO,
+                0.1,
+                FluidId(1),
+                1.0,
+                2.0,
+                [0.0; 4],
+                1.0,
+                false,
+            )
             .unwrap();
         pool.particles[idx0].alive = false;
         let idx1 = pool
-            .spawn(Vec2::ONE, Vec2::ONE, 0.2, FluidId(1), 2.0, 3.0, [1.0; 4])
+            .spawn(
+                Vec2::ONE,
+                Vec2::ONE,
+                0.2,
+                FluidId(1),
+                2.0,
+                3.0,
+                [1.0; 4],
+                1.0,
+                false,
+            )
             .unwrap();
         assert_eq!(idx1, idx0, "should reuse dead slot");
         assert_eq!(pool.alive_count(), 1);
@@ -186,10 +252,30 @@ mod tests {
     fn pool_capacity_forces_recycle() {
         let mut pool = ParticlePool::new(3);
         for _ in 0..3 {
-            pool.spawn(Vec2::ZERO, Vec2::ZERO, 0.1, FluidId(1), 1.0, 2.0, [0.0; 4]);
+            pool.spawn(
+                Vec2::ZERO,
+                Vec2::ZERO,
+                0.1,
+                FluidId(1),
+                1.0,
+                2.0,
+                [0.0; 4],
+                1.0,
+                false,
+            );
         }
         assert_eq!(pool.alive_count(), 3);
-        let idx = pool.spawn(Vec2::ZERO, Vec2::ZERO, 0.1, FluidId(1), 1.0, 2.0, [0.0; 4]);
+        let idx = pool.spawn(
+            Vec2::ZERO,
+            Vec2::ZERO,
+            0.1,
+            FluidId(1),
+            1.0,
+            2.0,
+            [0.0; 4],
+            1.0,
+            false,
+        );
         assert!(idx.is_some());
         assert_eq!(pool.alive_count(), 3); // still 3, one was force-recycled
     }
@@ -206,6 +292,8 @@ mod tests {
             size: 1.0,
             color: [1.0; 4],
             alive: true,
+            gravity_scale: 1.0,
+            fade_out: false,
         };
         assert!((p.age_ratio() - 0.5).abs() < f32::EPSILON);
     }

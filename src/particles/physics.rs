@@ -16,8 +16,9 @@ pub fn particle_physics(
             continue;
         }
 
-        // Apply gravity (downward)
-        p.velocity.y -= config.gravity * dt;
+        // Apply gravity scaled by particle's gravity_scale.
+        // Negative scale = particle floats upward (e.g. bubbles).
+        p.velocity.y -= config.gravity * p.gravity_scale * dt;
 
         // Integrate position
         p.position.x += p.velocity.x * dt;
@@ -51,6 +52,8 @@ mod tests {
             size: 2.0,
             color: [1.0; 4],
             alive: true,
+            gravity_scale: 1.0,
+            fade_out: false,
         };
 
         // After aging past lifetime, should be dead

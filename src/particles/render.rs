@@ -86,8 +86,12 @@ pub fn rebuild_particle_mesh(
         let y = p.position.y;
         let r = p.size * 0.5;
 
-        // Fade out as particle ages.
-        let alpha = p.color[3] * (1.0 - p.age_ratio());
+        // Optionally fade out as particle ages.
+        let alpha = if p.fade_out {
+            p.color[3] * (1.0 - p.age_ratio())
+        } else {
+            p.color[3]
+        };
         let c = [p.color[0], p.color[1], p.color[2], alpha];
 
         // Four corners of the quad (local space, no rotation):
@@ -163,6 +167,8 @@ mod tests {
             1.0,
             4.0,
             [0.2, 0.5, 1.0, 1.0],
+            1.0,
+            false,
         );
         let alive: Vec<_> = pool.particles.iter().filter(|p| !p.is_dead()).collect();
         assert_eq!(alive.len(), 1);
@@ -174,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn alpha_fades_with_age() {
+    fn alpha_fades_with_age_when_fade_out_true() {
         use crate::particles::particle::Particle;
         let p = Particle {
             position: Vec2::ZERO,
@@ -186,11 +192,44 @@ mod tests {
             size: 1.0,
             color: [1.0, 1.0, 1.0, 1.0],
             alive: true,
+            gravity_scale: 1.0,
+            fade_out: true,
         };
-        let alpha = p.color[3] * (1.0 - p.age_ratio());
+        let alpha = if p.fade_out {
+            p.color[3] * (1.0 - p.age_ratio())
+        } else {
+            p.color[3]
+        };
         assert!(
             (alpha - 0.5).abs() < 1e-5,
-            "alpha should be 0.5 at mid-life"
+            "alpha should be 0.5 at mid-life with fade_out=true"
+        );
+    }
+
+    #[test]
+    fn alpha_constant_when_fade_out_false() {
+        use crate::particles::particle::Particle;
+        let p = Particle {
+            position: Vec2::ZERO,
+            velocity: Vec2::ZERO,
+            mass: 0.0,
+            fluid_id: FluidId::NONE,
+            lifetime: 2.0,
+            age: 1.0,
+            size: 1.0,
+            color: [1.0, 1.0, 1.0, 0.8],
+            alive: true,
+            gravity_scale: 1.0,
+            fade_out: false,
+        };
+        let alpha = if p.fade_out {
+            p.color[3] * (1.0 - p.age_ratio())
+        } else {
+            p.color[3]
+        };
+        assert!(
+            (alpha - 0.8).abs() < 1e-5,
+            "alpha should stay at original with fade_out=false"
         );
     }
 }

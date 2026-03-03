@@ -150,6 +150,8 @@ pub fn spawn_splash_particles(
                 splash_config.particle_lifetime,
                 splash_config.particle_size,
                 color,
+                1.0,  // normal gravity
+                true, // fade out as splash lands
             );
         }
     }
