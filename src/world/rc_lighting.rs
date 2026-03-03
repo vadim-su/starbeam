@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 use bevy::tasks::ComputeTaskPool;
 
+use crate::fluid::registry::FluidRegistry;
 use crate::fluid::systems::{FluidMaterial, SharedFluidMaterial};
 use crate::object::definition::ObjectId;
 use crate::object::registry::ObjectRegistry;
@@ -276,6 +277,7 @@ fn extract_lighting_data(
     world_time: Option<Res<crate::world::day_night::WorldTime>>,
     time: Res<Time>,
     object_registry: Option<Res<ObjectRegistry>>,
+    fluid_registry: Option<Res<FluidRegistry>>,
     mut rc_dirty: ResMut<RcGridDirty>,
     mut cache: Local<RcCachedGrid>,
 ) {
@@ -682,6 +684,76 @@ fn extract_lighting_data(
                                 oe[2] as f32 / 255.0 * POINT_LIGHT_BOOST * flicker,
                                 1.0,
                             ];
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // --- Fluid emissive (lava, etc.) ---
+    // Emissive fluids inject light directly into the RC emissive buffer.
+    // Only overwrites if the new emission is brighter than what's already there.
+    if let Some(ref fluid_reg) = fluid_registry {
+        let cs = world_config.chunk_size as i32;
+        let cs_u = world_config.chunk_size;
+        let clamp_min_ty = min_ty.max(0);
+        let clamp_max_ty = max_ty.min(height_tiles - 1);
+        if clamp_min_ty <= clamp_max_ty {
+            let fl_min_cy = clamp_min_ty.div_euclid(cs);
+            let fl_max_cy = clamp_max_ty.div_euclid(cs);
+            let fl_min_cx = min_tx.div_euclid(cs);
+            let fl_max_cx = max_tx.div_euclid(cs);
+
+            for cy in fl_min_cy..=fl_max_cy {
+                for cx in fl_min_cx..=fl_max_cx {
+                    let data_cx = world_config.wrap_chunk_x(cx);
+                    let Some(chunk) = world_map.chunk(data_cx, cy) else {
+                        continue;
+                    };
+
+                    let chunk_tx0 = cx * cs;
+                    let chunk_ty0 = cy * cs;
+                    let tx0 = chunk_tx0.max(min_tx);
+                    let tx1 = (chunk_tx0 + cs).min(max_tx + 1);
+                    let ty0 = chunk_ty0.max(clamp_min_ty);
+                    let ty1 = (chunk_ty0 + cs).min(clamp_max_ty + 1);
+
+                    for ty in ty0..ty1 {
+                        let ly = (ty - chunk_ty0) as u32;
+                        for tx in tx0..tx1 {
+                            let lx = (tx - chunk_tx0) as u32;
+                            let fidx = (ly * cs_u + lx) as usize;
+                            let cell = chunk.fluids[fidx];
+                            if cell.is_empty() {
+                                continue;
+                            }
+                            let def = fluid_reg.get(cell.fluid_id);
+                            if def.light_emission == [0, 0, 0] {
+                                continue;
+                            }
+                            if cell.mass < 0.1 {
+                                continue;
+                            }
+
+                            let buf_x = (tx - min_tx) as u32;
+                            let buf_y = (max_ty - ty) as u32;
+                            let idx = (buf_y * input_w + buf_x) as usize;
+                            let intensity = cell.mass.min(1.0);
+                            let e = def.light_emission;
+                            let new_emission = [
+                                e[0] as f32 / 255.0 * POINT_LIGHT_BOOST * intensity,
+                                e[1] as f32 / 255.0 * POINT_LIGHT_BOOST * intensity,
+                                e[2] as f32 / 255.0 * POINT_LIGHT_BOOST * intensity,
+                                1.0,
+                            ];
+                            let existing = input.emissive[idx];
+                            if new_emission[0] > existing[0]
+                                || new_emission[1] > existing[1]
+                                || new_emission[2] > existing[2]
+                            {
+                                input.emissive[idx] = new_emission;
+                            }
                         }
                     }
                 }
