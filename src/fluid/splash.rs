@@ -33,7 +33,7 @@ impl Default for SplashConfig {
             splash_displacement: 0.3,
             particles_per_mass: 15.0,
             particle_lifetime: 1.5,
-            particle_size: 2.5,
+            particle_size: 4.0,
             min_splash_velocity: 5.0,
         }
     }

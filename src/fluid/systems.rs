@@ -382,9 +382,9 @@ pub fn wave_consume_events(
         let local_y = tile_y.rem_euclid(chunk_size as i32) as u32;
 
         let impulse = match event.kind {
-            ImpactKind::Splash => event.velocity.y.abs() * 0.02 * event.mass.sqrt(),
-            ImpactKind::Wake => event.velocity.length() * 0.005,
-            ImpactKind::Pour => event.velocity.y.abs() * 0.01,
+            ImpactKind::Splash => event.velocity.y.abs() * 0.08 * event.mass.sqrt(),
+            ImpactKind::Wake => event.velocity.length() * 0.02,
+            ImpactKind::Pour => event.velocity.y.abs() * 0.04,
         };
 
         let buf = wave_state
