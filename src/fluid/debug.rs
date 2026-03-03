@@ -7,7 +7,7 @@ use crate::fluid::systems::ActiveFluidChunks;
 use crate::registry::world::ActiveWorld;
 use crate::world::chunk::{tile_to_chunk, world_to_tile, WorldMap};
 
-/// Debug system: press F5 to place water at cursor, F6 to place gas (steam).
+/// Debug system: press F5 to place water, F6 to place steam, F7 to place lava at cursor.
 ///
 /// Places a full cell (mass=1.0) of the selected fluid at the tile under the
 /// cursor and registers the chunk as active for the fluid simulation.
@@ -23,7 +23,8 @@ pub fn debug_place_fluid(
 ) {
     let f5 = input.just_pressed(KeyCode::F5);
     let f6 = input.just_pressed(KeyCode::F6);
-    if !f5 && !f6 {
+    let f7 = input.just_pressed(KeyCode::F7);
+    if !f5 && !f6 && !f7 {
         return;
     }
 
@@ -50,15 +51,22 @@ pub fn debug_place_fluid(
     let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, chunk_size);
 
     // Determine which fluid to place
-    let fluid_id = if f5 {
-        // Water (first liquid)
-        fluid_registry.try_by_name("water").unwrap_or(FluidId(1))
+    let (fluid_id, fluid_name) = if f5 {
+        (
+            fluid_registry.try_by_name("water").unwrap_or(FluidId(1)),
+            "water",
+        )
+    } else if f7 {
+        (
+            fluid_registry.try_by_name("lava").unwrap_or(FluidId(2)),
+            "lava",
+        )
     } else {
-        // Steam (first gas)
-        fluid_registry.try_by_name("steam").unwrap_or(FluidId(3))
+        (
+            fluid_registry.try_by_name("steam").unwrap_or(FluidId(3)),
+            "steam",
+        )
     };
-
-    let fluid_name = if f5 { "water" } else { "steam" };
 
     // Place fluid in a 3x3 area for more visible effect
     for dy in -1..=1_i32 {
