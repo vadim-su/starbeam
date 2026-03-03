@@ -14,7 +14,7 @@ pub mod systems;
 pub mod wave;
 
 pub use cell::{FluidCell, FluidId};
-pub use detectors::FluidContactState;
+pub use detectors::{FluidContactState, Projectile};
 pub use events::{FluidReactionEvent, ImpactKind, WaterImpactEvent};
 pub use reactions::{FluidReactionDef, FluidReactionRegistry};
 pub use registry::{FluidDef, FluidRegistry};
@@ -44,6 +44,7 @@ impl Plugin for FluidPlugin {
                 (
                     detectors::detect_entity_water_entry,
                     detectors::detect_entity_swimming,
+                    detectors::detect_projectile_in_fluid,
                     systems::fluid_simulation,
                     systems::wave_consume_events,
                     systems::wave_simulation,

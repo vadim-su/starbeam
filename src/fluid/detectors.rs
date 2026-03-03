@@ -2,9 +2,15 @@ use bevy::prelude::*;
 
 use crate::fluid::cell::FluidId;
 use crate::fluid::events::{ImpactKind, WaterImpactEvent};
+use crate::particles::pool::ParticlePool;
 use crate::physics::Velocity;
 use crate::registry::world::ActiveWorld;
 use crate::world::chunk::WorldMap;
+
+/// Marker component for projectile entities.
+/// Attach this to any entity that should leave bubble trails when flying through fluid.
+#[derive(Component, Default)]
+pub struct Projectile;
 
 /// Tracks whether an entity was in fluid last frame.
 #[derive(Component, Default)]
@@ -130,6 +136,83 @@ pub fn detect_entity_swimming(
             mass: 1.0,
         });
     }
+}
+
+/// Spawn bubble particles behind projectiles flying through fluid.
+///
+/// Throttled to every 0.05 s via a `Local<f32>` accumulator.
+/// Bubbles float upward (negative gravity_scale) and fade out.
+pub fn detect_projectile_in_fluid(
+    query: Query<(&Transform, &Velocity), With<Projectile>>,
+    world_map: Res<WorldMap>,
+    active_world: Res<ActiveWorld>,
+    mut pool: ResMut<ParticlePool>,
+    time: Res<Time>,
+    mut throttle: Local<f32>,
+) {
+    *throttle += time.delta_secs();
+    if *throttle < 0.05 {
+        return;
+    }
+    *throttle = 0.0;
+
+    let tile_size = active_world.tile_size;
+    let chunk_size = active_world.chunk_size;
+
+    for (transform, _velocity) in &query {
+        let pos = transform.translation.truncate();
+
+        let tile_x = (pos.x / tile_size).floor() as i32;
+        let tile_y = (pos.y / tile_size).floor() as i32;
+        let data_cx = active_world.wrap_chunk_x(tile_x.div_euclid(chunk_size as i32));
+        let cy = tile_y.div_euclid(chunk_size as i32);
+        let local_x = tile_x.rem_euclid(chunk_size as i32) as u32;
+        let local_y = tile_y.rem_euclid(chunk_size as i32) as u32;
+
+        // Check if projectile is inside a fluid cell
+        let in_fluid = world_map
+            .chunks
+            .get(&(data_cx, cy))
+            .map(|chunk| {
+                let idx = (local_y * chunk_size + local_x) as usize;
+                idx < chunk.fluids.len() && !chunk.fluids[idx].is_empty()
+            })
+            .unwrap_or(false);
+
+        if !in_fluid {
+            continue;
+        }
+
+        // Spawn 1–2 bubble particles floating upward
+        for _ in 0..2 {
+            let jitter_x = (rand_jitter() - 0.5) * tile_size * 0.5;
+            pool.spawn(
+                Vec2::new(pos.x + jitter_x, pos.y),
+                Vec2::new(0.0, 30.0), // drift upward
+                0.0,                  // no CA mass
+                FluidId::NONE,
+                0.6,                  // short lifetime
+                2.5,                  // small bubble
+                [0.8, 0.9, 1.0, 0.6], // whitish translucent
+                -0.3,                 // negative gravity = float up
+                true,                 // fade out as bubble rises
+            );
+        }
+    }
+}
+
+/// Cheap deterministic pseudo-random jitter based on current time.
+/// Returns a value in [0.0, 1.0). Not suitable for cryptography.
+#[inline]
+fn rand_jitter() -> f32 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(12345);
+    // Simple hash to spread bits
+    let h = nanos.wrapping_mul(2654435761);
+    (h as f32) / (u32::MAX as f32)
 }
 
 #[cfg(test)]
