@@ -153,8 +153,8 @@ pub struct WaveConfig {
 impl Default for WaveConfig {
     fn default() -> Self {
         Self {
-            speed: 0.4,
-            damping: 0.98,
+            speed: 0.15,   // was 0.4 — much calmer wave propagation
+            damping: 0.96, // was 0.98 — waves die out faster
             epsilon: 0.001,
             max_height: 0.5,          // ~4px displacement (half a tile)
             max_impulse: 1.0,         // tighter clamp on input impulse
