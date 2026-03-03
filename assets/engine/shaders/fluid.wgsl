@@ -107,6 +107,12 @@ fn vertex(in: VertexInput) -> VertexOutput {
 // Fragment shader
 // ------------------------------------------------------------------ //
 
+// DEBUG: visualize chunk boundaries.
+// chunk_size=32, tile_size=8 → chunk world size = 256 units.
+// Each chunk gets a different shade so boundaries are clearly visible.
+// Set to true to enable.
+const DEBUG_CHUNK_BOUNDARIES: bool = false;
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     var color = in.color;
@@ -174,6 +180,23 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // 6. Emission glow (all fluids)
     // ------------------------------------------------------------------ //
     color = vec4<f32>(max(color.rgb, emission), color.a);
+
+    // ------------------------------------------------------------------ //
+    // DEBUG: chunk boundary visualizer
+    // Shows alternating tints based on chunk_x / chunk_y parity.
+    // chunk_size=32, tile_size=8 → 256 world units per chunk.
+    // ------------------------------------------------------------------ //
+    if DEBUG_CHUNK_BOUNDARIES {
+        let chunk_world: f32 = 256.0; // 32 * 8
+        let cx = floor(in.world_pos.x / chunk_world);
+        let cy = floor(in.world_pos.y / chunk_world);
+        let parity = (i32(cx) + i32(cy)) % 2;
+        if parity == 0 {
+            return vec4<f32>(0.2, 0.4, 1.0, 1.0); // blue
+        } else {
+            return vec4<f32>(1.0, 0.3, 0.2, 1.0); // red
+        }
+    }
 
     return color;
 }

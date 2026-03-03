@@ -16,8 +16,8 @@ use crate::fluid::reactions::FluidReactionRegistry;
 use crate::fluid::reactions::{execute_fluid_reactions, resolve_density_displacement};
 use crate::fluid::registry::FluidRegistry;
 use crate::fluid::render::{
-    build_fluid_mesh, ATTRIBUTE_EDGE_FLAGS, ATTRIBUTE_FLUID_DATA, ATTRIBUTE_WAVE_HEIGHT,
-    ATTRIBUTE_WAVE_PARAMS,
+    build_fluid_mesh, column_gas_surface_h, column_liquid_surface_h, ATTRIBUTE_EDGE_FLAGS,
+    ATTRIBUTE_FLUID_DATA, ATTRIBUTE_WAVE_HEIGHT, ATTRIBUTE_WAVE_PARAMS,
 };
 use crate::fluid::simulation::{reconcile_chunk_boundaries, simulate_grid, FluidSimConfig};
 use crate::fluid::wave::{reconcile_wave_boundaries, WaveBuffer, WaveConfig, WaveState};
@@ -417,6 +417,44 @@ pub fn fluid_rebuild_meshes(
             .get(&(data_cx, cy))
             .map(|buf| buf.height.as_slice());
 
+        // ── Cross-chunk surface smoothing data ──────────────────────────
+        // Extract the liquid/gas surface height of the left neighbour's
+        // rightmost column and the right neighbour's leftmost column.
+        // These are used by build_fluid_mesh to smooth the surface vertex
+        // heights at the horizontal chunk boundary so the seam disappears.
+        let width_chunks = active_world.width_chunks();
+        let left_data_cx = (data_cx - 1).rem_euclid(width_chunks);
+        let right_data_cx = (data_cx + 1).rem_euclid(width_chunks);
+
+        let left_edge_liquid_h = world_map.chunks.get(&(left_data_cx, cy)).and_then(|c| {
+            column_liquid_surface_h(&c.fluids, chunk_size - 1, chunk_size, &fluid_registry)
+        });
+        let right_edge_liquid_h = world_map
+            .chunks
+            .get(&(right_data_cx, cy))
+            .and_then(|c| column_liquid_surface_h(&c.fluids, 0, chunk_size, &fluid_registry));
+
+        let left_edge_gas_h = world_map.chunks.get(&(left_data_cx, cy)).and_then(|c| {
+            column_gas_surface_h(&c.fluids, chunk_size - 1, chunk_size, &fluid_registry)
+        });
+        let right_edge_gas_h = world_map
+            .chunks
+            .get(&(right_data_cx, cy))
+            .and_then(|c| column_gas_surface_h(&c.fluids, 0, chunk_size, &fluid_registry));
+
+        // Per-column absolute world-tile Y of the liquid surface in the chunk above.
+        // Used by compute_depth to compute accurate depth for cells whose upward scan
+        // reaches the top chunk boundary, preventing the brightness seam at the seam.
+        let above_surface_world_ys: Option<Vec<Option<f32>>> =
+            world_map.chunks.get(&(data_cx, cy + 1)).map(|c| {
+                (0..chunk_size)
+                    .map(|col| {
+                        column_liquid_surface_h(&c.fluids, col, chunk_size, &fluid_registry)
+                            .map(|local_h| (cy + 1) as f32 * chunk_size as f32 + local_h)
+                    })
+                    .collect()
+            });
+
         let Some(mesh) = build_fluid_mesh(
             &chunk.fluids,
             chunk.fg.tiles.as_slice(),
@@ -429,6 +467,11 @@ pub fn fluid_rebuild_meshes(
             neighbor_above_row.as_deref(),
             neighbor_below_row.as_deref(),
             wave_heights,
+            left_edge_liquid_h,
+            right_edge_liquid_h,
+            left_edge_gas_h,
+            right_edge_gas_h,
+            above_surface_world_ys.as_deref(),
         ) else {
             continue;
         };

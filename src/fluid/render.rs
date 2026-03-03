@@ -94,8 +94,21 @@ fn is_gas_surface(
 
 /// Compute depth_in_fluid: normalized 0..1 (0 = surface, 1 = deepest).
 ///
-/// For liquids: scan upward from cell to find the surface (max 16 cells).
-/// For gases: scan downward from cell to find the surface (max 16 cells).
+/// For liquids: scan upward from cell to find the surface (max MAX_DEPTH_SCAN cells).
+/// For gases: scan downward from cell to find the surface (max MAX_DEPTH_SCAN cells).
+///
+/// `neighbor_above_row`: bottom row of the chunk directly above (local_y=0 of upper chunk).
+/// `neighbor_below_row`: top row of the chunk directly below (local_y=chunk_size-1 of lower chunk).
+/// Used to determine whether fluid truly continues beyond the chunk boundary.
+///
+/// `chunk_base_y`: the absolute Y coordinate (in tiles) of this chunk's local_y=0.
+///   Equals `chunk_y * chunk_size`.
+///
+/// `above_surface_world_y`: for liquids, the world-tile Y of the fluid surface in the
+///   column's chunk above (= `(cy+1)*chunk_size + local_surface_y + fill`). When provided,
+///   used to compute accurate depth for cells whose scan reaches the top boundary. Without
+///   this, cells at the top boundary fallback to MAX_DEPTH_SCAN (may create a brightness
+///   seam at the chunk boundary when the surface is within MAX_DEPTH_SCAN tiles above).
 fn compute_depth(
     fluids: &[FluidCell],
     local_x: u32,
@@ -103,6 +116,10 @@ fn compute_depth(
     chunk_size: u32,
     fluid_id: super::cell::FluidId,
     is_gas: bool,
+    neighbor_above_row: Option<&[FluidCell]>,
+    neighbor_below_row: Option<&[FluidCell]>,
+    chunk_base_y: i32,
+    above_surface_world_y: Option<f32>,
 ) -> f32 {
     let mut distance: u32 = 0;
     let mut hit_chunk_boundary = false;
@@ -141,15 +158,95 @@ fn compute_depth(
         }
     }
 
-    // When we hit a chunk boundary, assume the fluid continues deep into
-    // the neighbor chunk. Use MAX_DEPTH_SCAN so boundary cells appear as
-    // "deep" — matching the cells just across the border in the neighbor
-    // chunk. This prevents bright seams at chunk edges.
+    // When we hit a chunk boundary, compute accurate depth using the absolute
+    // surface position when available, otherwise fall back to the old heuristic.
     if hit_chunk_boundary {
-        distance = MAX_DEPTH_SCAN;
+        if !is_gas {
+            // Liquid: surface is somewhere in the chunk above.
+            if let Some(surf_y) = above_surface_world_y {
+                // Compute exact distance from this cell to the water surface.
+                let cell_world_y = chunk_base_y as f32 + local_y as f32;
+                let actual_dist = (surf_y - cell_world_y).max(0.0);
+                distance = actual_dist.min(MAX_DEPTH_SCAN as f32) as u32;
+            } else {
+                // No surface data available: check if fluid continues above and
+                // fall back to MAX_DEPTH_SCAN so the cell appears deep.
+                let fluid_continues = neighbor_above_row.is_some_and(|row| {
+                    let cell = &row[local_x as usize];
+                    !cell.is_empty() && cell.fluid_id == fluid_id
+                });
+                if fluid_continues {
+                    distance = MAX_DEPTH_SCAN;
+                }
+                // else: no fluid above → distance stays as computed (surface cell).
+            }
+        } else {
+            // Gas: surface is somewhere in the chunk below.
+            let fluid_continues = neighbor_below_row.is_some_and(|row| {
+                let cell = &row[local_x as usize];
+                !cell.is_empty() && cell.fluid_id == fluid_id
+            });
+            if fluid_continues {
+                distance = MAX_DEPTH_SCAN;
+            }
+        }
     }
 
     distance as f32 / MAX_DEPTH_SCAN as f32
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cross-chunk surface height helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Compute the liquid surface height for a single column in **local tile units**.
+///
+/// Scans top-down to find the highest liquid cell. Returns `local_y + fill`
+/// (sub-tile precision), or `None` if the column has no liquid.
+///
+/// Used by `fluid_rebuild_meshes` to extract the edge column surface height
+/// from horizontally adjacent chunks so that surface-vertex smoothing can
+/// cross chunk boundaries.
+pub fn column_liquid_surface_h(
+    fluids: &[FluidCell],
+    local_x: u32,
+    chunk_size: u32,
+    fluid_registry: &FluidRegistry,
+) -> Option<f32> {
+    for local_y in (0..chunk_size).rev() {
+        let idx = (local_y * chunk_size + local_x) as usize;
+        let cell = &fluids[idx];
+        if !cell.is_empty() {
+            let def = fluid_registry.get(cell.fluid_id);
+            if !def.is_gas {
+                return Some(local_y as f32 + cell.mass.min(1.0));
+            }
+        }
+    }
+    None
+}
+
+/// Compute the gas surface height for a single column in **local tile units**.
+///
+/// Scans bottom-up to find the lowest gas cell. Returns `local_y + (1 - fill)`
+/// (sub-tile precision), or `None` if the column has no gas.
+pub fn column_gas_surface_h(
+    fluids: &[FluidCell],
+    local_x: u32,
+    chunk_size: u32,
+    fluid_registry: &FluidRegistry,
+) -> Option<f32> {
+    for local_y in 0..chunk_size {
+        let idx = (local_y * chunk_size + local_x) as usize;
+        let cell = &fluids[idx];
+        if !cell.is_empty() {
+            let def = fluid_registry.get(cell.fluid_id);
+            if def.is_gas {
+                return Some(local_y as f32 + (1.0 - cell.mass.min(1.0)));
+            }
+        }
+    }
+    None
 }
 
 /// Compute edge flags for a fluid cell: which sides border solid tiles or open air.
@@ -276,6 +373,21 @@ fn compute_column_surface_heights(
 /// - `UV_0`: `[fill_level, depth_in_fluid]` per vertex
 /// - `FLUID_DATA`: `[emission_r, emission_g, emission_b, flags]`
 /// - `EDGE_FLAGS`: bitmask of which sides border solid tiles or open air
+///
+/// `left_edge_liquid_h` / `right_edge_liquid_h`: liquid surface height
+/// (in local tile units) of the rightmost column of the left neighbour chunk
+/// and the leftmost column of the right neighbour chunk respectively.
+/// When provided, these are used to smooth the surface vertex heights at the
+/// horizontal chunk boundary, eliminating the staircase seam that otherwise
+/// appears where the within-chunk surface heights don't align.
+///
+/// `left_edge_gas_h` / `right_edge_gas_h`: same for gas columns.
+///
+/// `above_surface_world_ys`: per-column absolute world-tile Y of the liquid surface in
+///   the chunk directly above this one. Used by `compute_depth` to compute accurate depth
+///   for cells whose scan reaches the top boundary, preventing a brightness seam.
+///   Length must equal `chunk_size` when `Some`. Values are `None` for columns with no
+///   liquid in the chunk above.
 #[allow(clippy::too_many_arguments)]
 pub fn build_fluid_mesh(
     fluids: &[FluidCell],
@@ -289,6 +401,11 @@ pub fn build_fluid_mesh(
     neighbor_above_row: Option<&[FluidCell]>,
     neighbor_below_row: Option<&[FluidCell]>,
     wave_heights: Option<&[f32]>,
+    left_edge_liquid_h: Option<f32>,
+    right_edge_liquid_h: Option<f32>,
+    left_edge_gas_h: Option<f32>,
+    right_edge_gas_h: Option<f32>,
+    above_surface_world_ys: Option<&[Option<f32>]>,
 ) -> Option<Mesh> {
     let capacity = fluids.len();
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(capacity * 4);
@@ -302,6 +419,7 @@ pub fn build_fluid_mesh(
 
     let base_x = chunk_x * chunk_size as i32;
     let base_y = chunk_y * chunk_size as i32;
+    let chunk_base_y = base_y; // absolute Y of local_y=0 in world tiles
 
     // Pre-compute per-column surface heights for smooth interpolation.
     let liquid_heights = compute_column_surface_heights(fluids, chunk_size, fluid_registry, false);
@@ -344,6 +462,11 @@ pub fn build_fluid_mesh(
             ];
 
             // UV_0: [fill_level, depth_in_fluid]
+            // Look up the per-column surface world Y for the chunk above (for accurate
+            // cross-chunk depth when the scan reaches the top boundary).
+            let col_above_surface_world_y = above_surface_world_ys
+                .and_then(|arr| arr.get(local_x as usize))
+                .and_then(|v| *v);
             let depth = compute_depth(
                 fluids,
                 local_x,
@@ -351,6 +474,10 @@ pub fn build_fluid_mesh(
                 chunk_size,
                 cell.fluid_id,
                 def.is_gas,
+                neighbor_above_row,
+                neighbor_below_row,
+                chunk_base_y,
+                col_above_surface_world_y,
             );
             let uv = [fill, depth];
 
@@ -413,12 +540,23 @@ pub fn build_fluid_mesh(
                 let left_h = if local_x > 0 {
                     heights[(local_x - 1) as usize]
                 } else {
-                    None
+                    // Left chunk-boundary: use the neighbour's edge surface height
+                    // so that surface-vertex smoothing crosses the chunk seam.
+                    if def.is_gas {
+                        left_edge_gas_h
+                    } else {
+                        left_edge_liquid_h
+                    }
                 };
                 let right_h = if local_x + 1 < chunk_size {
                     heights[(local_x + 1) as usize]
                 } else {
-                    None
+                    // Right chunk-boundary: use the neighbour's edge surface height.
+                    if def.is_gas {
+                        right_edge_gas_h
+                    } else {
+                        right_edge_liquid_h
+                    }
                 };
 
                 let base = base_y as f32;
@@ -572,7 +710,8 @@ mod tests {
         let fluids = vec![FluidCell::EMPTY; 4];
         let tiles = vec![TileId::AIR; 4];
         let result = build_fluid_mesh(
-            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None,
+            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
+            None, None,
         );
         assert!(result.is_none(), "all-empty chunk should return None");
     }
@@ -587,7 +726,8 @@ mod tests {
         let tiles = vec![TileId::AIR; 4];
 
         let mesh = build_fluid_mesh(
-            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None,
+            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
+            None, None,
         )
         .expect("should produce a mesh");
 
@@ -628,7 +768,8 @@ mod tests {
         let tiles = vec![TileId::AIR; 4];
 
         let mesh = build_fluid_mesh(
-            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None,
+            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
+            None, None,
         )
         .expect("should produce a mesh");
 
@@ -654,7 +795,8 @@ mod tests {
         let tiles = vec![TileId::AIR; 4];
 
         let mesh = build_fluid_mesh(
-            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None,
+            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
+            None, None,
         )
         .expect("should produce a mesh");
 
@@ -685,7 +827,8 @@ mod tests {
         let tiles = vec![TileId::AIR; total];
 
         let mesh = build_fluid_mesh(
-            &fluids, &tiles, 0, 0, chunk_size, 8.0, &reg, &tile_reg, None, None, None,
+            &fluids, &tiles, 0, 0, chunk_size, 8.0, &reg, &tile_reg, None, None, None, None, None,
+            None, None, None,
         )
         .expect("should produce a mesh");
 
@@ -716,7 +859,8 @@ mod tests {
         // base_x = 1*2 = 2, base_y = 2*2 = 4
         // world_x = 2.0 * 8.0 = 16.0, world_y = 4.0 * 8.0 = 32.0
         let mesh = build_fluid_mesh(
-            &fluids, &tiles, 1, 2, 2, 8.0, &reg, &tile_reg, None, None, None,
+            &fluids, &tiles, 1, 2, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
+            None, None,
         )
         .expect("should produce a mesh");
 
@@ -742,7 +886,8 @@ mod tests {
         let tiles = vec![TileId::AIR; 4];
 
         let mesh = build_fluid_mesh(
-            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None,
+            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
+            None, None,
         )
         .expect("should produce a mesh");
 
@@ -768,7 +913,8 @@ mod tests {
         let tiles = vec![TileId::AIR; 4];
 
         let mesh = build_fluid_mesh(
-            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None,
+            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
+            None, None,
         )
         .expect("should produce a mesh");
 
@@ -904,7 +1050,7 @@ mod tests {
         let mut fluids = vec![FluidCell::EMPTY; 16]; // 4×4
         fluids[0] = FluidCell::new(FluidId(1), 1.0); // (0,0)
 
-        let depth = compute_depth(&fluids, 0, 0, 4, FluidId(1), false);
+        let depth = compute_depth(&fluids, 0, 0, 4, FluidId(1), false, None, None, 0, None);
         assert!(
             depth.abs() < 1e-5,
             "surface liquid should have depth 0.0, got {depth}"
@@ -920,18 +1066,18 @@ mod tests {
         }
 
         // y=5 is top (surface: above y=6 is empty) → depth = 0
-        let d5 = compute_depth(&fluids, 0, 5, 8, FluidId(1), false);
+        let d5 = compute_depth(&fluids, 0, 5, 8, FluidId(1), false, None, None, 0, None);
         assert!(d5.abs() < 1e-5, "top cell should have depth 0.0");
 
         // y=4 → 1 cell from surface → depth = 1/16
-        let d4 = compute_depth(&fluids, 0, 4, 8, FluidId(1), false);
+        let d4 = compute_depth(&fluids, 0, 4, 8, FluidId(1), false, None, None, 0, None);
         assert!(
             (d4 - 1.0 / 16.0).abs() < 1e-5,
             "expected depth 1/16, got {d4}"
         );
 
         // y=2 → 3 cells from surface → depth = 3/16
-        let d2 = compute_depth(&fluids, 0, 2, 8, FluidId(1), false);
+        let d2 = compute_depth(&fluids, 0, 2, 8, FluidId(1), false, None, None, 0, None);
         assert!(
             (d2 - 3.0 / 16.0).abs() < 1e-5,
             "expected depth 3/16, got {d2}"
@@ -947,22 +1093,184 @@ mod tests {
         }
 
         // y=2 is bottom of gas column (surface for gas: below y=1 is empty) → depth = 0
-        let d2 = compute_depth(&fluids, 0, 2, 8, FluidId(2), true);
+        let d2 = compute_depth(&fluids, 0, 2, 8, FluidId(2), true, None, None, 0, None);
         assert!(d2.abs() < 1e-5, "bottom gas cell should have depth 0.0");
 
         // y=3 → 1 cell from surface → depth = 1/16
-        let d3 = compute_depth(&fluids, 0, 3, 8, FluidId(2), true);
+        let d3 = compute_depth(&fluids, 0, 3, 8, FluidId(2), true, None, None, 0, None);
         assert!(
             (d3 - 1.0 / 16.0).abs() < 1e-5,
             "expected depth 1/16, got {d3}"
         );
 
         // y=5 → 3 cells from surface → depth = 3/16
-        let d5 = compute_depth(&fluids, 0, 5, 8, FluidId(2), true);
+        let d5 = compute_depth(&fluids, 0, 5, 8, FluidId(2), true, None, None, 0, None);
         assert!(
             (d5 - 3.0 / 16.0).abs() < 1e-5,
             "expected depth 3/16, got {d5}"
         );
+    }
+
+    // --- compute_depth boundary fix tests ---
+
+    #[test]
+    fn depth_at_top_boundary_surface_cell_is_zero_when_no_fluid_above() {
+        // 4×4 chunk: water column at x=0, rows 0..=3 (top row = row 3).
+        // No neighbor above → top row IS a surface cell → depth should be 0.
+        let mut fluids = vec![FluidCell::EMPTY; 16];
+        for y in 0..4u32 {
+            fluids[(y * 4) as usize] = FluidCell::new(FluidId(1), 1.0);
+        }
+
+        // Without the fix, row 3 would hit the boundary and return depth=1.0.
+        // With the fix and neighbor_above_row=None → no fluid above → depth=0.
+        let d = compute_depth(&fluids, 0, 3, 4, FluidId(1), false, None, None, 0, None);
+        assert!(
+            d.abs() < 1e-5,
+            "top row surface cell with no neighbour above should have depth 0.0, got {d}"
+        );
+    }
+
+    #[test]
+    fn depth_at_top_boundary_is_max_when_fluid_continues_above() {
+        // 4×4 chunk: water column at x=0, rows 0..=3 (fully filled).
+        // Neighbour above also has water → cell is deep → depth = 1.0.
+        let mut fluids = vec![FluidCell::EMPTY; 16];
+        for y in 0..4u32 {
+            fluids[(y * 4) as usize] = FluidCell::new(FluidId(1), 1.0);
+        }
+        let neighbor_row = vec![
+            FluidCell::new(FluidId(1), 1.0),
+            FluidCell::EMPTY,
+            FluidCell::EMPTY,
+            FluidCell::EMPTY,
+        ];
+
+        let d = compute_depth(
+            &fluids,
+            0,
+            3,
+            4,
+            FluidId(1),
+            false,
+            Some(&neighbor_row),
+            None,
+            0,
+            None,
+        );
+        assert!(
+            (d - 1.0).abs() < 1e-5,
+            "top row with fluid-filled neighbour above should have depth 1.0, got {d}"
+        );
+    }
+
+    #[test]
+    fn depth_at_top_boundary_is_correct_when_different_fluid_above() {
+        // 4×4 chunk: water at x=0, rows 0..=3.
+        // Neighbour above has DIFFERENT fluid (steam) → liquid surface is here → depth ≈ 0.
+        let mut fluids = vec![FluidCell::EMPTY; 16];
+        for y in 0..4u32 {
+            fluids[(y * 4) as usize] = FluidCell::new(FluidId(1), 1.0);
+        }
+        let neighbor_row = vec![
+            FluidCell::new(FluidId(2), 1.0), // steam, not water
+            FluidCell::EMPTY,
+            FluidCell::EMPTY,
+            FluidCell::EMPTY,
+        ];
+
+        let d = compute_depth(
+            &fluids,
+            0,
+            3,
+            4,
+            FluidId(1),
+            false,
+            Some(&neighbor_row),
+            None,
+            0,
+            None,
+        );
+        assert!(
+            d.abs() < 1e-5,
+            "top row with different-fluid neighbour above should have depth 0.0, got {d}"
+        );
+    }
+
+    // --- Cross-chunk surface smoothing helper tests ---
+
+    #[test]
+    fn column_liquid_surface_h_basic() {
+        let reg = test_fluid_registry();
+        // 2×2 chunk: water at (0,0) fill=0.7
+        let mut fluids = vec![FluidCell::EMPTY; 4];
+        fluids[0] = FluidCell::new(FluidId(1), 0.7);
+
+        let h = column_liquid_surface_h(&fluids, 0, 2, &reg);
+        assert!(h.is_some(), "should find liquid surface height");
+        assert!(
+            (h.unwrap() - 0.7).abs() < 1e-5,
+            "surface height should be 0.7 (row 0 + fill 0.7), got {:?}",
+            h
+        );
+    }
+
+    #[test]
+    fn column_liquid_surface_h_returns_none_for_empty_column() {
+        let reg = test_fluid_registry();
+        let fluids = vec![FluidCell::EMPTY; 4];
+
+        let h = column_liquid_surface_h(&fluids, 0, 2, &reg);
+        assert!(h.is_none(), "empty column should return None");
+    }
+
+    #[test]
+    fn surface_smoothing_uses_right_neighbour_edge_height() {
+        // 2×2 chunk with water at (1,0) fill=1.0 (surface height = 1.0).
+        // Right neighbour's leftmost column has liquid height = 1.5.
+        // Expected: top-right vertex of column 1 (rightmost) is averaged:
+        //   (base + (1.0 + 1.5) / 2.0) * tile_size = (0 + 1.25) * 8.0 = 10.0
+        let reg = test_fluid_registry();
+        let tile_reg = test_tile_registry();
+        let mut fluids = vec![FluidCell::EMPTY; 4];
+        fluids[1] = FluidCell::new(FluidId(1), 1.0); // column 1, row 0, full
+        let tiles = vec![TileId::AIR; 4];
+
+        let right_edge_liquid_h = Some(1.5_f32);
+
+        let mesh = build_fluid_mesh(
+            &fluids,
+            &tiles,
+            0,
+            0,
+            2,
+            8.0,
+            &reg,
+            &tile_reg,
+            None,
+            None,
+            None,
+            None,
+            right_edge_liquid_h,
+            None,
+            None,
+            None,
+        )
+        .expect("should produce mesh");
+
+        if let Some(bevy::mesh::VertexAttributeValues::Float32x3(pos)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        {
+            // Quad for (1,0): vertices 0=BL, 1=BR, 2=TR, 3=TL
+            // top-right (index 2): world_x+tile_size=16, y1_right should be avg(1.0,1.5)*8=10.0
+            let tr_y = pos[2][1];
+            assert!(
+                (tr_y - 10.0).abs() < 0.01,
+                "top-right vertex y should be averaged with right-neighbour edge: expected 10.0, got {tr_y}"
+            );
+        } else {
+            panic!("expected Float32x3 positions");
+        }
     }
 
     // --- Emission data tests ---
@@ -976,7 +1284,8 @@ mod tests {
         let tiles = vec![TileId::AIR; 4];
 
         let mesh = build_fluid_mesh(
-            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None,
+            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
+            None, None,
         )
         .expect("should produce a mesh");
 
@@ -1003,7 +1312,8 @@ mod tests {
         let tiles = vec![TileId::AIR; 4];
 
         let mesh = build_fluid_mesh(
-            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None,
+            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
+            None, None,
         )
         .expect("should produce a mesh");
 
@@ -1040,7 +1350,8 @@ mod tests {
         let tiles = vec![TileId::AIR; 4];
 
         let mesh = build_fluid_mesh(
-            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None,
+            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
+            None, None,
         )
         .expect("should produce a mesh");
 
@@ -1081,7 +1392,8 @@ mod tests {
         let tiles = vec![TileId::AIR; 4];
 
         let mesh = build_fluid_mesh(
-            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None,
+            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
+            None, None,
         )
         .expect("should produce a mesh");
 
@@ -1122,7 +1434,8 @@ mod tests {
         let tiles = vec![TileId::AIR; 4];
 
         let mesh = build_fluid_mesh(
-            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None,
+            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
+            None, None,
         )
         .expect("should produce a mesh");
 
@@ -1152,7 +1465,8 @@ mod tests {
         let tiles = vec![TileId::AIR; 4];
 
         let mesh = build_fluid_mesh(
-            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None,
+            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
+            None, None,
         )
         .expect("should produce a mesh");
 
@@ -1199,7 +1513,8 @@ mod tests {
         let tiles = vec![TileId::AIR; 16];
 
         let mesh = build_fluid_mesh(
-            &fluids, &tiles, 0, 0, 4, 8.0, &reg, &tile_reg, None, None, None,
+            &fluids, &tiles, 0, 0, 4, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
+            None, None,
         )
         .expect("should produce a mesh");
 
@@ -1262,6 +1577,11 @@ mod tests {
             None,
             None,
             Some(&wave),
+            None,
+            None,
+            None,
+            None,
+            None,
         )
         .expect("should produce a mesh");
 
@@ -1310,7 +1630,8 @@ mod tests {
         fluids[0] = FluidCell::new(FluidId(1), 1.0);
 
         let mesh = build_fluid_mesh(
-            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None,
+            &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
+            None, None,
         )
         .expect("should produce mesh");
         assert!(
