@@ -12,14 +12,16 @@ use bevy::sprite_render::{AlphaMode2d, Material2d, Material2dKey, MeshMaterial2d
 
 use crate::fluid::cell::FluidCell;
 use crate::fluid::events::{FluidReactionEvent, ImpactKind, WaterImpactEvent};
-use crate::fluid::reactions::FluidReactionRegistry;
-use crate::fluid::reactions::{execute_fluid_reactions, resolve_density_displacement};
+use crate::fluid::fluid_world::FluidWorld;
+use crate::fluid::reactions::{
+    execute_fluid_reactions_global, resolve_density_displacement_global, FluidReactionRegistry,
+};
 use crate::fluid::registry::FluidRegistry;
 use crate::fluid::render::{
     build_fluid_mesh, column_gas_surface_h, column_liquid_surface_h, ATTRIBUTE_EDGE_FLAGS,
     ATTRIBUTE_FLUID_DATA, ATTRIBUTE_WAVE_HEIGHT, ATTRIBUTE_WAVE_PARAMS,
 };
-use crate::fluid::simulation::{reconcile_chunk_boundaries, simulate_grid, FluidSimConfig};
+use crate::fluid::simulation::{simulate_tick, FluidSimConfig};
 use crate::fluid::wave::{reconcile_wave_boundaries, WaveBuffer, WaveConfig, WaveState};
 use crate::registry::tile::TileRegistry;
 use crate::registry::world::ActiveWorld;
@@ -170,7 +172,7 @@ pub fn fluid_simulation(
         accumulator.accumulator -= tick_interval;
         ticks_this_frame += 1;
 
-        run_one_tick_legacy(
+        run_one_tick(
             &mut world_map,
             &fluid_registry,
             &tile_registry,
@@ -179,6 +181,7 @@ pub fn fluid_simulation(
             &config,
             reaction_registry.as_deref(),
             &mut reaction_events,
+            ticks_this_frame - 1,
         );
     }
 
@@ -189,11 +192,12 @@ pub fn fluid_simulation(
     }
 }
 
-/// One tick of the legacy per-chunk fluid simulation.
-/// Extracted from the original `fluid_simulation` body to preserve existing
-/// behavior while the fixed-timestep wrapper controls tick rate.
+/// One tick of the global fluid simulation using FluidWorld.
+///
+/// Creates a snapshot of all active chunks, runs simulation, density displacement,
+/// and reactions globally, then detects movement and manages chunk sleep/wake.
 #[allow(clippy::too_many_arguments)]
-fn run_one_tick_legacy(
+fn run_one_tick(
     world_map: &mut WorldMap,
     fluid_registry: &FluidRegistry,
     tile_registry: &TileRegistry,
@@ -202,91 +206,77 @@ fn run_one_tick_legacy(
     config: &FluidSimConfig,
     reaction_registry: Option<&FluidReactionRegistry>,
     reaction_events: &mut MessageWriter<FluidReactionEvent>,
+    tick_parity: u32,
 ) {
     let chunk_size = active_world.chunk_size;
-    let len = (chunk_size * chunk_size) as usize;
+    let width_chunks = active_world.width_chunks();
+    let height_chunks = active_world.height_chunks();
 
-    // Collect chunks to process this tick
-    let chunks_to_process: Vec<(i32, i32)> = active_fluids.chunks.iter().copied().collect();
+    // Filter out sleeping chunks
+    let chunks_to_process: Vec<(i32, i32)> = active_fluids
+        .chunks
+        .iter()
+        .copied()
+        .filter(|coord| {
+            active_fluids.calm_ticks.get(coord).copied().unwrap_or(0) <= SLEEP_THRESHOLD
+        })
+        .collect();
 
     if chunks_to_process.is_empty() {
         return;
     }
 
-    let width_chunks = active_world.width_chunks();
-    let height_chunks = active_world.height_chunks();
-    let tile_size = active_world.tile_size;
+    // Snapshot for movement detection (before simulation modifies live data)
+    let initial_snapshots: HashMap<(i32, i32), Vec<FluidCell>> = chunks_to_process
+        .iter()
+        .filter_map(|&(cx, cy)| {
+            world_map
+                .chunks
+                .get(&(cx, cy))
+                .map(|c| ((cx, cy), c.fluids.clone()))
+        })
+        .collect();
 
-    // Step 1: Simulate each chunk with double-buffered fluid arrays.
-    //
-    // Sleep/wake: chunks with no movement for SLEEP_THRESHOLD ticks are skipped.
-    // reconcile_chunk_boundaries runs once after all intra-chunk iterations.
-    for &(cx, cy) in &chunks_to_process {
-        let Some(chunk) = world_map.chunks.get(&(cx, cy)) else {
-            continue;
-        };
+    // --- Run global simulation within a FluidWorld scope ---
+    {
+        let mut fluid_world = FluidWorld::new(
+            world_map,
+            chunk_size,
+            width_chunks,
+            height_chunks,
+            tile_registry,
+            fluid_registry,
+        );
 
-        // --- Sleep check ---
-        // Skip simulation for chunks that have been calm long enough.
-        // We still process them in reconcile so cross-chunk flow can wake them.
-        let calm = active_fluids
-            .calm_ticks
-            .get(&(cx, cy))
-            .copied()
-            .unwrap_or(0);
-        if calm > SLEEP_THRESHOLD {
-            continue;
-        }
+        simulate_tick(&mut fluid_world, &chunks_to_process, config, tick_parity);
+        resolve_density_displacement_global(&mut fluid_world, &chunks_to_process);
 
-        // Allocate buffers once per chunk per tick
-        let mut buf_a = chunk.fluids.clone();
-        let initial_fluids = buf_a.clone(); // snapshot to detect movement
-        let mut buf_b = vec![FluidCell::EMPTY; len];
-        let mut tiles = chunk.fg.tiles.clone();
-
-        // One iteration per tick — tick rate now controls simulation speed
-        for _ in 0..1u32 {
-            simulate_grid(
-                &tiles,
-                &buf_a,
-                &mut buf_b,
-                chunk_size,
-                chunk_size,
-                tile_registry,
-                fluid_registry,
-                config,
+        if let Some(rr) = reaction_registry {
+            let events = execute_fluid_reactions_global(
+                &mut fluid_world,
+                &chunks_to_process,
+                rr,
+                active_world.tile_size,
             );
-
-            // Apply density displacement (heavier fluids sink + spread horizontally)
-            resolve_density_displacement(
-                &mut buf_b,
-                &tiles,
-                chunk_size,
-                chunk_size,
-                fluid_registry,
-                tile_registry,
-            );
-
-            // Apply fluid reactions (e.g. lava + water → stone + steam)
-            if let Some(rr) = reaction_registry {
-                let events = execute_fluid_reactions(
-                    &mut buf_b, &mut tiles, chunk_size, chunk_size, rr, cx, cy, tile_size,
-                );
-                for evt in events {
-                    reaction_events.write(evt);
-                }
+            for evt in events {
+                reaction_events.write(evt);
             }
-
-            // Swap buffers: buf_a becomes the new read state
-            std::mem::swap(&mut buf_a, &mut buf_b);
-            // Clear the write buffer for the next iteration
-            buf_b.fill(FluidCell::EMPTY);
         }
+    }
+    // fluid_world dropped here, releasing &mut world_map
 
-        // --- Detect movement and update calm_ticks ---
-        let moved = initial_fluids.iter().zip(buf_a.iter()).any(|(old, new)| {
-            old.fluid_id != new.fluid_id || (old.mass - new.mass).abs() >= CALM_MASS_EPSILON
-        });
+    // --- Detect movement and update calm_ticks ---
+    for &(cx, cy) in &chunks_to_process {
+        let moved = if let (Some(initial), Some(chunk)) = (
+            initial_snapshots.get(&(cx, cy)),
+            world_map.chunks.get(&(cx, cy)),
+        ) {
+            initial.iter().zip(chunk.fluids.iter()).any(|(old, new)| {
+                old.fluid_id != new.fluid_id || (old.mass - new.mass).abs() >= CALM_MASS_EPSILON
+            })
+        } else {
+            false
+        };
 
         let entry = active_fluids.calm_ticks.entry((cx, cy)).or_insert(0);
         if moved {
@@ -294,73 +284,39 @@ fn run_one_tick_legacy(
         } else {
             *entry = entry.saturating_add(1);
         }
-
-        // Write back final state
-        if let Some(chunk) = world_map.chunks.get_mut(&(cx, cy)) {
-            chunk.fluids = buf_a;
-            chunk.fg.tiles = tiles;
-        }
     }
 
-    // Step 2: Transfer fluid across chunk boundaries (once per tick)
-    reconcile_chunk_boundaries(
-        world_map,
-        &active_fluids.chunks,
-        chunk_size,
-        width_chunks,
-        height_chunks,
-        tile_registry,
-        fluid_registry,
-        config,
-    );
-
-    // Activate neighbor chunks that received fluid from boundary transfer
+    // --- Activate neighbor chunks that have fluid ---
+    let current_chunks: Vec<(i32, i32)> = active_fluids.chunks.iter().copied().collect();
     let mut new_active: Vec<(i32, i32)> = Vec::new();
-    for &(cx, cy) in &active_fluids.chunks {
-        // Check right neighbor
-        let ncx = (cx + 1).rem_euclid(width_chunks);
-        if !active_fluids.chunks.contains(&(ncx, cy)) {
-            if let Some(chunk) = world_map.chunks.get(&(ncx, cy)) {
-                if chunk.fluids.iter().any(|c| !c.is_empty()) {
-                    new_active.push((ncx, cy));
-                }
+    for &(cx, cy) in &current_chunks {
+        for (dx, dy) in [(-1i32, 0), (1, 0), (0, -1), (0, 1)] {
+            let ncx = if dy == 0 {
+                (cx + dx).rem_euclid(width_chunks)
+            } else {
+                cx
+            };
+            let ncy = cy + dy;
+            if ncy < 0 || ncy >= height_chunks {
+                continue;
             }
-        }
-        // Check left neighbor
-        let ncx = (cx - 1).rem_euclid(width_chunks);
-        if !active_fluids.chunks.contains(&(ncx, cy)) {
-            if let Some(chunk) = world_map.chunks.get(&(ncx, cy)) {
-                if chunk.fluids.iter().any(|c| !c.is_empty()) {
-                    new_active.push((ncx, cy));
-                }
+            if active_fluids.chunks.contains(&(ncx, ncy)) {
+                continue;
             }
-        }
-        // Check top neighbor
-        if cy + 1 < height_chunks && !active_fluids.chunks.contains(&(cx, cy + 1)) {
-            if let Some(chunk) = world_map.chunks.get(&(cx, cy + 1)) {
+            if let Some(chunk) = world_map.chunks.get(&(ncx, ncy)) {
                 if chunk.fluids.iter().any(|c| !c.is_empty()) {
-                    new_active.push((cx, cy + 1));
-                }
-            }
-        }
-        // Check bottom neighbor
-        if cy > 0 && !active_fluids.chunks.contains(&(cx, cy - 1)) {
-            if let Some(chunk) = world_map.chunks.get(&(cx, cy - 1)) {
-                if chunk.fluids.iter().any(|c| !c.is_empty()) {
-                    new_active.push((cx, cy - 1));
+                    new_active.push((ncx, ncy));
                 }
             }
         }
     }
     for coord in new_active {
         active_fluids.chunks.insert(coord);
-        // Wake newly activated chunks — they just received fluid
         active_fluids.calm_ticks.insert(coord, 0);
     }
 
-    // Also wake sleeping chunks that received fluid from reconcile
-    // (reconcile modifies chunk.fluids directly, bypassing the sleep check above).
-    // Collect candidates first to avoid double-borrow.
+    // Wake sleeping chunks that still have fluid (may have received fluid from
+    // global simulation crossing chunk boundaries)
     let sleeping_with_fluid: Vec<(i32, i32)> = active_fluids
         .chunks
         .iter()
