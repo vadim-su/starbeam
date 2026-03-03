@@ -388,7 +388,32 @@ pub fn build_fluid_mesh(
 
             colors.extend_from_slice(&[color, color, color, color]);
 
-            uvs.extend_from_slice(&[uv, uv, uv, uv]);
+            // UV_0: [fill_level, local_y_fraction]
+            //
+            // For liquid surface cells we need a per-vertex local_y gradient
+            // (0 at bottom → fill at top) so the fragment shader can compare
+            // local position against the animated water line without using
+            // fract(world_y / tile_size), which produces sawtooth artifacts
+            // when fill==1.0 (both vertices map to fract≈0).
+            //
+            // Vertex layout:
+            //   0 = bottom-left  → local_y = 0.0
+            //   1 = bottom-right → local_y = 0.0
+            //   2 = top-right    → local_y = fill
+            //   3 = top-left     → local_y = fill
+            //
+            // For non-surface cells and gas cells we keep the uniform depth
+            // value (no wave animation needed).
+            if is_surface && !def.is_gas {
+                uvs.extend_from_slice(&[
+                    [fill, 0.0],  // 0: bottom-left
+                    [fill, 0.0],  // 1: bottom-right
+                    [fill, fill], // 2: top-right
+                    [fill, fill], // 3: top-left
+                ]);
+            } else {
+                uvs.extend_from_slice(&[uv, uv, uv, uv]);
+            }
 
             // FLUID_DATA: [emission_r, emission_g, emission_b, flags]
             for i in 0..4 {
@@ -655,14 +680,30 @@ mod tests {
             mesh.attribute(Mesh::ATTRIBUTE_UV_0)
         {
             assert_eq!(uvs.len(), 4, "1 quad = 4 UV vertices");
-            for uv in uvs {
+            // fill = 0.7; this is a liquid surface cell, so UV_0.y is per-vertex:
+            //   bottom verts (0,1) → local_y = 0.0
+            //   top verts    (2,3) → local_y = fill = 0.7
+            for uv in uvs.iter() {
                 assert!((uv[0] - 0.7).abs() < 1e-5, "fill_level should be 0.7");
-                // Single cell with no fluid above → depth = 0.0 (surface)
-                assert!(
-                    (uv[1] - 0.0).abs() < 1e-5,
-                    "depth should be 0.0 for surface cell"
-                );
             }
+            // Vertex 0 (bottom-left) and 1 (bottom-right) → local_y = 0.0
+            assert!(
+                (uvs[0][1] - 0.0).abs() < 1e-5,
+                "bottom-left local_y should be 0.0"
+            );
+            assert!(
+                (uvs[1][1] - 0.0).abs() < 1e-5,
+                "bottom-right local_y should be 0.0"
+            );
+            // Vertex 2 (top-right) and 3 (top-left) → local_y = fill = 0.7
+            assert!(
+                (uvs[2][1] - 0.7).abs() < 1e-5,
+                "top-right local_y should be fill (0.7)"
+            );
+            assert!(
+                (uvs[3][1] - 0.7).abs() < 1e-5,
+                "top-left local_y should be fill (0.7)"
+            );
         } else {
             panic!("expected Float32x2 UVs");
         }
