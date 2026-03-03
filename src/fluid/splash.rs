@@ -217,7 +217,7 @@ pub fn reabsorb_particles(
             .buffers
             .entry((cx, cy))
             .or_insert_with(|| WaveBuffer::new(chunk_size));
-        buf.apply_impulse(local_x, local_y, impulse);
+        buf.apply_impulse(local_x, local_y, impulse, 2.0);
 
         // Mark particle dead
         pool.particles[i].alive = false;

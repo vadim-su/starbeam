@@ -40,10 +40,11 @@ impl WaveBuffer {
     }
 
     /// Add an impulse to the velocity at the given local cell coordinates.
-    pub fn apply_impulse(&mut self, local_x: u32, local_y: u32, impulse: f32) {
+    /// The impulse is clamped to `[-max_impulse, max_impulse]` before being applied.
+    pub fn apply_impulse(&mut self, local_x: u32, local_y: u32, impulse: f32, max_impulse: f32) {
         let idx = (local_y * self.chunk_size + local_x) as usize;
         if idx < self.velocity.len() {
-            self.velocity[idx] += impulse;
+            self.velocity[idx] += impulse.clamp(-max_impulse, max_impulse);
         }
     }
 
@@ -108,6 +109,12 @@ impl WaveBuffer {
             }
 
             self.velocity[i] *= config.damping;
+
+            // Nonlinear damping: large waves decay faster to prevent "flying into space"
+            if self.prev_height[i].abs() > config.max_height * config.high_wave_threshold {
+                self.velocity[i] *= config.high_wave_damping / config.damping;
+            }
+
             // Damping on both channels independently (not on their sum):
             // - velocity *= damping dissipates kinetic energy
             // - prev * damping dissipates potential energy (standing waves in bounded domain)
@@ -135,6 +142,12 @@ pub struct WaveConfig {
     pub epsilon: f32,
     /// Maximum absolute wave height (clamped).
     pub max_height: f32,
+    /// Maximum impulse magnitude (clamped on input).
+    pub max_impulse: f32,
+    /// Fraction of max_height above which extra damping kicks in.
+    pub high_wave_threshold: f32,
+    /// Damping factor for waves above threshold.
+    pub high_wave_damping: f32,
 }
 
 impl Default for WaveConfig {
@@ -143,7 +156,10 @@ impl Default for WaveConfig {
             speed: 0.4,
             damping: 0.98,
             epsilon: 0.001,
-            max_height: 5.0,
+            max_height: 1.5,
+            max_impulse: 2.0,
+            high_wave_threshold: 0.7,
+            high_wave_damping: 0.90,
         }
     }
 }
@@ -241,7 +257,7 @@ mod tests {
     #[test]
     fn impulse_creates_wave() {
         let mut buf = WaveBuffer::new(16);
-        buf.apply_impulse(8, 8, 1.0);
+        buf.apply_impulse(8, 8, 1.0, 2.0);
 
         assert!(!buf.is_calm(0.001));
 
@@ -256,7 +272,7 @@ mod tests {
         let fluids = all_water(chunk_size);
         let mut buf = WaveBuffer::new(chunk_size);
 
-        buf.apply_impulse(8, 8, 2.0);
+        buf.apply_impulse(8, 8, 2.0, 2.0);
 
         // Run several steps to let the wave propagate
         for _ in 0..10 {
@@ -298,7 +314,7 @@ mod tests {
 
         let mut buf = WaveBuffer::new(chunk_size);
         // Impulse on the left side at (2, 4)
-        buf.apply_impulse(2, 4, 2.0);
+        buf.apply_impulse(2, 4, 2.0, 2.0);
 
         for _ in 0..20 {
             buf.step(&fluids, &config);
@@ -324,7 +340,7 @@ mod tests {
         let fluids = all_water(chunk_size);
         let mut buf = WaveBuffer::new(chunk_size);
 
-        buf.apply_impulse(8, 8, 2.0);
+        buf.apply_impulse(8, 8, 2.0, 2.0);
 
         for _ in 0..1000 {
             buf.step(&fluids, &config);
@@ -344,7 +360,7 @@ mod tests {
         let mut buf = WaveBuffer::new(chunk_size);
 
         // Apply a huge impulse
-        buf.apply_impulse(4, 4, 100.0);
+        buf.apply_impulse(4, 4, 100.0, 200.0);
         buf.step(&fluids, &config);
 
         let idx = (4 * chunk_size + 4) as usize;
@@ -353,6 +369,18 @@ mod tests {
             "height {} should be clamped to max_height {}",
             buf.height[idx],
             config.max_height
+        );
+    }
+
+    #[test]
+    fn impulse_is_clamped() {
+        let mut buf = WaveBuffer::new(8);
+        buf.apply_impulse(4, 4, 100.0, 3.0);
+        let idx = (4 * 8 + 4) as usize;
+        assert!(
+            (buf.velocity[idx] - 3.0).abs() < 1e-5,
+            "impulse should be clamped to max_impulse=3.0, got {}",
+            buf.velocity[idx]
         );
     }
 }

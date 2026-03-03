@@ -509,6 +509,7 @@ pub fn wave_consume_events(
     mut events: MessageReader<WaterImpactEvent>,
     mut wave_state: ResMut<WaveState>,
     active_world: Res<ActiveWorld>,
+    wave_config: Res<WaveConfig>,
 ) {
     let chunk_size = active_world.chunk_size;
     let tile_size = active_world.tile_size;
@@ -532,16 +533,16 @@ pub fn wave_consume_events(
             .buffers
             .entry((data_cx, cy))
             .or_insert_with(|| WaveBuffer::new(chunk_size));
-        buf.apply_impulse(local_x, local_y, impulse);
+        buf.apply_impulse(local_x, local_y, impulse, wave_config.max_impulse);
 
         // Spread impulse to neighbors for wider splash
         if matches!(event.kind, ImpactKind::Splash) {
             let spread = impulse * 0.5;
             if local_x > 0 {
-                buf.apply_impulse(local_x - 1, local_y, spread);
+                buf.apply_impulse(local_x - 1, local_y, spread, wave_config.max_impulse);
             }
             if local_x + 1 < chunk_size {
-                buf.apply_impulse(local_x + 1, local_y, spread);
+                buf.apply_impulse(local_x + 1, local_y, spread, wave_config.max_impulse);
             }
         }
     }
