@@ -153,23 +153,31 @@ pub fn fluid_simulation(
 
     let width_chunks = active_world.width_chunks();
     let height_chunks = active_world.height_chunks();
+    let tile_size = active_world.tile_size;
 
-    for _ in 0..config.iterations_per_tick {
-        // Step 1: Simulate each chunk in isolation
-        for &(cx, cy) in &chunks_to_process {
-            let Some(chunk) = world_map.chunks.get(&(cx, cy)) else {
-                continue;
-            };
+    // Step 1: Simulate each chunk with double-buffered fluid arrays.
+    //
+    // Double-buffering eliminates the per-iteration O(chunk_size²) allocation:
+    //   OLD: N × (clone + alloc) per chunk per tick
+    //   NEW: 1 × (clone + alloc) per chunk per tick, then N swaps
+    //
+    // reconcile_chunk_boundaries runs once after all intra-chunk iterations,
+    // rather than N times. Cross-chunk flow is still applied each tick.
+    for &(cx, cy) in &chunks_to_process {
+        let Some(chunk) = world_map.chunks.get(&(cx, cy)) else {
+            continue;
+        };
 
-            // Clone current state because simulate_grid reads the old state
-            let mut tiles = chunk.fg.tiles.clone();
-            let fluids = chunk.fluids.clone();
-            let mut new_fluids = vec![FluidCell::EMPTY; len];
+        // Allocate buffers once per chunk per tick
+        let mut buf_a = chunk.fluids.clone();
+        let mut buf_b = vec![FluidCell::EMPTY; len];
+        let mut tiles = chunk.fg.tiles.clone();
 
+        for _ in 0..config.iterations_per_tick {
             simulate_grid(
                 &tiles,
-                &fluids,
-                &mut new_fluids,
+                &buf_a,
+                &mut buf_b,
                 chunk_size,
                 chunk_size,
                 &tile_registry,
@@ -178,45 +186,42 @@ pub fn fluid_simulation(
             );
 
             // Apply density displacement (heavier fluids sink)
-            resolve_density_displacement(&mut new_fluids, chunk_size, chunk_size, &fluid_registry);
+            resolve_density_displacement(&mut buf_b, chunk_size, chunk_size, &fluid_registry);
 
             // Apply fluid reactions (e.g. lava + water → stone + steam)
             if let Some(ref rr) = reaction_registry {
-                let tile_size = active_world.tile_size;
                 let events = execute_fluid_reactions(
-                    &mut new_fluids,
-                    &mut tiles,
-                    chunk_size,
-                    chunk_size,
-                    rr,
-                    cx,
-                    cy,
-                    tile_size,
+                    &mut buf_b, &mut tiles, chunk_size, chunk_size, rr, cx, cy, tile_size,
                 );
                 for evt in events {
                     reaction_events.write(evt);
                 }
             }
 
-            // Write back
-            if let Some(chunk) = world_map.chunks.get_mut(&(cx, cy)) {
-                chunk.fluids = new_fluids;
-                chunk.fg.tiles = tiles;
-            }
+            // Swap buffers: buf_a becomes the new read state
+            std::mem::swap(&mut buf_a, &mut buf_b);
+            // Clear the write buffer for the next iteration
+            buf_b.fill(FluidCell::EMPTY);
         }
 
-        // Step 2: Transfer fluid across chunk boundaries
-        reconcile_chunk_boundaries(
-            &mut world_map,
-            &active_fluids.chunks,
-            chunk_size,
-            width_chunks,
-            height_chunks,
-            &tile_registry,
-            &fluid_registry,
-            &config,
-        );
+        // Write back final state
+        if let Some(chunk) = world_map.chunks.get_mut(&(cx, cy)) {
+            chunk.fluids = buf_a;
+            chunk.fg.tiles = tiles;
+        }
     }
+
+    // Step 2: Transfer fluid across chunk boundaries (once per tick)
+    reconcile_chunk_boundaries(
+        &mut world_map,
+        &active_fluids.chunks,
+        chunk_size,
+        width_chunks,
+        height_chunks,
+        &tile_registry,
+        &fluid_registry,
+        &config,
+    );
 
     // Activate neighbor chunks that received fluid from boundary transfer
     let mut new_active: Vec<(i32, i32)> = Vec::new();
