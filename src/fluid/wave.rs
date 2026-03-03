@@ -145,10 +145,10 @@ pub struct WaveConfig {
 impl Default for WaveConfig {
     fn default() -> Self {
         Self {
-            speed: 0.3,
-            damping: 0.97,
+            speed: 0.4,
+            damping: 0.98,
             epsilon: 0.001,
-            max_height: 3.0,
+            max_height: 5.0,
         }
     }
 }
