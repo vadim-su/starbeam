@@ -20,7 +20,7 @@ pub use reactions::{FluidReactionDef, FluidReactionRegistry};
 pub use registry::{FluidDef, FluidRegistry};
 pub use render::build_fluid_mesh;
 pub use simulation::FluidSimConfig;
-pub use systems::{ActiveFluidChunks, FluidMaterial};
+pub use systems::{ActiveFluidChunks, FluidMaterial, FluidTickAccumulator};
 
 use crate::registry::AppState;
 use crate::sets::GameSet;
@@ -33,6 +33,7 @@ impl Plugin for FluidPlugin {
             .add_message::<events::FluidReactionEvent>()
             .add_plugins(Material2dPlugin::<FluidMaterial>::default())
             .init_resource::<FluidSimConfig>()
+            .init_resource::<systems::FluidTickAccumulator>()
             .init_resource::<systems::ActiveFluidChunks>()
             .init_resource::<wave::WaveConfig>()
             .init_resource::<wave::WaveState>()

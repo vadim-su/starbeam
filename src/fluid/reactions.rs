@@ -126,41 +126,159 @@ impl FluidReactionRegistry {
 
 // --- Density displacement ---
 
-/// Resolve density displacement by swapping vertically adjacent cells where
-/// a heavier fluid sits above a lighter one.
+/// Resolve density displacement between immiscible fluids.
+///
+/// Phase 1 — **Vertical**: multi-pass bubble-sort so heavier fluids sink
+/// completely through lighter ones in a single call (not just one swap).
+///
+/// Phase 2 — **Horizontal spreading**: 3-cell rotation that lets heavy fluid
+/// undercut lighter fluid.  Heavy at (x,y) + light at (x±1,y) + available
+/// cell above the light position → heavy moves sideways, light goes up,
+/// source cell empties.  Two sweeps (L→R then R→L) ensure symmetric spread.
 ///
 /// Grid layout: y=0 is bottom, y increases upward. Index = y * width + x.
 pub fn resolve_density_displacement(
     fluids: &mut [FluidCell],
+    tiles: &[TileId],
     width: u32,
     height: u32,
     fluid_registry: &FluidRegistry,
+    tile_registry: &TileRegistry,
 ) {
-    // Process from bottom to top so swaps propagate upward in a single pass
-    for y in 0..(height - 1) {
-        for x in 0..width {
-            let below_idx = (y * width + x) as usize;
-            let above_idx = ((y + 1) * width + x) as usize;
+    // --- Phase 1: Vertical displacement (multi-pass) ---
+    // Each pass moves heavy fluid one cell down.  Repeat up to `height`
+    // times so even the worst case (heavy at the very top) fully settles.
+    for _pass in 0..height {
+        let mut any_swap = false;
+        for y in 0..(height - 1) {
+            for x in 0..width {
+                let below_idx = (y * width + x) as usize;
+                let above_idx = ((y + 1) * width + x) as usize;
 
-            let below = fluids[below_idx];
-            let above = fluids[above_idx];
+                let below = fluids[below_idx];
+                let above = fluids[above_idx];
 
-            // Only swap if both cells are non-empty and have different fluid types
-            if below.is_empty() || above.is_empty() {
-                continue;
-            }
-            if below.fluid_id == above.fluid_id {
-                continue;
-            }
+                if below.is_empty() || above.is_empty() {
+                    continue;
+                }
+                if below.fluid_id == above.fluid_id {
+                    continue;
+                }
 
-            let density_below = fluid_registry.get(below.fluid_id).density;
-            let density_above = fluid_registry.get(above.fluid_id).density;
+                let d_below = fluid_registry.get(below.fluid_id).density;
+                let d_above = fluid_registry.get(above.fluid_id).density;
 
-            // If the fluid above is heavier, swap them (heavy sinks)
-            if density_above > density_below {
-                fluids.swap(below_idx, above_idx);
+                if d_above > d_below {
+                    fluids.swap(below_idx, above_idx);
+                    any_swap = true;
+                }
             }
         }
+        if !any_swap {
+            break; // Already fully sorted
+        }
+    }
+
+    // --- Phase 2: Horizontal spreading via 3-cell rotation ---
+    // When heavy fluid is next to lighter fluid and there is room above the
+    // lighter fluid's position, rotate: heavy→sideways, light→up, source→empty.
+    // This allows heavy fluid to spread along the bottom under lighter fluid.
+    //
+    // Left-to-right sweep
+    for y in 0..height {
+        for x in 0..(width - 1) {
+            horizontal_displace_pair(
+                fluids,
+                tiles,
+                x,
+                x + 1,
+                y,
+                width,
+                height,
+                fluid_registry,
+                tile_registry,
+            );
+        }
+    }
+    // Right-to-left sweep
+    for y in 0..height {
+        for x in (1..width).rev() {
+            horizontal_displace_pair(
+                fluids,
+                tiles,
+                x,
+                x - 1,
+                y,
+                width,
+                height,
+                fluid_registry,
+                tile_registry,
+            );
+        }
+    }
+}
+
+/// Try a single horizontal displacement between cells at (src_x, y) and (dst_x, y).
+///
+/// If src is heavier than dst, move src sideways to dst's position and push
+/// dst up one cell.  The cell above dst must be available (empty and not solid).
+#[allow(clippy::too_many_arguments)]
+fn horizontal_displace_pair(
+    fluids: &mut [FluidCell],
+    tiles: &[TileId],
+    src_x: u32,
+    dst_x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    fluid_registry: &FluidRegistry,
+    tile_registry: &TileRegistry,
+) {
+    let src_idx = (y * width + src_x) as usize;
+    let dst_idx = (y * width + dst_x) as usize;
+
+    let src = fluids[src_idx];
+    let dst = fluids[dst_idx];
+
+    if src.is_empty() || dst.is_empty() {
+        return;
+    }
+    if src.fluid_id == dst.fluid_id {
+        return;
+    }
+
+    let d_src = fluid_registry.get(src.fluid_id).density;
+    let d_dst = fluid_registry.get(dst.fluid_id).density;
+
+    // Only the heavier fluid displaces the lighter one
+    if d_src <= d_dst {
+        return;
+    }
+
+    // Need a cell above the destination for the displaced light fluid
+    if y + 1 >= height {
+        return;
+    }
+
+    let above_dst_idx = ((y + 1) * width + dst_x) as usize;
+
+    // Cannot place fluid into a solid tile
+    if tile_registry.is_solid(tiles[above_dst_idx]) {
+        return;
+    }
+
+    let above = fluids[above_dst_idx];
+
+    if above.is_empty() {
+        // Empty cell above → light fluid goes up
+        fluids[above_dst_idx] = dst;
+        fluids[dst_idx] = src;
+        fluids[src_idx] = FluidCell::EMPTY;
+    } else if above.fluid_id == dst.fluid_id {
+        // Same-type fluid above → merge light fluid mass upward
+        fluids[above_dst_idx].mass += dst.mass;
+        fluids[dst_idx] = src;
+        fluids[src_idx] = FluidCell::EMPTY;
     }
 }
 
@@ -394,21 +512,29 @@ mod tests {
 
     // --- Density displacement tests ---
 
+    /// Helper: create all-air tiles array for displacement tests.
+    fn air_tiles(len: usize) -> Vec<TileId> {
+        vec![TileId::AIR; len]
+    }
+
     #[test]
     fn density_displacement_heavy_sinks() {
         let fr = test_fluid_registry();
+        let tr = test_tile_registry();
         let water_id = fr.by_name("water"); // density 1000
         let lava_id = fr.by_name("lava"); // density 3000
 
         let w = 3;
         let h = 3;
-        let mut fluids = vec![FluidCell::EMPTY; (w * h) as usize];
+        let len = (w * h) as usize;
+        let mut fluids = vec![FluidCell::EMPTY; len];
+        let tiles = air_tiles(len);
 
         // Water below (y=0), lava above (y=1) — lava is heavier, should sink
         fluids[idx(1, 0, w)] = FluidCell::new(water_id, 1.0);
         fluids[idx(1, 1, w)] = FluidCell::new(lava_id, 1.0);
 
-        resolve_density_displacement(&mut fluids, w, h, &fr);
+        resolve_density_displacement(&mut fluids, &tiles, w, h, &fr, &tr);
 
         // After displacement: lava should be below, water above
         assert_eq!(fluids[idx(1, 0, w)].fluid_id, lava_id);
@@ -418,18 +544,21 @@ mod tests {
     #[test]
     fn density_displacement_light_stays_on_top() {
         let fr = test_fluid_registry();
+        let tr = test_tile_registry();
         let water_id = fr.by_name("water"); // density 1000
         let steam_id = fr.by_name("steam"); // density 0.6
 
         let w = 3;
         let h = 3;
-        let mut fluids = vec![FluidCell::EMPTY; (w * h) as usize];
+        let len = (w * h) as usize;
+        let mut fluids = vec![FluidCell::EMPTY; len];
+        let tiles = air_tiles(len);
 
         // Water below (y=0), steam above (y=1) — already correct order
         fluids[idx(1, 0, w)] = FluidCell::new(water_id, 1.0);
         fluids[idx(1, 1, w)] = FluidCell::new(steam_id, 0.8);
 
-        resolve_density_displacement(&mut fluids, w, h, &fr);
+        resolve_density_displacement(&mut fluids, &tiles, w, h, &fr, &tr);
 
         // No change — water is heavier and already below
         assert_eq!(fluids[idx(1, 0, w)].fluid_id, water_id);
@@ -439,17 +568,20 @@ mod tests {
     #[test]
     fn density_displacement_preserves_mass() {
         let fr = test_fluid_registry();
+        let tr = test_tile_registry();
         let water_id = fr.by_name("water");
         let lava_id = fr.by_name("lava");
 
         let w = 1;
         let h = 2;
-        let mut fluids = vec![FluidCell::EMPTY; (w * h) as usize];
+        let len = (w * h) as usize;
+        let mut fluids = vec![FluidCell::EMPTY; len];
+        let tiles = air_tiles(len);
 
         fluids[idx(0, 0, w)] = FluidCell::new(water_id, 0.7);
         fluids[idx(0, 1, w)] = FluidCell::new(lava_id, 0.9);
 
-        resolve_density_displacement(&mut fluids, w, h, &fr);
+        resolve_density_displacement(&mut fluids, &tiles, w, h, &fr, &tr);
 
         // Lava sinks, water rises — masses preserved
         assert_eq!(fluids[idx(0, 0, w)].fluid_id, lava_id);
@@ -461,16 +593,19 @@ mod tests {
     #[test]
     fn density_displacement_skips_empty_cells() {
         let fr = test_fluid_registry();
+        let tr = test_tile_registry();
         let water_id = fr.by_name("water");
 
         let w = 1;
         let h = 2;
-        let mut fluids = vec![FluidCell::EMPTY; (w * h) as usize];
+        let len = (w * h) as usize;
+        let mut fluids = vec![FluidCell::EMPTY; len];
+        let tiles = air_tiles(len);
 
         // Water below, empty above — should not swap
         fluids[idx(0, 0, w)] = FluidCell::new(water_id, 1.0);
 
-        resolve_density_displacement(&mut fluids, w, h, &fr);
+        resolve_density_displacement(&mut fluids, &tiles, w, h, &fr, &tr);
 
         assert_eq!(fluids[idx(0, 0, w)].fluid_id, water_id);
         assert!(fluids[idx(0, 1, w)].is_empty());
@@ -479,17 +614,20 @@ mod tests {
     #[test]
     fn density_displacement_skips_same_fluid() {
         let fr = test_fluid_registry();
+        let tr = test_tile_registry();
         let water_id = fr.by_name("water");
 
         let w = 1;
         let h = 2;
-        let mut fluids = vec![FluidCell::EMPTY; (w * h) as usize];
+        let len = (w * h) as usize;
+        let mut fluids = vec![FluidCell::EMPTY; len];
+        let tiles = air_tiles(len);
 
         // Same fluid in both cells — no swap needed
         fluids[idx(0, 0, w)] = FluidCell::new(water_id, 0.5);
         fluids[idx(0, 1, w)] = FluidCell::new(water_id, 0.8);
 
-        resolve_density_displacement(&mut fluids, w, h, &fr);
+        resolve_density_displacement(&mut fluids, &tiles, w, h, &fr, &tr);
 
         // Masses unchanged
         assert!((fluids[idx(0, 0, w)].mass - 0.5).abs() < f32::EPSILON);

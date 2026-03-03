@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 use bevy::tasks::ComputeTaskPool;
 
+use crate::fluid::cell::FluidId;
 use crate::fluid::registry::FluidRegistry;
 use crate::fluid::systems::{FluidMaterial, SharedFluidMaterial};
 use crate::object::definition::ObjectId;
@@ -781,6 +782,50 @@ fn extract_lighting_data(
                     let ty0 = chunk_ty0.max(clamp_min_ty);
                     let ty1 = (chunk_ty0 + cs).min(clamp_max_ty + 1);
 
+                    // Pre-compute per-cell emission coverage for this chunk.
+                    // A cell is "covered" when a contiguous column of fluid
+                    // above it contains a different fluid type (e.g. water
+                    // over lava).  Covered emissive cells are skipped so
+                    // their light doesn't bleed into the lightmap through
+                    // the covering fluid.
+                    let total = (cs_u * cs_u) as usize;
+                    let mut emission_covered = vec![false; total];
+                    {
+                        // Seed top_fluid from the chunk above (cross-boundary).
+                        let above_chunk = world_map.chunk(
+                            world_config.wrap_chunk_x(cx),
+                            cy + 1,
+                        );
+                        for lx in 0..cs_u {
+                            let mut top_fluid = above_chunk
+                                .map(|c| {
+                                    let aidx = lx as usize; // bottom row of chunk above = ly=0
+                                    c.fluids[aidx].fluid_id
+                                })
+                                .filter(|id| *id != FluidId::NONE)
+                                .unwrap_or(FluidId::NONE);
+                            let mut cover_active = false;
+
+                            for ly in (0..cs_u).rev() {
+                                let cidx = (ly * cs_u + lx) as usize;
+                                let cell = chunk.fluids[cidx];
+                                if cell.is_empty() {
+                                    top_fluid = FluidId::NONE;
+                                    cover_active = false;
+                                } else {
+                                    if top_fluid == FluidId::NONE {
+                                        top_fluid = cell.fluid_id;
+                                    } else if cell.fluid_id != top_fluid {
+                                        cover_active = true;
+                                    }
+                                    if cover_active {
+                                        emission_covered[cidx] = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     for ty in ty0..ty1 {
                         let ly = (ty - chunk_ty0) as u32;
                         for tx in tx0..tx1 {
@@ -795,6 +840,11 @@ fn extract_lighting_data(
                                 continue;
                             }
                             if cell.mass < 0.1 {
+                                continue;
+                            }
+                            // Skip emission for cells covered by a different
+                            // fluid above (e.g. lava under water).
+                            if emission_covered[fidx] {
                                 continue;
                             }
 

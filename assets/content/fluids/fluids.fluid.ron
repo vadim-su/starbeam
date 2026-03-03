@@ -71,4 +71,20 @@ FluidRegistryAsset(
             light_absorption: 0.4,
         ),
     ],
+    reactions: [
+        // Water + Lava (any adjacency) → stone tile + steam byproduct
+        // (
+        //     fluid_a: "water",
+        //     fluid_b: "lava",
+        //     adjacency: Any,
+        //     result_tile: Some("stone"),
+        //     result_fluid: None,
+        //     min_mass_a: 0.3,
+        //     min_mass_b: 0.3,
+        //     consume_a: 0.5,
+        //     consume_b: 0.5,
+        //     byproduct_fluid: Some("steam"),
+        //     byproduct_mass: 0.3,
+        // ),
+    ],
 )

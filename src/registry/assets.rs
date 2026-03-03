@@ -5,7 +5,7 @@ use bevy::reflect::TypePath;
 use serde::Deserialize;
 
 use super::tile::TileDef;
-use crate::fluid::FluidDef;
+use crate::fluid::{FluidDef, FluidReactionDef};
 use crate::item::definition::ItemDef;
 use crate::object::definition::ObjectDef;
 use crate::parallax::config::ParallaxLayerDef;
@@ -16,10 +16,12 @@ pub struct TileRegistryAsset {
     pub tiles: Vec<TileDef>,
 }
 
-/// Asset loaded from *.fluid.ron (monolithic fluid list)
+/// Asset loaded from *.fluid.ron (monolithic fluid list + optional reactions)
 #[derive(Asset, TypePath, Debug, Deserialize)]
 pub struct FluidRegistryAsset {
     pub fluids: Vec<FluidDef>,
+    #[serde(default)]
+    pub reactions: Vec<FluidReactionDef>,
 }
 
 /// Asset loaded from a single *.object.ron file (per-entity).

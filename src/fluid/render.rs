@@ -3,7 +3,7 @@ use bevy::mesh::{Indices, MeshVertexAttribute, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::VertexFormat;
 
-use super::cell::FluidCell;
+use super::cell::{FluidCell, FluidId};
 use super::registry::FluidRegistry;
 use crate::registry::tile::{TileId, TileRegistry};
 
@@ -406,6 +406,8 @@ pub fn build_fluid_mesh(
     left_edge_gas_h: Option<f32>,
     right_edge_gas_h: Option<f32>,
     above_surface_world_ys: Option<&[Option<f32>]>,
+    // Per-column seed: true = column above is already in "covered" state.
+    emission_cover_seed: Option<&[bool]>,
 ) -> Option<Mesh> {
     let capacity = fluids.len();
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(capacity * 4);
@@ -424,6 +426,43 @@ pub fn build_fluid_mesh(
     // Pre-compute per-column surface heights for smooth interpolation.
     let liquid_heights = compute_column_surface_heights(fluids, chunk_size, fluid_registry, false);
     let gas_heights = compute_column_surface_heights(fluids, chunk_size, fluid_registry, true);
+
+    // Pre-compute per-cell emission coverage: a cell is "covered" when there
+    // is a contiguous column of fluid above it that contains a different fluid
+    // type.  E.g. all lava cells beneath a water body are marked covered so
+    // their emission glow doesn't bleed through the semi-transparent water.
+    let mut emission_covered = vec![false; (chunk_size * chunk_size) as usize];
+    for lx in 0..chunk_size {
+        // Start from the row above the chunk (cross-chunk neighbour).
+        let mut top_fluid = neighbor_above_row
+            .map(|row| row[lx as usize].fluid_id)
+            .filter(|id| *id != FluidId::NONE)
+            .unwrap_or(FluidId::NONE);
+        // Seed from calling code: if the chunk(s) above already determined
+        // that this column is in "covered" state, propagate it.
+        let mut cover_active = emission_cover_seed
+            .map(|seeds| seeds[lx as usize])
+            .unwrap_or(false);
+
+        // Iterate top-down within the chunk.
+        for ly in (0..chunk_size).rev() {
+            let cidx = (ly * chunk_size + lx) as usize;
+            let cell = &fluids[cidx];
+            if cell.is_empty() {
+                top_fluid = FluidId::NONE;
+                cover_active = false;
+            } else {
+                if top_fluid == FluidId::NONE {
+                    top_fluid = cell.fluid_id;
+                } else if cell.fluid_id != top_fluid {
+                    cover_active = true;
+                }
+                if cover_active {
+                    emission_covered[cidx] = true;
+                }
+            }
+        }
+    }
 
     for local_y in 0..chunk_size {
         for local_x in 0..chunk_size {
@@ -481,12 +520,19 @@ pub fn build_fluid_mesh(
             );
             let uv = [fill, depth];
 
-            // Emission from FluidDef.light_emission
-            let emission = [
+            // Emission from FluidDef.light_emission.
+            // Suppress emission when this cell is covered by a different fluid
+            // anywhere above in the same column (e.g. lava under water).
+            // Uses the pre-computed `emission_covered` array which walks each
+            // column top-down marking all cells beneath a foreign-fluid body.
+            let mut emission = [
                 def.light_emission[0] as f32 / 255.0,
                 def.light_emission[1] as f32 / 255.0,
                 def.light_emission[2] as f32 / 255.0,
             ];
+            if emission_covered[idx] {
+                emission = [0.0, 0.0, 0.0];
+            }
 
             // Surface detection for wave vertices
             let is_surface = if def.is_gas {
@@ -711,7 +757,7 @@ mod tests {
         let tiles = vec![TileId::AIR; 4];
         let result = build_fluid_mesh(
             &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
-            None, None,
+            None, None, None,
         );
         assert!(result.is_none(), "all-empty chunk should return None");
     }
@@ -727,7 +773,7 @@ mod tests {
 
         let mesh = build_fluid_mesh(
             &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
-            None, None,
+            None, None, None,
         )
         .expect("should produce a mesh");
 
@@ -769,7 +815,7 @@ mod tests {
 
         let mesh = build_fluid_mesh(
             &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
-            None, None,
+            None, None, None,
         )
         .expect("should produce a mesh");
 
@@ -796,7 +842,7 @@ mod tests {
 
         let mesh = build_fluid_mesh(
             &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
-            None, None,
+            None, None, None,
         )
         .expect("should produce a mesh");
 
@@ -828,7 +874,7 @@ mod tests {
 
         let mesh = build_fluid_mesh(
             &fluids, &tiles, 0, 0, chunk_size, 8.0, &reg, &tile_reg, None, None, None, None, None,
-            None, None, None,
+            None, None, None, None,
         )
         .expect("should produce a mesh");
 
@@ -860,7 +906,7 @@ mod tests {
         // world_x = 2.0 * 8.0 = 16.0, world_y = 4.0 * 8.0 = 32.0
         let mesh = build_fluid_mesh(
             &fluids, &tiles, 1, 2, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
-            None, None,
+            None, None, None,
         )
         .expect("should produce a mesh");
 
@@ -887,7 +933,7 @@ mod tests {
 
         let mesh = build_fluid_mesh(
             &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
-            None, None,
+            None, None, None,
         )
         .expect("should produce a mesh");
 
@@ -914,7 +960,7 @@ mod tests {
 
         let mesh = build_fluid_mesh(
             &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
-            None, None,
+            None, None, None,
         )
         .expect("should produce a mesh");
 
@@ -1255,6 +1301,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .expect("should produce mesh");
 
@@ -1285,7 +1332,7 @@ mod tests {
 
         let mesh = build_fluid_mesh(
             &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
-            None, None,
+            None, None, None,
         )
         .expect("should produce a mesh");
 
@@ -1313,7 +1360,7 @@ mod tests {
 
         let mesh = build_fluid_mesh(
             &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
-            None, None,
+            None, None, None,
         )
         .expect("should produce a mesh");
 
@@ -1351,7 +1398,7 @@ mod tests {
 
         let mesh = build_fluid_mesh(
             &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
-            None, None,
+            None, None, None,
         )
         .expect("should produce a mesh");
 
@@ -1393,7 +1440,7 @@ mod tests {
 
         let mesh = build_fluid_mesh(
             &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
-            None, None,
+            None, None, None,
         )
         .expect("should produce a mesh");
 
@@ -1435,7 +1482,7 @@ mod tests {
 
         let mesh = build_fluid_mesh(
             &fluids, &tiles, 0, 0, 2, 8.0, &reg, &tile_reg, None, None, None, None, None, None,
-            None, None,
+            None, None, None,
         )
         .expect("should produce a mesh");
 

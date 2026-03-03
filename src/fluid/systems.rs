@@ -25,6 +25,12 @@ use crate::registry::tile::TileRegistry;
 use crate::registry::world::ActiveWorld;
 use crate::world::chunk::{ChunkCoord, LoadedChunks, WorldMap};
 
+/// Tracks time between fixed fluid simulation ticks.
+#[derive(Resource, Default)]
+pub struct FluidTickAccumulator {
+    pub accumulator: f32,
+}
+
 /// Custom Material2d for fluid rendering with lightmap, wave animation, and emission.
 ///
 /// Bindings (all in @group(2)):
@@ -141,8 +147,11 @@ pub fn update_fluid_time(
     }
 }
 
-/// Main fluid simulation system. Runs N iterations per tick on active chunks.
+/// Main fluid simulation system. Runs at a fixed tick rate using an accumulator
+/// to decouple simulation speed from frame rate.
 pub fn fluid_simulation(
+    time: Res<Time>,
+    mut accumulator: ResMut<FluidTickAccumulator>,
     mut world_map: ResMut<WorldMap>,
     fluid_registry: Res<FluidRegistry>,
     tile_registry: Res<TileRegistry>,
@@ -151,6 +160,48 @@ pub fn fluid_simulation(
     config: Res<FluidSimConfig>,
     reaction_registry: Option<Res<FluidReactionRegistry>>,
     mut reaction_events: MessageWriter<FluidReactionEvent>,
+) {
+    let tick_interval = 1.0 / config.tick_rate;
+    accumulator.accumulator += time.delta_secs();
+    let mut ticks_this_frame = 0u32;
+
+    while accumulator.accumulator >= tick_interval && ticks_this_frame < config.max_ticks_per_frame
+    {
+        accumulator.accumulator -= tick_interval;
+        ticks_this_frame += 1;
+
+        run_one_tick_legacy(
+            &mut world_map,
+            &fluid_registry,
+            &tile_registry,
+            &active_world,
+            &mut active_fluids,
+            &config,
+            reaction_registry.as_deref(),
+            &mut reaction_events,
+        );
+    }
+
+    // Prevent accumulator spiral
+    let max_acc = tick_interval * config.max_ticks_per_frame as f32;
+    if accumulator.accumulator > max_acc {
+        accumulator.accumulator = max_acc;
+    }
+}
+
+/// One tick of the legacy per-chunk fluid simulation.
+/// Extracted from the original `fluid_simulation` body to preserve existing
+/// behavior while the fixed-timestep wrapper controls tick rate.
+#[allow(clippy::too_many_arguments)]
+fn run_one_tick_legacy(
+    world_map: &mut WorldMap,
+    fluid_registry: &FluidRegistry,
+    tile_registry: &TileRegistry,
+    active_world: &ActiveWorld,
+    active_fluids: &mut ActiveFluidChunks,
+    config: &FluidSimConfig,
+    reaction_registry: Option<&FluidReactionRegistry>,
+    reaction_events: &mut MessageWriter<FluidReactionEvent>,
 ) {
     let chunk_size = active_world.chunk_size;
     let len = (chunk_size * chunk_size) as usize;
@@ -167,10 +218,6 @@ pub fn fluid_simulation(
     let tile_size = active_world.tile_size;
 
     // Step 1: Simulate each chunk with double-buffered fluid arrays.
-    //
-    // Double-buffering eliminates the per-iteration O(chunk_size²) allocation:
-    //   OLD: N × (clone + alloc) per chunk per tick
-    //   NEW: 1 × (clone + alloc) per chunk per tick, then N swaps
     //
     // Sleep/wake: chunks with no movement for SLEEP_THRESHOLD ticks are skipped.
     // reconcile_chunk_boundaries runs once after all intra-chunk iterations.
@@ -197,23 +244,31 @@ pub fn fluid_simulation(
         let mut buf_b = vec![FluidCell::EMPTY; len];
         let mut tiles = chunk.fg.tiles.clone();
 
-        for _ in 0..config.iterations_per_tick {
+        // One iteration per tick — tick rate now controls simulation speed
+        for _ in 0..1u32 {
             simulate_grid(
                 &tiles,
                 &buf_a,
                 &mut buf_b,
                 chunk_size,
                 chunk_size,
-                &tile_registry,
-                &fluid_registry,
-                &config,
+                tile_registry,
+                fluid_registry,
+                config,
             );
 
-            // Apply density displacement (heavier fluids sink)
-            resolve_density_displacement(&mut buf_b, chunk_size, chunk_size, &fluid_registry);
+            // Apply density displacement (heavier fluids sink + spread horizontally)
+            resolve_density_displacement(
+                &mut buf_b,
+                &tiles,
+                chunk_size,
+                chunk_size,
+                fluid_registry,
+                tile_registry,
+            );
 
             // Apply fluid reactions (e.g. lava + water → stone + steam)
-            if let Some(ref rr) = reaction_registry {
+            if let Some(rr) = reaction_registry {
                 let events = execute_fluid_reactions(
                     &mut buf_b, &mut tiles, chunk_size, chunk_size, rr, cx, cy, tile_size,
                 );
@@ -249,14 +304,14 @@ pub fn fluid_simulation(
 
     // Step 2: Transfer fluid across chunk boundaries (once per tick)
     reconcile_chunk_boundaries(
-        &mut world_map,
+        world_map,
         &active_fluids.chunks,
         chunk_size,
         width_chunks,
         height_chunks,
-        &tile_registry,
-        &fluid_registry,
-        &config,
+        tile_registry,
+        fluid_registry,
+        config,
     );
 
     // Activate neighbor chunks that received fluid from boundary transfer
@@ -455,6 +510,51 @@ pub fn fluid_rebuild_meshes(
                     .collect()
             });
 
+        // Compute per-column emission coverage seed by walking upward through
+        // chunks above.  For each column, if the neighbour-above row has an
+        // emissive fluid of the same type as cells in this chunk, we keep
+        // walking up to see if a *different* fluid sits on top of that body.
+        // If so, the column enters "covered" state from the very top of this
+        // chunk, suppressing lava glow under water across chunk boundaries.
+        let emission_cover_seed: Vec<bool> = (0..chunk_size)
+            .map(|x| {
+                let Some(ref nar) = neighbor_above_row else {
+                    return false;
+                };
+                let nar_cell = nar[x as usize];
+                if nar_cell.is_empty() {
+                    return false;
+                }
+                let emissive_fluid = nar_cell.fluid_id;
+                let def = fluid_registry.get(emissive_fluid);
+                if def.light_emission == [0, 0, 0] {
+                    return false;
+                }
+                // Walk upward from row 1 of chunk (data_cx, cy+1).
+                // Row 0 is the neighbor_above_row we already have.
+                let mut check_cy = cy + 1;
+                let mut check_ly: u32 = 1;
+                loop {
+                    if check_ly >= chunk_size {
+                        check_cy += 1;
+                        check_ly = 0;
+                    }
+                    let Some(check_chunk) = world_map.chunks.get(&(data_cx, check_cy)) else {
+                        return false;
+                    };
+                    let cidx = (check_ly * chunk_size + x) as usize;
+                    let c = check_chunk.fluids[cidx];
+                    if c.is_empty() {
+                        return false; // hit air → not covered
+                    }
+                    if c.fluid_id != emissive_fluid {
+                        return true; // different fluid above → covered!
+                    }
+                    check_ly += 1;
+                }
+            })
+            .collect();
+
         let Some(mesh) = build_fluid_mesh(
             &chunk.fluids,
             chunk.fg.tiles.as_slice(),
@@ -472,6 +572,7 @@ pub fn fluid_rebuild_meshes(
             left_edge_gas_h,
             right_edge_gas_h,
             above_surface_world_ys.as_deref(),
+            Some(&emission_cover_seed),
         ) else {
             continue;
         };

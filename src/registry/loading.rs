@@ -19,7 +19,7 @@ use super::tile::TileRegistry;
 use super::world::ActiveWorld;
 use super::{AppState, BiomeParallaxConfigs, RegistryHandles};
 use crate::cosmos::address::CelestialSeeds;
-use crate::fluid::FluidRegistry;
+use crate::fluid::{FluidReactionRegistry, FluidRegistry};
 use crate::cosmos::assets::{GenerationConfigAsset, StarTypeAsset};
 use crate::cosmos::current::CurrentSystem;
 use crate::cosmos::generation::generate_system;
@@ -236,8 +236,20 @@ pub(crate) fn check_loading(
 
     // Build resources from loaded assets
     let registry_ref = TileRegistry::from_defs(tiles.tiles.clone());
+    let fluid_registry = FluidRegistry::from_defs(fluid_asset.fluids.clone());
+
+    // Build fluid reaction registry (water+lava→stone, etc.)
+    if !fluid_asset.reactions.is_empty() {
+        let reaction_registry = FluidReactionRegistry::from_defs(
+            &fluid_asset.reactions,
+            &fluid_registry,
+            &registry_ref,
+        );
+        commands.insert_resource(reaction_registry);
+    }
+
     commands.insert_resource(registry_ref);
-    commands.insert_resource(FluidRegistry::from_defs(fluid_asset.fluids.clone()));
+    commands.insert_resource(fluid_registry);
     commands.insert_resource(ObjectRegistry::from_defs(object_defs));
     commands.insert_resource(PlayerConfig {
         speed: character.speed,

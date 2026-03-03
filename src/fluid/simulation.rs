@@ -19,7 +19,10 @@ pub const MAX_SPEED: f32 = 1.0;
 /// Configuration for the fluid simulation.
 #[derive(Debug, Clone, Resource)]
 pub struct FluidSimConfig {
-    pub iterations_per_tick: u32,
+    /// Simulation ticks per second (default 20 = like Minecraft).
+    pub tick_rate: f32,
+    /// Max ticks per frame to prevent death spiral (default 3).
+    pub max_ticks_per_frame: u32,
     pub min_mass: f32,
     pub min_flow: f32,
     pub max_speed: f32,
@@ -28,10 +31,11 @@ pub struct FluidSimConfig {
 impl Default for FluidSimConfig {
     fn default() -> Self {
         Self {
-            iterations_per_tick: 2, // was 6 → 3 → 2
+            tick_rate: 20.0,
+            max_ticks_per_frame: 3,
             min_mass: MIN_MASS,
             min_flow: MIN_FLOW,
-            max_speed: MAX_SPEED, // was *4 → *2 → *1 (base speed)
+            max_speed: MAX_SPEED,
         }
     }
 }
@@ -257,6 +261,12 @@ fn try_flow_vertical(
         return remaining;
     }
 
+    // Write-buffer check: another cell may have already claimed this target
+    // during this iteration with a different fluid type.
+    if new_fluids[nidx].fluid_id != FluidId::NONE && new_fluids[nidx].fluid_id != fluid_id {
+        return remaining;
+    }
+
     let neighbor_mass = new_fluids[nidx].mass;
     let total = remaining + neighbor_mass;
 
@@ -390,6 +400,12 @@ fn try_flow_side(
 
     let neighbor = fluids[nidx];
     if !neighbor.is_empty() && neighbor.fluid_id != fluid_id {
+        return remaining;
+    }
+
+    // Write-buffer check: another cell may have already claimed this target
+    // during this iteration with a different fluid type.
+    if new_fluids[nidx].fluid_id != FluidId::NONE && new_fluids[nidx].fluid_id != fluid_id {
         return remaining;
     }
 
@@ -557,6 +573,76 @@ pub fn reconcile_chunk_boundaries(
             cb.fluids[idx_b].mass += flow;
             if cb.fluids[idx_b].fluid_id == FluidId::NONE {
                 cb.fluids[idx_b].fluid_id = fluid_id;
+            }
+        }
+    }
+
+    // --- Cross-chunk density displacement ---
+    // Swap vertically adjacent cells at chunk boundaries when a heavier fluid
+    // sits above a lighter one. Without this, lava (density 3000) can stay on
+    // top of water (density 1000) indefinitely at chunk seams.
+    let mut density_swaps: Vec<((i32, i32), usize, (i32, i32), usize)> = Vec::new();
+    let mut processed_vert: HashSet<((i32, i32), (i32, i32))> = HashSet::new();
+
+    for &(cx, cy) in active_chunks {
+        for dy in [-1_i32, 1] {
+            let ncy = cy + dy;
+            if ncy < 0 || ncy >= height_chunks {
+                continue;
+            }
+
+            let (bottom_cy, top_cy) = if dy == 1 { (cy, ncy) } else { (ncy, cy) };
+            let key = ((cx, bottom_cy), (cx, top_cy));
+            if !processed_vert.insert(key) {
+                continue;
+            }
+
+            let Some(bottom_chunk) = world_map.chunks.get(&(cx, bottom_cy)) else {
+                continue;
+            };
+            let Some(top_chunk) = world_map.chunks.get(&(cx, top_cy)) else {
+                continue;
+            };
+
+            for local_x in 0..chunk_size {
+                let idx_bottom = ((chunk_size - 1) * chunk_size + local_x) as usize;
+                let idx_top = local_x as usize;
+
+                let cell_bottom = bottom_chunk.fluids[idx_bottom];
+                let cell_top = top_chunk.fluids[idx_top];
+
+                if cell_bottom.is_empty() || cell_top.is_empty() {
+                    continue;
+                }
+                if cell_bottom.fluid_id == cell_top.fluid_id {
+                    continue;
+                }
+
+                let density_bottom = fluid_registry.get(cell_bottom.fluid_id).density;
+                let density_top = fluid_registry.get(cell_top.fluid_id).density;
+
+                // If the fluid on top is heavier, swap them
+                if density_top > density_bottom {
+                    density_swaps.push(((cx, bottom_cy), idx_bottom, (cx, top_cy), idx_top));
+                }
+            }
+        }
+    }
+
+    // Apply cross-chunk density swaps
+    for (chunk_low, idx_low, chunk_high, idx_high) in density_swaps {
+        // We need both chunks to perform the swap
+        let cell_low = world_map.chunks.get(&chunk_low).map(|c| c.fluids[idx_low]);
+        let cell_high = world_map
+            .chunks
+            .get(&chunk_high)
+            .map(|c| c.fluids[idx_high]);
+        if let (Some(cl), Some(ch)) = (cell_low, cell_high) {
+            if let Some(c) = world_map.chunks.get_mut(&chunk_low) {
+                c.fluids[idx_low] = ch;
+            }
+            if let Some(c) = world_map.chunks.get_mut(&chunk_high) {
+                c.fluids[idx_high] = cl;
             }
         }
     }
@@ -871,10 +957,7 @@ mod tests {
         let mut new_fluids = fluids.clone();
         let tr = test_tile_registry();
         let fr = test_fluid_registry();
-        let config = FluidSimConfig {
-            iterations_per_tick: 1,
-            ..Default::default()
-        };
+        let config = FluidSimConfig::default();
 
         let water_id = fr.by_name("water");
         // Place water at top-center (x=1, y=2)
@@ -960,10 +1043,7 @@ mod tests {
         let (tiles, mut fluids) = make_grid(w, h);
         let tr = test_tile_registry();
         let fr = test_fluid_registry();
-        let config = FluidSimConfig {
-            iterations_per_tick: 1,
-            ..Default::default()
-        };
+        let config = FluidSimConfig::default();
         let water_id = fr.by_name("water");
 
         // Stack 3 water cells
