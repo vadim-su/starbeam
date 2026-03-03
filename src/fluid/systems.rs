@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use bevy::asset::RenderAssetUsages;
 use bevy::ecs::message::{MessageReader, MessageWriter};
@@ -75,10 +75,21 @@ impl Material2d for FluidMaterial {
 
 /// Tracks which DATA chunk coordinates have active (non-empty) fluids.
 /// The simulation only processes chunks in this set.
+/// How many consecutive calm ticks before a chunk enters sleep mode.
+/// At 60 fps with default tick rate, 60 ticks ≈ 1 second of stillness.
+const SLEEP_THRESHOLD: u32 = 60;
+
+/// Minimum mass-change per cell to consider a chunk still active.
+const CALM_MASS_EPSILON: f32 = 0.001;
+
 /// When fluid is placed (e.g. debug commands), the chunk coords must be added here.
 #[derive(Resource, Default, Debug)]
 pub struct ActiveFluidChunks {
     pub chunks: HashSet<(i32, i32)>,
+    /// Consecutive ticks with no fluid movement per chunk.
+    /// When this exceeds `SLEEP_THRESHOLD`, simulation is skipped for that chunk.
+    /// Reset to 0 whenever fluid moves or is externally added.
+    pub calm_ticks: HashMap<(i32, i32), u32>,
 }
 
 /// Marker component on chunk entities that own a fluid mesh overlay.
@@ -161,15 +172,28 @@ pub fn fluid_simulation(
     //   OLD: N × (clone + alloc) per chunk per tick
     //   NEW: 1 × (clone + alloc) per chunk per tick, then N swaps
     //
-    // reconcile_chunk_boundaries runs once after all intra-chunk iterations,
-    // rather than N times. Cross-chunk flow is still applied each tick.
+    // Sleep/wake: chunks with no movement for SLEEP_THRESHOLD ticks are skipped.
+    // reconcile_chunk_boundaries runs once after all intra-chunk iterations.
     for &(cx, cy) in &chunks_to_process {
         let Some(chunk) = world_map.chunks.get(&(cx, cy)) else {
             continue;
         };
 
+        // --- Sleep check ---
+        // Skip simulation for chunks that have been calm long enough.
+        // We still process them in reconcile so cross-chunk flow can wake them.
+        let calm = active_fluids
+            .calm_ticks
+            .get(&(cx, cy))
+            .copied()
+            .unwrap_or(0);
+        if calm > SLEEP_THRESHOLD {
+            continue;
+        }
+
         // Allocate buffers once per chunk per tick
         let mut buf_a = chunk.fluids.clone();
+        let initial_fluids = buf_a.clone(); // snapshot to detect movement
         let mut buf_b = vec![FluidCell::EMPTY; len];
         let mut tiles = chunk.fg.tiles.clone();
 
@@ -202,6 +226,18 @@ pub fn fluid_simulation(
             std::mem::swap(&mut buf_a, &mut buf_b);
             // Clear the write buffer for the next iteration
             buf_b.fill(FluidCell::EMPTY);
+        }
+
+        // --- Detect movement and update calm_ticks ---
+        let moved = initial_fluids.iter().zip(buf_a.iter()).any(|(old, new)| {
+            old.fluid_id != new.fluid_id || (old.mass - new.mass).abs() >= CALM_MASS_EPSILON
+        });
+
+        let entry = active_fluids.calm_ticks.entry((cx, cy)).or_insert(0);
+        if moved {
+            *entry = 0;
+        } else {
+            *entry = entry.saturating_add(1);
         }
 
         // Write back final state
@@ -263,15 +299,45 @@ pub fn fluid_simulation(
     }
     for coord in new_active {
         active_fluids.chunks.insert(coord);
+        // Wake newly activated chunks — they just received fluid
+        active_fluids.calm_ticks.insert(coord, 0);
+    }
+
+    // Also wake sleeping chunks that received fluid from reconcile
+    // (reconcile modifies chunk.fluids directly, bypassing the sleep check above).
+    // Collect candidates first to avoid double-borrow.
+    let sleeping_with_fluid: Vec<(i32, i32)> = active_fluids
+        .chunks
+        .iter()
+        .copied()
+        .filter(|coord| active_fluids.calm_ticks.get(coord).copied().unwrap_or(0) > SLEEP_THRESHOLD)
+        .filter(|&(cx, cy)| {
+            world_map
+                .chunks
+                .get(&(cx, cy))
+                .is_some_and(|chunk| chunk.fluids.iter().any(|c| !c.is_empty()))
+        })
+        .collect();
+    for coord in sleeping_with_fluid {
+        active_fluids.calm_ticks.insert(coord, 0);
     }
 
     // Prune chunks that no longer have any fluid
-    active_fluids.chunks.retain(|&(cx, cy)| {
-        world_map
-            .chunks
-            .get(&(cx, cy))
-            .is_some_and(|chunk| chunk.fluids.iter().any(|c| !c.is_empty()))
-    });
+    let to_remove: Vec<(i32, i32)> = active_fluids
+        .chunks
+        .iter()
+        .copied()
+        .filter(|&(cx, cy)| {
+            !world_map
+                .chunks
+                .get(&(cx, cy))
+                .is_some_and(|chunk| chunk.fluids.iter().any(|c| !c.is_empty()))
+        })
+        .collect();
+    for coord in to_remove {
+        active_fluids.chunks.remove(&coord);
+        active_fluids.calm_ticks.remove(&coord);
+    }
 }
 
 /// Rebuild fluid mesh overlays for active fluid chunks.
