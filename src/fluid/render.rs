@@ -43,12 +43,14 @@ fn is_liquid_surface(
     let above_y = local_y + 1;
     if above_y >= chunk_size {
         // At chunk boundary: check neighbor chunk's bottom row if available.
-        if let Some(row) = neighbor_above_row {
-            let above = &row[local_x as usize];
-            return above.is_empty() || above.fluid_id != fluid_id;
-        }
-        // No neighbor data: assume fluid continues (no waves at seam).
-        return false;
+        return match neighbor_above_row {
+            Some(row) => {
+                let above = &row[local_x as usize];
+                above.is_empty() || above.fluid_id != fluid_id
+            }
+            // No neighbor chunk loaded above → treat as open sky → is a surface.
+            None => true,
+        };
     }
     let above_idx = (above_y * chunk_size + local_x) as usize;
     let above = &fluids[above_idx];
@@ -69,12 +71,14 @@ fn is_gas_surface(
 ) -> bool {
     if local_y == 0 {
         // At chunk boundary: check neighbor chunk's top row if available.
-        if let Some(row) = neighbor_below_row {
-            let below = &row[local_x as usize];
-            return below.is_empty() || below.fluid_id != fluid_id;
-        }
-        // No neighbor data: assume gas continues (no waves at seam).
-        return false;
+        return match neighbor_below_row {
+            Some(row) => {
+                let below = &row[local_x as usize];
+                below.is_empty() || below.fluid_id != fluid_id
+            }
+            // No neighbor chunk loaded below → treat as open space → is a surface.
+            None => true,
+        };
     }
     let below_idx = ((local_y - 1) * chunk_size + local_x) as usize;
     let below = &fluids[below_idx];
@@ -697,14 +701,24 @@ mod tests {
 
     #[test]
     fn liquid_not_surface_at_top_edge() {
-        // 2×2 chunk: water at (0,1) — top row, above is out-of-bounds.
-        // At chunk boundary we assume fluid continues (no waves at seams).
+        // 2×2 chunk: water at (0,1) — top row, no neighbor chunk above.
+        // With no neighbor data (None), we treat it as open sky → IS a surface.
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[2] = FluidCell::new(FluidId(1), 1.0); // (0,1)
 
         assert!(
-            !is_liquid_surface(&fluids, 0, 1, 2, FluidId(1), None),
-            "top-edge cell should NOT be surface (assume continuation at chunk boundary)"
+            is_liquid_surface(&fluids, 0, 1, 2, FluidId(1), None),
+            "top-edge cell with no neighbor should be surface (open sky assumed)"
+        );
+
+        // But if neighbor above has the SAME fluid at the boundary → not a surface.
+        let neighbor_row: Vec<FluidCell> = vec![
+            FluidCell::new(FluidId(1), 1.0),
+            FluidCell::new(FluidId(1), 1.0),
+        ];
+        assert!(
+            !is_liquid_surface(&fluids, 0, 1, 2, FluidId(1), Some(&neighbor_row)),
+            "top-edge with fluid-filled neighbor should NOT be surface"
         );
     }
 
@@ -739,14 +753,24 @@ mod tests {
 
     #[test]
     fn gas_not_surface_at_bottom_edge() {
-        // 2×2 chunk: steam at (0,0) — bottom row, below is out-of-bounds.
-        // At chunk boundary we assume gas continues (no waves at seams).
+        // 2×2 chunk: steam at (0,0) — bottom row, no neighbor chunk below.
+        // With no neighbor data (None), we treat it as open space → IS a surface.
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(2), 1.0); // (0,0)
 
         assert!(
-            !is_gas_surface(&fluids, 0, 0, 2, FluidId(2), None),
-            "bottom-edge gas cell should NOT be surface (assume continuation at chunk boundary)"
+            is_gas_surface(&fluids, 0, 0, 2, FluidId(2), None),
+            "bottom-edge gas cell with no neighbor should be surface (open space assumed)"
+        );
+
+        // But if neighbor below has the SAME fluid → not a surface.
+        let neighbor_row: Vec<FluidCell> = vec![
+            FluidCell::new(FluidId(2), 1.0),
+            FluidCell::new(FluidId(2), 1.0),
+        ];
+        assert!(
+            !is_gas_surface(&fluids, 0, 0, 2, FluidId(2), Some(&neighbor_row)),
+            "bottom-edge gas with fluid-filled neighbor should NOT be surface"
         );
     }
 

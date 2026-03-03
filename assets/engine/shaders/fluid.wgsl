@@ -45,9 +45,10 @@ fn vertex(in: VertexInput) -> VertexOutput {
         let amp   = in.wave_params.x;
         let speed = in.wave_params.y;
         // Multi-octave ripple: base (slow, large) + mid + detail (fast, small)
-        let base   = sin(world_pos.x * 1.5 + uniforms.time * 1.0  * speed) * 1.2 * amp;
-        let mid    = sin(world_pos.x * 4.0 + world_pos.y * 0.5 + uniforms.time * 1.8 * speed) * 0.5 * amp;
-        let detail = sin(world_pos.x * 9.0 - world_pos.y * 1.2 + uniforms.time * 3.0 * speed) * 0.2 * amp;
+        // Amplitudes in world units (tile_size=8.0), so 3.0 ≈ 0.375 tiles.
+        let base   = sin(world_pos.x * 1.5 + uniforms.time * 1.0  * speed) * 3.0 * amp;
+        let mid    = sin(world_pos.x * 4.0 + world_pos.y * 0.5 + uniforms.time * 1.8 * speed) * 1.2 * amp;
+        let detail = sin(world_pos.x * 9.0 - world_pos.y * 1.2 + uniforms.time * 3.0 * speed) * 0.5 * amp;
         world_pos.y += base + mid + detail + in.wave_height;
     }
 
@@ -75,8 +76,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let world_x = in.world_pos.x;
     let world_y = in.world_pos.y;
 
-    // 1. Shimmer: subtle brightness oscillation based on world position and time
-    let shimmer = 1.0 + 0.12 * sin(world_x * 5.0 + world_y * 3.0 + uniforms.time * 1.5);
+    // 1. Shimmer: brightness oscillation based on world position and time.
+    // Stronger shimmer so it's visible even through the lightmap darkening.
+    let shimmer = 1.0 + 0.25 * sin(world_x * 5.0 + world_y * 3.0 + uniforms.time * 1.5);
     color = vec4<f32>(color.rgb * shimmer, color.a);
 
     // 2. Lightmap: multiply by lightmap sample at world position
