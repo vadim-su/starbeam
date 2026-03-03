@@ -472,8 +472,10 @@ pub fn build_fluid_mesh(
                 fluid_data.push([emission[0], emission[1], emission[2], flags]);
             }
 
-            // WAVE_HEIGHT: dynamic wave displacement from wave propagation simulation
-            let wave_h = wave_heights.map(|wh| wh[idx]).unwrap_or(0.0);
+            // WAVE_HEIGHT: dynamic wave displacement from wave propagation simulation.
+            // Scale from abstract wave units to world units (pixels) by tile_size,
+            // so vertex displacement in the shader matches the mesh coordinate space.
+            let wave_h = wave_heights.map(|wh| wh[idx] * tile_size).unwrap_or(0.0);
             wave_data.extend_from_slice(&[wave_h, wave_h, wave_h, wave_h]);
 
             // WAVE_PARAMS: per-fluid amplitude and speed multipliers from FluidDef
