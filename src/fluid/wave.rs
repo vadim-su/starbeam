@@ -15,6 +15,7 @@ use crate::fluid::cell::FluidCell;
 pub struct WaveBuffer {
     pub height: Vec<f32>,
     pub velocity: Vec<f32>,
+    prev_height: Vec<f32>,
     pub chunk_size: u32,
 }
 
@@ -25,6 +26,7 @@ impl WaveBuffer {
         Self {
             height: vec![0.0; len],
             velocity: vec![0.0; len],
+            prev_height: vec![0.0; len],
             chunk_size,
         }
     }
@@ -54,13 +56,11 @@ impl WaveBuffer {
         let size = self.chunk_size;
         let len = (size * size) as usize;
 
-        // Snapshot the previous height field so all cells read consistent
-        // neighbor values from the same timestep (avoids asymmetric energy
-        // transfer from in-place updates).
-        let prev_height = self.height.clone();
+        // Swap buffers: prev_height now holds last tick's heights,
+        // and height becomes the write target (avoids per-tick clone).
+        std::mem::swap(&mut self.height, &mut self.prev_height);
 
         for i in 0..len {
-            // Empty cells get zeroed out
             if fluids[i].is_empty() {
                 self.height[i] = 0.0;
                 self.velocity[i] = 0.0;
@@ -70,55 +70,50 @@ impl WaveBuffer {
             let x = (i as u32) % size;
             let y = (i as u32) / size;
 
-            // Gather 4-connected neighbor heights (only non-empty fluid neighbors)
             let mut sum = 0.0;
             let mut count = 0u32;
 
-            // Left
             if x > 0 {
                 let ni = (y * size + (x - 1)) as usize;
                 if !fluids[ni].is_empty() {
-                    sum += prev_height[ni];
+                    sum += self.prev_height[ni];
                     count += 1;
                 }
             }
-            // Right
             if x + 1 < size {
                 let ni = (y * size + (x + 1)) as usize;
                 if !fluids[ni].is_empty() {
-                    sum += prev_height[ni];
+                    sum += self.prev_height[ni];
                     count += 1;
                 }
             }
-            // Down
             if y > 0 {
                 let ni = ((y - 1) * size + x) as usize;
                 if !fluids[ni].is_empty() {
-                    sum += prev_height[ni];
+                    sum += self.prev_height[ni];
                     count += 1;
                 }
             }
-            // Up
             if y + 1 < size {
                 let ni = ((y + 1) * size + x) as usize;
                 if !fluids[ni].is_empty() {
-                    sum += prev_height[ni];
+                    sum += self.prev_height[ni];
                     count += 1;
                 }
             }
 
             if count > 0 {
                 let avg = sum / count as f32;
-                self.velocity[i] += (avg - prev_height[i]) * config.speed;
+                self.velocity[i] += (avg - self.prev_height[i]) * config.speed;
             }
 
             self.velocity[i] *= config.damping;
-            self.height[i] = (prev_height[i] + self.velocity[i]) * config.damping;
-
-            // Clamp height
+            // Damping on both channels independently (not on their sum):
+            // - velocity *= damping dissipates kinetic energy
+            // - prev * damping dissipates potential energy (standing waves in bounded domain)
+            self.height[i] = self.prev_height[i] * config.damping + self.velocity[i];
             self.height[i] = self.height[i].clamp(-config.max_height, config.max_height);
 
-            // Zero out if both height and velocity are below epsilon
             if self.height[i].abs() < config.epsilon && self.velocity[i].abs() < config.epsilon {
                 self.height[i] = 0.0;
                 self.velocity[i] = 0.0;
