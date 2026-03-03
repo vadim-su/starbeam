@@ -15,7 +15,8 @@ use crate::fluid::events::{ImpactKind, WaterImpactEvent};
 use crate::fluid::reactions::resolve_density_displacement;
 use crate::fluid::registry::FluidRegistry;
 use crate::fluid::render::{
-    build_fluid_mesh, ATTRIBUTE_FLUID_DATA, ATTRIBUTE_WAVE_HEIGHT, ATTRIBUTE_WAVE_PARAMS,
+    build_fluid_mesh, ATTRIBUTE_EDGE_FLAGS, ATTRIBUTE_FLUID_DATA, ATTRIBUTE_WAVE_HEIGHT,
+    ATTRIBUTE_WAVE_PARAMS,
 };
 use crate::fluid::simulation::{reconcile_chunk_boundaries, simulate_grid, FluidSimConfig};
 use crate::fluid::wave::{reconcile_wave_boundaries, WaveBuffer, WaveConfig, WaveState};
@@ -64,6 +65,7 @@ impl Material2d for FluidMaterial {
             ATTRIBUTE_FLUID_DATA.at_shader_location(3),
             ATTRIBUTE_WAVE_HEIGHT.at_shader_location(4),
             ATTRIBUTE_WAVE_PARAMS.at_shader_location(5),
+            ATTRIBUTE_EDGE_FLAGS.at_shader_location(6),
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         Ok(())
@@ -257,6 +259,7 @@ pub fn fluid_rebuild_meshes(
     active_world: Res<ActiveWorld>,
     active_fluids: Res<ActiveFluidChunks>,
     fluid_registry: Res<FluidRegistry>,
+    tile_registry: Res<TileRegistry>,
     loaded_chunks: Res<LoadedChunks>,
     fluid_material: Res<SharedFluidMaterial>,
     existing_fluid_meshes: Query<(Entity, &ChunkCoord), With<FluidMeshEntity>>,
@@ -323,11 +326,13 @@ pub fn fluid_rebuild_meshes(
 
         let Some(mesh) = build_fluid_mesh(
             &chunk.fluids,
+            chunk.fg.tiles.as_slice(),
             display_cx,
             cy,
             chunk_size,
             tile_size,
             &fluid_registry,
+            &tile_registry,
             neighbor_above_row.as_deref(),
             neighbor_below_row.as_deref(),
             wave_heights,
