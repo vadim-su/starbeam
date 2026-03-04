@@ -266,11 +266,15 @@ pub fn resolve_density_displacement_global(world: &mut FluidWorld, active_chunks
     }
 }
 
-/// Try a horizontal swap between two adjacent cells at the same Y level.
+/// Try a horizontal displacement between two adjacent cells at the same Y level.
 ///
-/// If src is heavier than dst, they simply exchange positions. No upward
-/// push — the vertical phase on the next tick will naturally sort them.
-/// Returns true if a swap was performed.
+/// Handles two cases:
+/// - **Dual-slot equalization**: both cells share the same two fluids — equalize
+///   heavy/light mass between them so the heavy fluid spreads evenly on its layer.
+/// - **Single-fluid swap**: different primary fluids — exchange entire cells if
+///   src is heavier than dst.
+///
+/// Returns true if a displacement was performed.
 fn horizontal_swap_global(world: &mut FluidWorld, src_gx: i32, dst_gx: i32, gy: i32) -> bool {
     let src = world.read_current(src_gx, gy);
     let dst = world.read_current(dst_gx, gy);
@@ -278,6 +282,40 @@ fn horizontal_swap_global(world: &mut FluidWorld, src_gx: i32, dst_gx: i32, gy: 
     if src.is_empty() || dst.is_empty() {
         return false;
     }
+
+    // Case A: Both cells have dual slots with the same two fluids.
+    // Equalize heavy fluid mass between neighbors so lava spreads evenly.
+    if !src.primary.is_empty()
+        && !src.secondary.is_empty()
+        && !dst.primary.is_empty()
+        && !dst.secondary.is_empty()
+        && src.primary.fluid_id == dst.primary.fluid_id
+        && src.secondary.fluid_id == dst.secondary.fluid_id
+    {
+        let heavy_diff = src.primary.mass - dst.primary.mass;
+        if heavy_diff.abs() < MIN_DISPLACEMENT * 2.0 {
+            return false;
+        }
+        // Transfer from the cell with more heavy fluid to the one with less.
+        // Move heavy one way, light the other to keep totals constant.
+        let transfer = heavy_diff * 0.25;
+        if transfer.abs() < MIN_DISPLACEMENT {
+            return false;
+        }
+        let mut new_src = src;
+        let mut new_dst = dst;
+        new_src.primary.mass -= transfer;
+        new_src.secondary.mass += transfer;
+        new_dst.primary.mass += transfer;
+        new_dst.secondary.mass -= transfer;
+        new_src.normalize();
+        new_dst.normalize();
+        world.write(src_gx, gy, new_src);
+        world.write(dst_gx, gy, new_dst);
+        return true;
+    }
+
+    // Case B: Different primary fluids — whole cell swap.
     if src.fluid_id() == dst.fluid_id() {
         return false;
     }
@@ -289,7 +327,6 @@ fn horizontal_swap_global(world: &mut FluidWorld, src_gx: i32, dst_gx: i32, gy: 
         return false;
     }
 
-    // Simple swap — heavy and light fluid exchange places at the same level
     world.swap_fluids((src_gx, gy), (dst_gx, gy));
     true
 }
