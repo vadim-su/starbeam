@@ -19,9 +19,9 @@ impl Default for SphConfig {
     fn default() -> Self {
         Self {
             smoothing_radius: 16.0,
-            rest_density: 0.0,
-            stiffness: 100.0,
-            viscosity: 0.2,
+            rest_density: 0.016,
+            stiffness: 3000.0,
+            viscosity: 0.3,
             gravity: Vec2::new(0.0, -200.0),
             particle_mass: 1.0,
         }
@@ -40,9 +40,7 @@ pub fn compute_density_pressure(store: &mut ParticleStore, config: &SphConfig, g
             density += store.masses[j] * poly6(r, h);
         }
         store.densities[i] = density;
-        // Clamp pressure >= 0: no attraction, only repulsion.
-        // Negative pressure causes particles to collapse into a single point.
-        store.pressures[i] = (config.stiffness * (density - config.rest_density)).max(0.0);
+        store.pressures[i] = config.stiffness * (density - config.rest_density);
     }
 }
 
@@ -120,9 +118,9 @@ mod tests {
     fn test_config() -> SphConfig {
         SphConfig {
             smoothing_radius: 16.0,
-            rest_density: 0.0,
-            stiffness: 100.0,
-            viscosity: 1.0,
+            rest_density: 0.016,
+            stiffness: 3000.0,
+            viscosity: 0.3,
             gravity: Vec2::new(0.0, -98.0),
             particle_mass: 1.0,
         }
@@ -158,8 +156,8 @@ mod tests {
         let mut store = two_particles_store(2.0);
         let grid = SpatialHash::from_positions(&store.positions, config.smoothing_radius);
         compute_density_pressure(&mut store, &config, &grid);
-        // P = max(0, k * (rho - rho_0))
-        let expected = (config.stiffness * (store.densities[0] - config.rest_density)).max(0.0);
+        // P = k * (rho - rho_0)
+        let expected = config.stiffness * (store.densities[0] - config.rest_density);
         assert!(
             (store.pressures[0] - expected).abs() < 1e-6,
             "Pressure should follow clamped equation of state: got {}, expected {}",

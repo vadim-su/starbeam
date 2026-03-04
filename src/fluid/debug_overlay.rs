@@ -304,7 +304,12 @@ pub fn draw_fluid_debug_panel(
                             .text("Smoothing radius"),
                     );
                     ui.add(
-                        egui::Slider::new(&mut sph_config.stiffness, 1.0..=500.0)
+                        egui::Slider::new(&mut sph_config.rest_density, 0.0..=0.1)
+                            .text("Rest density"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut sph_config.stiffness, 1.0..=10000.0)
+                            .logarithmic(true)
                             .text("Stiffness"),
                     );
                     ui.add(
