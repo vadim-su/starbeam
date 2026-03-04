@@ -406,23 +406,27 @@ pub fn draw_fluid_debug_panel(
                     ui.checkbox(&mut state.enable_shimmer, "Enable shimmer");
 
                     ui.separator();
-                    ui.label(egui::RichText::new("Simulation").underline());
+                    ui.label(egui::RichText::new("PBF Simulation").underline());
                     ui.add(
                         egui::Slider::new(&mut sph_config.smoothing_radius, 4.0..=64.0)
-                            .text("Smoothing radius"),
+                            .text("Smoothing radius (h)"),
                     );
                     ui.add(
-                        egui::Slider::new(&mut sph_config.rest_density, 0.0..=0.1)
-                            .text("Rest density"),
+                        egui::Slider::new(&mut sph_config.rest_density, 0.001..=0.1)
+                            .text("Rest density (ρ₀)"),
                     );
                     ui.add(
-                        egui::Slider::new(&mut sph_config.stiffness, 1.0..=10000.0)
+                        egui::Slider::new(&mut sph_config.solver_iterations, 1..=10)
+                            .text("Solver iterations"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut sph_config.epsilon, 1.0..=5000.0)
                             .logarithmic(true)
-                            .text("Stiffness"),
+                            .text("Epsilon (CFM)"),
                     );
                     ui.add(
-                        egui::Slider::new(&mut sph_config.viscosity, 0.0..=5.0)
-                            .text("Viscosity"),
+                        egui::Slider::new(&mut sph_config.viscosity, 0.0..=0.5)
+                            .text("XSPH viscosity"),
                     );
                     ui.add(
                         egui::Slider::new(&mut sph_config.gravity.y, -500.0..=0.0)
@@ -433,12 +437,8 @@ pub fn draw_fluid_debug_panel(
                             .text("Particle mass"),
                     );
                     ui.add(
-                        egui::Slider::new(&mut sph_config.eos_gamma, 1.0..=10.0)
-                            .text("EOS gamma (γ)"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut sph_config.xsph_factor, 0.0..=1.0)
-                            .text("XSPH smoothing"),
+                        egui::Slider::new(&mut sph_config.surface_tension_k, 0.0..=1.0)
+                            .text("Surface tension (k)"),
                     );
 
                     ui.separator();

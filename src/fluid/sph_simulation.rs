@@ -1,172 +1,221 @@
+//! Position Based Fluids (PBF) simulation.
+//!
+//! Based on Macklin & Müller 2013 "Position Based Fluids".
+//! Instead of computing forces and integrating, we solve density constraints
+//! directly at the position level. This is unconditionally stable.
+//!
+//! Algorithm:
+//! 1. Apply gravity to velocities, predict new positions
+//! 2. For N solver iterations:
+//!    a. Compute density at predicted positions
+//!    b. Compute λ (Lagrange multiplier) from density constraint violation
+//!    c. Compute position correction Δp from λ values
+//!    d. Apply corrections to predicted positions
+//! 3. Update velocities from position change
+//! 4. Apply XSPH viscosity smoothing
+
 use bevy::math::Vec2;
 use bevy::prelude::Resource;
 
 use crate::fluid::spatial_hash::SpatialHash;
-use crate::fluid::sph_kernels::{poly6, spiky_gradient, viscosity_laplacian};
+use crate::fluid::sph_kernels::{poly6, spiky_gradient};
 use crate::fluid::sph_particle::ParticleStore;
 
 #[derive(Debug, Clone, Resource)]
 pub struct SphConfig {
     pub smoothing_radius: f32,
     pub rest_density: f32,
-    pub stiffness: f32,
+    /// Number of constraint solver iterations (4-6 typical).
+    pub solver_iterations: u32,
+    /// Constraint Force Mixing — relaxation parameter in λ denominator.
+    /// Prevents division by zero and controls constraint stiffness.
+    /// Higher = softer/more stable, lower = stiffer.
+    pub epsilon: f32,
     pub viscosity: f32,
     pub gravity: Vec2,
     pub particle_mass: f32,
-    /// Tait EOS exponent (γ). Higher = more incompressible. 7 for water.
-    pub eos_gamma: f32,
-    /// XSPH velocity smoothing factor (0 = off, 0.5 = typical).
-    pub xsph_factor: f32,
+    /// Artificial pressure strength (prevents particle clumping at surface).
+    pub surface_tension_k: f32,
 }
 
 impl Default for SphConfig {
     fn default() -> Self {
         Self {
             smoothing_radius: 16.0,
-            rest_density: 0.016,
-            stiffness: 50.0,
-            viscosity: 0.3,
+            rest_density: 0.018,
+            solver_iterations: 4,
+            epsilon: 600.0,
+            viscosity: 0.01,
             gravity: Vec2::new(0.0, -200.0),
             particle_mass: 1.0,
-            eos_gamma: 7.0,
-            xsph_factor: 0.3,
+            surface_tension_k: 0.1,
         }
     }
 }
 
-pub fn compute_density_pressure(store: &mut ParticleStore, config: &SphConfig, grid: &SpatialHash) {
-    let h = config.smoothing_radius;
-    let mut neighbors = Vec::new();
-    for i in 0..store.len() {
-        let pos_i = store.positions[i];
-        let mut density = 0.0f32;
-        grid.query_into(pos_i, &mut neighbors);
-        for &j in &neighbors {
-            let r = pos_i.distance(store.positions[j]);
-            density += store.masses[j] * poly6(r, h);
-        }
-        store.densities[i] = density;
-        // Tait equation of state: P = B * ((ρ/ρ₀)^γ - 1)
-        // Much stiffer than linear EOS at high compression, nearly incompressible.
-        let rho0 = config.rest_density.max(1e-8);
-        let ratio = density / rho0;
-        store.pressures[i] = config.stiffness * (ratio.powf(config.eos_gamma) - 1.0);
-    }
-}
-
-pub fn compute_forces(store: &mut ParticleStore, config: &SphConfig, grid: &SpatialHash) {
-    let h = config.smoothing_radius;
-    // Minimum separation distance — particles closer than this get strong repulsion
-    let min_dist = h * 0.25;
-    let mut neighbors = Vec::new();
-    for i in 0..store.len() {
-        let pos_i = store.positions[i];
-        let vel_i = store.velocities[i];
-        let pressure_i = store.pressures[i];
-        let density_i = store.densities[i];
-        let mut f_pressure = Vec2::ZERO;
-        let mut f_viscosity = Vec2::ZERO;
-        grid.query_into(pos_i, &mut neighbors);
-        for &j in &neighbors {
-            if i == j {
-                continue;
-            }
-            let pos_j = store.positions[j];
-            let diff = pos_i - pos_j;
-            let r = diff.length();
-            if r < 1e-6 || r > h {
-                continue;
-            }
-            let dir = diff / r;
-            let density_j = store.densities[j];
-
-            // SPH pressure force
-            if density_j > 1e-6 {
-                let pressure_j = store.pressures[j];
-                let pressure_avg = (pressure_i + pressure_j) * 0.5;
-                f_pressure -=
-                    dir * store.masses[j] * pressure_avg / density_j * spiky_gradient(r, h);
-            }
-
-            // Short-range repulsion: prevents interpenetration
-            if r < min_dist {
-                let overlap = (min_dist - r) / min_dist; // 1 at r=0, 0 at min_dist
-                // Quadratic repulsion, scaled by stiffness
-                let repulsion = config.stiffness * 4.0 * overlap * overlap;
-                f_pressure += dir * repulsion;
-            }
-
-            // Viscosity
-            if density_j > 1e-6 {
-                let vel_j = store.velocities[j];
-                f_viscosity +=
-                    (vel_j - vel_i) * store.masses[j] / density_j * viscosity_laplacian(r, h);
-            }
-        }
-        f_viscosity *= config.viscosity;
-        let f_gravity = config.gravity * density_i;
-        store.forces[i] = f_pressure + f_viscosity + f_gravity;
-    }
-}
-
-/// XSPH velocity smoothing: smooths velocity field by blending with neighbors.
-/// Prevents particle clustering and produces smoother flow.
-pub fn xsph_smooth(store: &mut ParticleStore, config: &SphConfig, grid: &SpatialHash) {
-    if config.xsph_factor <= 0.0 {
-        return;
-    }
-    let h = config.smoothing_radius;
-    let epsilon = config.xsph_factor;
-    let n = store.len();
-    // Compute corrections in a separate buffer to avoid read-write conflict
-    let mut corrections: Vec<Vec2> = vec![Vec2::ZERO; n];
-    let mut neighbors = Vec::new();
-    for i in 0..n {
-        let pos_i = store.positions[i];
-        let vel_i = store.velocities[i];
-        let mut correction = Vec2::ZERO;
-        grid.query_into(pos_i, &mut neighbors);
-        for &j in &neighbors {
-            if i == j {
-                continue;
-            }
-            let r = pos_i.distance(store.positions[j]);
-            if r > h {
-                continue;
-            }
-            let density_j = store.densities[j];
-            if density_j > 1e-6 {
-                let vel_j = store.velocities[j];
-                correction += store.masses[j] / density_j * (vel_j - vel_i) * poly6(r, h);
-            }
-        }
-        corrections[i] = correction * epsilon;
-    }
-    for i in 0..n {
-        store.velocities[i] += corrections[i];
-    }
-}
-
-pub fn integrate(store: &mut ParticleStore, dt: f32) {
-    for i in 0..store.len() {
-        let density = store.densities[i].max(1e-6);
-        let acceleration = store.forces[i] / density;
-        store.velocities[i] += acceleration * dt;
-        store.positions[i] += store.velocities[i] * dt;
-    }
-    store.mark_changed();
-}
-
+/// One PBF simulation step.
 pub fn sph_step(store: &mut ParticleStore, config: &SphConfig, dt: f32) {
     if store.is_empty() {
         return;
     }
-    let grid = SpatialHash::from_positions(&store.positions, config.smoothing_radius);
-    compute_density_pressure(store, config, &grid);
-    compute_forces(store, config, &grid);
-    integrate(store, dt);
-    // XSPH smoothing uses the same spatial hash (positions barely moved)
-    xsph_smooth(store, config, &grid);
+    let n = store.len();
+    let h = config.smoothing_radius;
+
+    // --- Step 1: Predict positions ---
+    // Apply gravity to velocities and compute predicted positions.
+    let mut predicted = Vec::with_capacity(n);
+    for i in 0..n {
+        store.velocities[i] += config.gravity * dt;
+        predicted.push(store.positions[i] + store.velocities[i] * dt);
+    }
+
+    // Buffers for solver
+    let mut lambdas = vec![0.0f32; n];
+    let mut neighbors_buf = Vec::new();
+
+    // --- Step 2: Solver iterations ---
+    for _ in 0..config.solver_iterations {
+        // Build spatial hash from predicted positions
+        let grid = SpatialHash::from_positions(&predicted, h);
+
+        // 2a: Compute density and lambda for each particle
+        for i in 0..n {
+            let pos_i = predicted[i];
+            grid.query_into(pos_i, &mut neighbors_buf);
+
+            // Compute density at predicted position
+            let mut density = 0.0f32;
+            for &j in &neighbors_buf {
+                let r = pos_i.distance(predicted[j]);
+                density += config.particle_mass * poly6(r, h);
+            }
+            store.densities[i] = density;
+
+            // Density constraint: C_i = ρ_i/ρ₀ - 1
+            let constraint = density / config.rest_density - 1.0;
+
+            // Compute gradient denominator: Σ_k |∇_{p_k} C_i|²
+            let mut sum_grad_sq = 0.0f32;
+            let mut grad_i = Vec2::ZERO;
+
+            for &j in &neighbors_buf {
+                if j == i {
+                    continue;
+                }
+                let diff = pos_i - predicted[j];
+                let r = diff.length();
+                if r < 1e-6 || r > h {
+                    continue;
+                }
+                let dir = diff / r;
+                // ∇_{p_j} C_i = -(m_j/ρ₀) * ∇W(p_i - p_j, h)
+                // spiky_gradient returns scalar (negative), dir points i→j direction
+                // ∇_{p_i} W = spiky_gradient(r,h) * dir
+                // ∇_{p_j} W = -spiky_gradient(r,h) * dir
+                // So ∇_{p_j} C_i = -(m/ρ₀) * (-spiky_gradient * dir) = (m/ρ₀) * spiky_gradient * dir
+                let grad_w = spiky_gradient(r, h) * dir;
+                let grad_j = -(config.particle_mass / config.rest_density) * grad_w;
+                sum_grad_sq += grad_j.length_squared();
+                // Accumulate ∇_{p_i} C_i = (1/ρ₀) * Σ_j m_j * ∇_{p_i}W
+                grad_i += (config.particle_mass / config.rest_density) * grad_w;
+            }
+            sum_grad_sq += grad_i.length_squared();
+
+            // λ_i = -C_i / (Σ|∇C|² + ε)
+            lambdas[i] = -constraint / (sum_grad_sq + config.epsilon);
+        }
+
+        // 2b: Compute and apply position corrections
+        for i in 0..n {
+            let pos_i = predicted[i];
+            grid.query_into(pos_i, &mut neighbors_buf);
+
+            let mut delta_p = Vec2::ZERO;
+            for &j in &neighbors_buf {
+                if j == i {
+                    continue;
+                }
+                let diff = pos_i - predicted[j];
+                let r = diff.length();
+                if r < 1e-6 || r > h {
+                    continue;
+                }
+                let dir = diff / r;
+                let grad_w = spiky_gradient(r, h) * dir;
+
+                // Artificial pressure (tensile instability correction)
+                // s_corr = -k * (W(r,h) / W(Δq,h))^n
+                let s_corr = if config.surface_tension_k > 0.0 {
+                    let w_dq = poly6(0.3 * h, h); // reference kernel value at 0.3h
+                    if w_dq > 1e-10 {
+                        let w_ratio = poly6(r, h) / w_dq;
+                        -config.surface_tension_k * w_ratio * w_ratio * w_ratio * w_ratio // n=4
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                };
+
+                // Δp_i = (1/ρ₀) * Σ_j (λ_i + λ_j + s_corr) * ∇W
+                delta_p += (1.0 / config.rest_density)
+                    * (lambdas[i] + lambdas[j] + s_corr)
+                    * grad_w;
+            }
+            predicted[i] += delta_p;
+        }
+    }
+
+    // --- Step 3: Update velocities and positions ---
+    let inv_dt = if dt > 1e-8 { 1.0 / dt } else { 0.0 };
+    for i in 0..n {
+        store.velocities[i] = (predicted[i] - store.positions[i]) * inv_dt;
+        store.positions[i] = predicted[i];
+    }
+
+    // --- Step 4: XSPH viscosity smoothing ---
+    if config.viscosity > 0.0 {
+        let grid = SpatialHash::from_positions(&store.positions, h);
+        let mut corrections: Vec<Vec2> = vec![Vec2::ZERO; n];
+        for i in 0..n {
+            let pos_i = store.positions[i];
+            let vel_i = store.velocities[i];
+            grid.query_into(pos_i, &mut neighbors_buf);
+            let mut correction = Vec2::ZERO;
+            for &j in &neighbors_buf {
+                if j == i {
+                    continue;
+                }
+                let r = pos_i.distance(store.positions[j]);
+                if r > h {
+                    continue;
+                }
+                correction += (store.velocities[j] - vel_i) * poly6(r, h);
+            }
+            corrections[i] = correction * config.viscosity;
+        }
+        for i in 0..n {
+            store.velocities[i] += corrections[i];
+        }
+    }
+
+    // Recompute densities/pressures for debug display (using final positions)
+    {
+        let grid = SpatialHash::from_positions(&store.positions, h);
+        for i in 0..n {
+            let pos_i = store.positions[i];
+            grid.query_into(pos_i, &mut neighbors_buf);
+            let mut density = 0.0f32;
+            for &j in &neighbors_buf {
+                let r = pos_i.distance(store.positions[j]);
+                density += config.particle_mass * poly6(r, h);
+            }
+            store.densities[i] = density;
+            store.pressures[i] = density / config.rest_density - 1.0; // constraint value for debug
+        }
+    }
+
+    store.mark_changed();
 }
 
 #[cfg(test)]
@@ -179,13 +228,13 @@ mod tests {
     fn test_config() -> SphConfig {
         SphConfig {
             smoothing_radius: 16.0,
-            rest_density: 0.016,
-            stiffness: 50.0,
-            viscosity: 0.3,
+            rest_density: 0.018,
+            solver_iterations: 4,
+            epsilon: 600.0,
+            viscosity: 0.01,
             gravity: Vec2::new(0.0, -98.0),
             particle_mass: 1.0,
-            eos_gamma: 7.0,
-            xsph_factor: 0.3,
+            surface_tension_k: 0.1,
         }
     }
 
@@ -197,83 +246,34 @@ mod tests {
     }
 
     #[test]
-    fn density_increases_with_proximity() {
-        let config = test_config();
-        let mut close = two_particles_store(4.0);
-        let mut far = two_particles_store(12.0);
-        let grid_close = SpatialHash::from_positions(&close.positions, config.smoothing_radius);
-        let grid_far = SpatialHash::from_positions(&far.positions, config.smoothing_radius);
-        compute_density_pressure(&mut close, &config, &grid_close);
-        compute_density_pressure(&mut far, &config, &grid_far);
-        assert!(
-            close.densities[0] > far.densities[0],
-            "Closer particles should have higher density: {} vs {}",
-            close.densities[0],
-            far.densities[0]
-        );
-    }
-
-    #[test]
-    fn pressure_follows_tait_eos() {
-        let config = test_config();
-        let mut store = two_particles_store(2.0);
-        let grid = SpatialHash::from_positions(&store.positions, config.smoothing_radius);
-        compute_density_pressure(&mut store, &config, &grid);
-        // P = B * ((ρ/ρ₀)^γ - 1)
-        let ratio = store.densities[0] / config.rest_density;
-        let expected = config.stiffness * (ratio.powf(config.eos_gamma) - 1.0);
-        assert!(
-            (store.pressures[0] - expected).abs() < 1e-3,
-            "Pressure should follow Tait EOS: got {}, expected {}",
-            store.pressures[0],
-            expected
-        );
-    }
-
-    #[test]
     fn gravity_pulls_down() {
         let config = test_config();
         let mut store = ParticleStore::new();
         store.add(Particle::new(Vec2::new(0.0, 100.0), FluidId(1), 1.0));
-        let grid = SpatialHash::from_positions(&store.positions, config.smoothing_radius);
-        compute_density_pressure(&mut store, &config, &grid);
-        compute_forces(&mut store, &config, &grid);
-        assert!(store.forces[0].y < 0.0, "Gravity should pull down");
-    }
-
-    #[test]
-    fn pressure_pushes_apart() {
-        // Need enough particles close together to exceed rest_density and create
-        // positive pressure. Place a cluster of 5 particles within small area.
-        let config = test_config();
-        let mut store = ParticleStore::new();
-        store.add(Particle::new(Vec2::new(0.0, 0.0), FluidId(1), 1.0));
-        store.add(Particle::new(Vec2::new(2.0, 0.0), FluidId(1), 1.0));
-        store.add(Particle::new(Vec2::new(1.0, 1.0), FluidId(1), 1.0));
-        store.add(Particle::new(Vec2::new(1.0, -1.0), FluidId(1), 1.0));
-        store.add(Particle::new(Vec2::new(1.0, 0.0), FluidId(1), 1.0));
-        let grid = SpatialHash::from_positions(&store.positions, config.smoothing_radius);
-        compute_density_pressure(&mut store, &config, &grid);
-        compute_forces(&mut store, &config, &grid);
-        // Outermost particle (0 at x=0) should be pushed left (away from cluster center)
+        let y_before = store.positions[0].y;
+        sph_step(&mut store, &config, 1.0 / 60.0);
         assert!(
-            store.forces[0].x < 0.0,
-            "Left particle pushed left: {}",
-            store.forces[0].x
+            store.positions[0].y < y_before,
+            "Particle should fall: {} -> {}",
+            y_before,
+            store.positions[0].y
         );
     }
 
     #[test]
-    fn integrate_moves_particle() {
+    fn close_particles_pushed_apart() {
         let config = test_config();
-        let mut store = ParticleStore::new();
-        store.add(Particle::new(Vec2::new(0.0, 100.0), FluidId(1), 1.0));
-        let grid = SpatialHash::from_positions(&store.positions, config.smoothing_radius);
-        compute_density_pressure(&mut store, &config, &grid);
-        compute_forces(&mut store, &config, &grid);
-        integrate(&mut store, 1.0 / 60.0);
-        assert!(store.positions[0].y < 100.0, "Particle should fall");
-        assert!(store.velocities[0].y < 0.0, "Velocity should be downward");
+        let mut store = two_particles_store(2.0); // very close
+        let dist_before = store.positions[0].distance(store.positions[1]);
+        // Run several steps for constraint to take effect
+        for _ in 0..10 {
+            sph_step(&mut store, &config, 1.0 / 60.0);
+        }
+        let dist_after = store.positions[0].distance(store.positions[1]);
+        assert!(
+            dist_after > dist_before,
+            "Close particles should spread: {dist_before} -> {dist_after}"
+        );
     }
 
     #[test]
@@ -283,5 +283,34 @@ mod tests {
         let initial_y = store.positions[0].y;
         sph_step(&mut store, &config, 1.0 / 60.0);
         assert_ne!(store.positions[0].y, initial_y);
+    }
+
+    #[test]
+    fn density_near_rest_for_well_spaced_particles() {
+        let config = test_config();
+        // Place particles on a grid with spacing = 8 (h/2)
+        let mut store = ParticleStore::new();
+        for x in 0..4 {
+            for y in 0..4 {
+                store.add(Particle::new(
+                    Vec2::new(x as f32 * 8.0, y as f32 * 8.0),
+                    FluidId(1),
+                    1.0,
+                ));
+            }
+        }
+        // Run one step to compute density
+        let mut config_no_gravity = config.clone();
+        config_no_gravity.gravity = Vec2::ZERO;
+        sph_step(&mut store, &config_no_gravity, 1.0 / 60.0);
+        // Center particles should have density near rest_density
+        let center = 5; // particle at (8, 8) — has neighbors on all sides
+        let ratio = store.densities[center] / config.rest_density;
+        assert!(
+            ratio > 0.5 && ratio < 3.0,
+            "Center density ratio should be reasonable: {ratio} (density={}, rest={})",
+            store.densities[center],
+            config.rest_density
+        );
     }
 }
