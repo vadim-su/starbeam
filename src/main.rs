@@ -21,7 +21,7 @@ mod world;
 
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
-use bevy_egui::EguiPlugin;
+use bevy_egui::{EguiGlobalSettings, EguiPlugin};
 
 use sets::GameSet;
 
@@ -41,6 +41,10 @@ fn main() {
                 }),
         )
         .add_plugins(EguiPlugin::default())
+        .insert_resource(EguiGlobalSettings {
+            auto_create_primary_context: false,
+            ..default()
+        })
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_plugins(menu::MenuPlugin)
         .add_plugins(registry::RegistryPlugin)

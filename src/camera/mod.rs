@@ -4,6 +4,7 @@ pub mod snap;
 use bevy::ecs::message::MessageReader;
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
+use bevy_egui::PrimaryEguiContext;
 
 use crate::player::respawn_player_on_warp;
 use crate::registry::AppState;
@@ -43,6 +44,7 @@ fn spawn_camera(mut commands: Commands) {
             scale: CAMERA_SCALE,
             ..OrthographicProjection::default_2d()
         }),
+        PrimaryEguiContext,
     ));
 }
 
