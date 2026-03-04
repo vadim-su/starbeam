@@ -285,8 +285,8 @@ fn flow_vertical(
     if flow > min_flow {
         flow *= 0.5;
     }
-    // Clamp: don't exceed available capacity in neighbor (total_mass must stay <= 1.0 for non-compressed)
-    let capacity = (1.0 - current_neighbor.total_mass() + neighbor_mass).max(0.0);
+    // Clamp: don't exceed available capacity in neighbor
+    let capacity = (1.0 - current_neighbor.total_mass()).max(0.0);
     flow = flow.min(max_speed).min(remaining).min(capacity).max(0.0);
 
     if flow <= 0.0 {
@@ -382,7 +382,7 @@ fn flow_side(
         flow *= 0.5;
     }
     // Clamp: don't exceed available capacity in neighbor
-    let capacity = (1.0 - current_neighbor.total_mass() + current_neighbor.slot_for(fluid_id).map(|s| s.mass).unwrap_or(0.0)).max(0.0);
+    let capacity = (1.0 - current_neighbor.total_mass()).max(0.0);
     flow = flow.min(max_speed).min(remaining).min(capacity).max(0.0);
 
     if flow <= 0.0 {

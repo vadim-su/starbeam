@@ -110,6 +110,7 @@ impl<'a> FluidWorld<'a> {
 
     /// Add mass to a cell's matching slot, or create a new slot if possible.
     /// Returns the amount actually added (0.0 if both slots are occupied by other fluids).
+    /// When mixing with a different fluid, caps total mass at 1.0.
     pub fn add_mass(&mut self, gx: i32, gy: i32, fluid_id: FluidId, amount: f32) -> f32 {
         let Some((cx, cy, lx, ly)) = self.resolve(gx, gy) else {
             return 0.0;
@@ -120,25 +121,41 @@ impl<'a> FluidWorld<'a> {
         let idx = (ly * self.chunk_size + lx) as usize;
         let cell = &mut chunk.fluids[idx];
 
+        // Check if there's a different fluid in the cell (dual-fluid scenario)
+        let has_other_fluid = (!cell.primary.is_empty() && cell.primary.fluid_id != fluid_id)
+            || (!cell.secondary.is_empty() && cell.secondary.fluid_id != fluid_id);
+
+        // When mixing fluids, cap total mass at 1.0. Same-fluid allows compression.
+        let actual = if has_other_fluid {
+            let available = (1.0 - cell.total_mass()).max(0.0);
+            amount.min(available)
+        } else {
+            amount
+        };
+
+        if actual <= 0.0 {
+            return 0.0;
+        }
+
         // 1. Primary already has this fluid
         if cell.primary.fluid_id == fluid_id && !cell.primary.is_empty() {
-            cell.primary.mass += amount;
-            return amount;
+            cell.primary.mass += actual;
+            return actual;
         }
         // 2. Secondary already has this fluid
         if cell.secondary.fluid_id == fluid_id && !cell.secondary.is_empty() {
-            cell.secondary.mass += amount;
-            return amount;
+            cell.secondary.mass += actual;
+            return actual;
         }
         // 3. Cell is completely empty → create primary
         if cell.is_empty() {
-            cell.primary = FluidSlot::new(fluid_id, amount);
-            return amount;
+            cell.primary = FluidSlot::new(fluid_id, actual);
+            return actual;
         }
         // 4. Secondary slot is empty → create secondary
         if cell.secondary.is_empty() {
-            cell.secondary = FluidSlot::new(fluid_id, amount);
-            return amount;
+            cell.secondary = FluidSlot::new(fluid_id, actual);
+            return actual;
         }
         // 5. Both slots occupied by other fluids
         0.0

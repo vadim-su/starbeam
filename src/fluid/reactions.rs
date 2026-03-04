@@ -134,21 +134,27 @@ pub const MAX_REACTIONS_PER_CHUNK: u32 = 8;
 
 /// Maximum vertical swaps per column per tick.
 /// Limits how fast heavy fluids sink through light ones (1 = one cell/tick).
-const MAX_VERTICAL_SWAPS_PER_COLUMN: u32 = 1;
+const MAX_VERTICAL_SWAPS_PER_COLUMN: u32 = 2;
 
 /// Maximum horizontal displacement operations per row per tick.
 /// Limits sideways spreading to prevent chain-reaction displacement spikes.
 const MAX_HORIZONTAL_DISPLACE_PER_ROW: u32 = 2;
 
+/// Rate at which heavy fluid displaces light fluid in dual-slot cells (per tick).
+const SLOT_DISPLACEMENT_RATE: f32 = 0.5;
+
+/// Minimum displacement transfer to avoid micro-oscillations.
+const MIN_DISPLACEMENT: f32 = 0.002;
+
 /// Resolve density displacement between immiscible fluids using global addressing.
 ///
-/// Phase 1 — **Vertical**: single bottom-up pass; heavy fluids sink through
-/// lighter ones at most `MAX_VERTICAL_SWAPS_PER_COLUMN` cells per column per tick.
+/// Phase 0 — **Intra-cell**: enforce density order (heavy primary, light secondary).
 ///
-/// Phase 2 — **Horizontal**: heavy fluid swaps with adjacent lighter fluid
-/// (simple same-level exchange, no upward push). The vertical pass on the
-/// *next* tick will naturally raise the lighter fluid. Rate-limited per row
-/// to avoid displacement cascades.
+/// Phase 1 — **Vertical**: bottom-up pass. For dual-slot cells sharing the same
+/// two fluids, transfers heavy mass down and light mass up (slot-level redistribution).
+/// For single-fluid cells with different types, swaps entire cells.
+///
+/// Phase 2 — **Horizontal**: heavy fluid swaps with adjacent lighter fluid.
 pub fn resolve_density_displacement_global(world: &mut FluidWorld, active_chunks: &[(i32, i32)]) {
     let cs = world.chunk_size as i32;
 
@@ -167,7 +173,7 @@ pub fn resolve_density_displacement_global(world: &mut FluidWorld, active_chunks
         }
     }
 
-    // Phase 1: Vertical — heavy sinks, light rises, one swap per column per tick.
+    // Phase 1: Vertical — heavy sinks, light rises.
     for &(cx, cy) in active_chunks {
         let base_gx = cx * cs;
         let base_gy = cy * cs;
@@ -179,11 +185,39 @@ pub fn resolve_density_displacement_global(world: &mut FluidWorld, active_chunks
                     break;
                 }
                 let gy = base_gy + ly;
-                let below = world.read_current(gx, gy);
-                let above = world.read_current(gx, gy + 1);
+                let mut below = world.read_current(gx, gy);
+                let mut above = world.read_current(gx, gy + 1);
                 if below.is_empty() || above.is_empty() {
                     continue;
                 }
+
+                // Case A: Both cells have dual slots with the same two fluids.
+                // Transfer heavy (primary) mass down, light (secondary) mass up.
+                if !above.primary.is_empty()
+                    && !above.secondary.is_empty()
+                    && !below.primary.is_empty()
+                    && !below.secondary.is_empty()
+                    && above.primary.fluid_id == below.primary.fluid_id
+                    && above.secondary.fluid_id == below.secondary.fluid_id
+                {
+                    let heavy_above = above.primary.mass;
+                    let light_below = below.secondary.mass;
+                    let transfer = heavy_above.min(light_below) * SLOT_DISPLACEMENT_RATE;
+                    if transfer > MIN_DISPLACEMENT {
+                        above.primary.mass -= transfer;
+                        above.secondary.mass += transfer;
+                        below.primary.mass += transfer;
+                        below.secondary.mass -= transfer;
+                        above.normalize();
+                        below.normalize();
+                        world.write(gx, gy, below);
+                        world.write(gx, gy + 1, above);
+                        swaps += 1;
+                    }
+                    continue;
+                }
+
+                // Case B: Different primary fluids — whole cell swap.
                 if below.fluid_id() == above.fluid_id() {
                     continue;
                 }
