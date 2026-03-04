@@ -680,10 +680,10 @@ mod tests {
         load_world_save(&universe, &addr, &mut world_map, &mut dirty, 200.0);
 
         let restored = world_map.chunk(0, 0).expect("chunk should be restored");
-        assert_eq!(restored.fluids[0].fluid_id, FluidId(1));
-        assert!((restored.fluids[0].mass - 0.8).abs() < f32::EPSILON);
-        assert_eq!(restored.fluids[5].fluid_id, FluidId(2));
-        assert!((restored.fluids[5].mass - 1.5).abs() < f32::EPSILON);
+        assert_eq!(restored.fluids[0].fluid_id(), FluidId(1));
+        assert!((restored.fluids[0].mass() - 0.8).abs() < f32::EPSILON);
+        assert_eq!(restored.fluids[5].fluid_id(), FluidId(2));
+        assert!((restored.fluids[5].mass() - 1.5).abs() < f32::EPSILON);
         assert!(restored.fluids[1].is_empty());
     }
 
