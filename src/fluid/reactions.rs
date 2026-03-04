@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 
-use crate::fluid::cell::FluidId;
+use crate::fluid::cell::{FluidCell, FluidId};
+use crate::fluid::events::FluidReactionEvent;
+use crate::fluid::fluid_world::FluidWorld;
 use crate::fluid::registry::FluidRegistry;
 use crate::registry::tile::{TileId, TileRegistry};
 
@@ -102,5 +104,720 @@ impl FluidReactionRegistry {
             .collect();
 
         Self { reactions }
+    }
+
+    /// Find a reaction matching the given fluid pair and adjacency.
+    /// Checks both orders (a,b) and (b,a). Adjacency::Any matches everything.
+    pub fn find_reaction(
+        &self,
+        a: FluidId,
+        b: FluidId,
+        adjacency: &Adjacency,
+    ) -> Option<&CompiledReaction> {
+        self.reactions.iter().find(|r| {
+            let ids_match =
+                (r.fluid_a == a && r.fluid_b == b) || (r.fluid_a == b && r.fluid_b == a);
+            let adj_match = r.adjacency == Adjacency::Any
+                || *adjacency == Adjacency::Any
+                || r.adjacency == *adjacency;
+            ids_match && adj_match
+        })
+    }
+}
+
+/// Maximum reactions per chunk per tick (rate limiting to avoid lag spikes).
+pub const MAX_REACTIONS_PER_CHUNK: u32 = 8;
+
+// ---------------------------------------------------------------------------
+// Global density displacement using FluidWorld
+// ---------------------------------------------------------------------------
+
+/// Resolve density displacement between immiscible fluids using global addressing.
+///
+/// Phase 1 — **Vertical**: multi-pass bubble-sort so heavier fluids sink
+/// completely through lighter ones.
+///
+/// Phase 2 — **Horizontal spreading**: heavy fluid undercuts lighter fluid
+/// via 3-cell rotation. Two sweeps (L→R then R→L) ensure symmetric spread.
+pub fn resolve_density_displacement_global(world: &mut FluidWorld, active_chunks: &[(i32, i32)]) {
+    let cs = world.chunk_size as i32;
+
+    // Phase 1: Vertical bubble sort — limited to 2 passes per tick
+    // for smooth settling instead of instant teleportation.
+    // Heavy fluids sink ~2 cells/tick; at 60 ticks/sec that's 120 cells/sec.
+    for _pass in 0..2 {
+        let mut any_swap = false;
+        for &(cx, cy) in active_chunks {
+            let base_gx = cx * cs;
+            let base_gy = cy * cs;
+            for ly in 0..cs {
+                let gy = base_gy + ly;
+                for lx in 0..cs {
+                    let gx = base_gx + lx;
+                    let below = world.read_current(gx, gy);
+                    let above = world.read_current(gx, gy + 1);
+                    if below.is_empty() || above.is_empty() {
+                        continue;
+                    }
+                    if below.fluid_id == above.fluid_id {
+                        continue;
+                    }
+                    let d_below = world.fluid_registry.get(below.fluid_id).density;
+                    let d_above = world.fluid_registry.get(above.fluid_id).density;
+                    if d_above > d_below {
+                        world.swap_fluids((gx, gy), (gx, gy + 1));
+                        any_swap = true;
+                    }
+                }
+            }
+        }
+        if !any_swap {
+            break;
+        }
+    }
+
+    // Phase 2: Horizontal spreading (L→R then R→L)
+    for &(cx, cy) in active_chunks {
+        let base_gx = cx * cs;
+        let base_gy = cy * cs;
+        // Left-to-right sweep
+        for ly in 0..cs {
+            let gy = base_gy + ly;
+            for lx in 0..(cs - 1) {
+                let gx = base_gx + lx;
+                horizontal_displace_global(world, gx, gx + 1, gy);
+            }
+        }
+        // Right-to-left sweep
+        for ly in 0..cs {
+            let gy = base_gy + ly;
+            for lx in (1..cs).rev() {
+                let gx = base_gx + lx;
+                horizontal_displace_global(world, gx, gx - 1, gy);
+            }
+        }
+    }
+}
+
+/// Try a single horizontal displacement between cells at (src_gx, gy) and (dst_gx, gy)
+/// using global coordinates.
+///
+/// If src is heavier than dst, move src sideways to dst's position and push
+/// dst up one cell. The cell above dst must be available (empty and not solid).
+fn horizontal_displace_global(world: &mut FluidWorld, src_gx: i32, dst_gx: i32, gy: i32) {
+    let src = world.read_current(src_gx, gy);
+    let dst = world.read_current(dst_gx, gy);
+
+    if src.is_empty() || dst.is_empty() {
+        return;
+    }
+    if src.fluid_id == dst.fluid_id {
+        return;
+    }
+
+    let d_src = world.fluid_registry.get(src.fluid_id).density;
+    let d_dst = world.fluid_registry.get(dst.fluid_id).density;
+
+    // Only the heavier fluid displaces the lighter one
+    if d_src <= d_dst {
+        return;
+    }
+
+    // Need a cell above the destination for the displaced light fluid
+    if world.is_solid(dst_gx, gy + 1) {
+        return;
+    }
+
+    let above = world.read_current(dst_gx, gy + 1);
+
+    if above.is_empty() {
+        // Empty cell above → light fluid goes up
+        world.write(dst_gx, gy + 1, dst);
+        world.write(dst_gx, gy, src);
+        world.write(src_gx, gy, FluidCell::EMPTY);
+    } else if above.fluid_id == dst.fluid_id {
+        // Same-type fluid above → merge light fluid mass upward
+        let mut merged = above;
+        merged.mass += dst.mass;
+        world.write(dst_gx, gy + 1, merged);
+        world.write(dst_gx, gy, src);
+        world.write(src_gx, gy, FluidCell::EMPTY);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Global fluid reactions using FluidWorld
+// ---------------------------------------------------------------------------
+
+/// Process fluid reactions for all active chunks using global addressing.
+///
+/// Checks each non-empty cell against its 4 neighbors. When a reaction is
+/// found in the registry, consumes fluid mass, places result tiles/fluids,
+/// and returns `FluidReactionEvent`s for VFX systems.
+pub fn execute_fluid_reactions_global(
+    world: &mut FluidWorld,
+    active_chunks: &[(i32, i32)],
+    reaction_registry: &FluidReactionRegistry,
+    tile_size: f32,
+) -> Vec<FluidReactionEvent> {
+    let cs = world.chunk_size as i32;
+    let mut events = Vec::new();
+    let mut reaction_count: u32 = 0;
+    let max_total = MAX_REACTIONS_PER_CHUNK * active_chunks.len().max(1) as u32;
+
+    for &(cx, cy) in active_chunks {
+        let base_gx = cx * cs;
+        let base_gy = cy * cs;
+        for ly in 0..cs {
+            for lx in 0..cs {
+                if reaction_count >= max_total {
+                    return events;
+                }
+                let gx = base_gx + lx;
+                let gy = base_gy + ly;
+                let cell = world.read_current(gx, gy);
+                if cell.is_empty() {
+                    continue;
+                }
+
+                // Check 4 neighbors (dx, dy, adjacency from cell's perspective)
+                let neighbors: [(i32, i32, Adjacency); 4] = [
+                    (0, -1, Adjacency::Below),
+                    (0, 1, Adjacency::Above),
+                    (-1, 0, Adjacency::Side),
+                    (1, 0, Adjacency::Side),
+                ];
+
+                for (dx, dy, adj) in &neighbors {
+                    let ngx = gx + dx;
+                    let ngy = gy + dy;
+                    let neighbor = world.read_current(ngx, ngy);
+                    if neighbor.is_empty() || neighbor.fluid_id == cell.fluid_id {
+                        continue;
+                    }
+
+                    let Some(reaction) =
+                        reaction_registry.find_reaction(cell.fluid_id, neighbor.fluid_id, adj)
+                    else {
+                        continue;
+                    };
+
+                    // Determine which position is fluid_a vs fluid_b
+                    let (a_pos, b_pos) = if cell.fluid_id == reaction.fluid_a {
+                        ((gx, gy), (ngx, ngy))
+                    } else {
+                        ((ngx, ngy), (gx, gy))
+                    };
+
+                    let cell_a = world.read_current(a_pos.0, a_pos.1);
+                    let cell_b = world.read_current(b_pos.0, b_pos.1);
+                    if cell_a.mass < reaction.min_mass_a || cell_b.mass < reaction.min_mass_b {
+                        continue;
+                    }
+
+                    // Consume mass
+                    let mut new_a = cell_a;
+                    let mut new_b = cell_b;
+                    new_a.mass -= reaction.consume_a;
+                    new_b.mass -= reaction.consume_b;
+                    if new_a.mass < 0.001 {
+                        new_a = FluidCell::EMPTY;
+                    }
+                    if new_b.mass < 0.001 {
+                        new_b = FluidCell::EMPTY;
+                    }
+
+                    // Place result tile at the primary cell (a_pos)
+                    if let Some(tile_id) = reaction.result_tile {
+                        world.set_tile(a_pos.0, a_pos.1, tile_id);
+                        new_a = FluidCell::EMPTY; // tile replaces fluid
+                    }
+
+                    // Place result fluid or byproduct at primary cell
+                    if new_a.is_empty() {
+                        if let Some(fid) = reaction.result_fluid {
+                            new_a = FluidCell::new(fid, reaction.byproduct_mass.max(0.1));
+                        } else if let Some(fid) = reaction.byproduct_fluid {
+                            new_a = FluidCell::new(fid, reaction.byproduct_mass.max(0.1));
+                        }
+                    }
+
+                    world.write(a_pos.0, a_pos.1, new_a);
+                    world.write(b_pos.0, b_pos.1, new_b);
+
+                    // Emit event for VFX
+                    let world_x = gx as f32 * tile_size + tile_size * 0.5;
+                    let world_y = gy as f32 * tile_size + tile_size * 0.5;
+                    events.push(FluidReactionEvent {
+                        position: Vec2::new(world_x, world_y),
+                        fluid_a: cell_a.fluid_id,
+                        fluid_b: cell_b.fluid_id,
+                        result_tile: reaction.result_tile,
+                        result_fluid: reaction.result_fluid,
+                    });
+
+                    reaction_count += 1;
+                    break; // at most one reaction per cell per tick
+                }
+            }
+        }
+    }
+    events
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fluid::registry::FluidDef;
+
+    fn test_tile_registry() -> TileRegistry {
+        crate::test_helpers::fixtures::test_tile_registry()
+    }
+
+    fn test_fluid_registry() -> FluidRegistry {
+        FluidRegistry::from_defs(vec![
+            FluidDef {
+                id: "water".to_string(),
+                density: 1000.0,
+                viscosity: 0.1,
+                max_compress: 0.02,
+                is_gas: false,
+                color: [64, 128, 255, 180],
+                damage_on_contact: 0.0,
+                light_emission: [0, 0, 0],
+                effects: vec![],
+                wave_amplitude: 1.0,
+                wave_speed: 1.0,
+                light_absorption: 0.3,
+            },
+            FluidDef {
+                id: "lava".to_string(),
+                density: 3000.0,
+                viscosity: 0.6,
+                max_compress: 0.01,
+                is_gas: false,
+                color: [255, 80, 20, 220],
+                damage_on_contact: 10.0,
+                light_emission: [255, 100, 20],
+                effects: vec![],
+                wave_amplitude: 0.4,
+                wave_speed: 0.3,
+                light_absorption: 0.8,
+            },
+            FluidDef {
+                id: "steam".to_string(),
+                density: 0.6,
+                viscosity: 0.05,
+                max_compress: 0.01,
+                is_gas: true,
+                color: [200, 200, 200, 100],
+                damage_on_contact: 0.0,
+                light_emission: [0, 0, 0],
+                effects: vec![],
+                wave_amplitude: 0.6,
+                wave_speed: 1.5,
+                light_absorption: 0.05,
+            },
+        ])
+    }
+
+    fn test_reaction_defs() -> Vec<FluidReactionDef> {
+        vec![
+            FluidReactionDef {
+                fluid_a: "water".to_string(),
+                fluid_b: "lava".to_string(),
+                adjacency: Adjacency::Any,
+                result_tile: Some("stone".to_string()),
+                result_fluid: None,
+                min_mass_a: 0.0,
+                min_mass_b: 0.0,
+                consume_a: 1.0,
+                consume_b: 1.0,
+                byproduct_fluid: Some("steam".to_string()),
+                byproduct_mass: 0.5,
+            },
+            FluidReactionDef {
+                fluid_a: "water".to_string(),
+                fluid_b: "lava".to_string(),
+                adjacency: Adjacency::Below,
+                result_tile: None,
+                result_fluid: Some("steam".to_string()),
+                min_mass_a: 0.0,
+                min_mass_b: 0.0,
+                consume_a: 0.5,
+                consume_b: 0.0,
+                byproduct_fluid: None,
+                byproduct_mass: 0.0,
+            },
+        ]
+    }
+
+    fn idx(x: u32, y: u32, width: u32) -> usize {
+        (y * width + x) as usize
+    }
+
+    // --- Density displacement tests ---
+
+    /// Helper: create all-air tiles array for displacement tests.
+    fn air_tiles(len: usize) -> Vec<TileId> {
+        vec![TileId::AIR; len]
+    }
+
+    #[test]
+    fn density_displacement_heavy_sinks() {
+        let fr = test_fluid_registry();
+        let tr = test_tile_registry();
+        let water_id = fr.by_name("water"); // density 1000
+        let lava_id = fr.by_name("lava"); // density 3000
+
+        let w = 3;
+        let h = 3;
+        let len = (w * h) as usize;
+        let mut fluids = vec![FluidCell::EMPTY; len];
+        let tiles = air_tiles(len);
+
+        // Water below (y=0), lava above (y=1) — lava is heavier, should sink
+        fluids[idx(1, 0, w)] = FluidCell::new(water_id, 1.0);
+        fluids[idx(1, 1, w)] = FluidCell::new(lava_id, 1.0);
+
+        resolve_density_displacement(&mut fluids, &tiles, w, h, &fr, &tr);
+
+        // After displacement: lava should be below, water above
+        assert_eq!(fluids[idx(1, 0, w)].fluid_id, lava_id);
+        assert_eq!(fluids[idx(1, 1, w)].fluid_id, water_id);
+    }
+
+    #[test]
+    fn density_displacement_light_stays_on_top() {
+        let fr = test_fluid_registry();
+        let tr = test_tile_registry();
+        let water_id = fr.by_name("water"); // density 1000
+        let steam_id = fr.by_name("steam"); // density 0.6
+
+        let w = 3;
+        let h = 3;
+        let len = (w * h) as usize;
+        let mut fluids = vec![FluidCell::EMPTY; len];
+        let tiles = air_tiles(len);
+
+        // Water below (y=0), steam above (y=1) — already correct order
+        fluids[idx(1, 0, w)] = FluidCell::new(water_id, 1.0);
+        fluids[idx(1, 1, w)] = FluidCell::new(steam_id, 0.8);
+
+        resolve_density_displacement(&mut fluids, &tiles, w, h, &fr, &tr);
+
+        // No change — water is heavier and already below
+        assert_eq!(fluids[idx(1, 0, w)].fluid_id, water_id);
+        assert_eq!(fluids[idx(1, 1, w)].fluid_id, steam_id);
+    }
+
+    #[test]
+    fn density_displacement_preserves_mass() {
+        let fr = test_fluid_registry();
+        let tr = test_tile_registry();
+        let water_id = fr.by_name("water");
+        let lava_id = fr.by_name("lava");
+
+        let w = 1;
+        let h = 2;
+        let len = (w * h) as usize;
+        let mut fluids = vec![FluidCell::EMPTY; len];
+        let tiles = air_tiles(len);
+
+        fluids[idx(0, 0, w)] = FluidCell::new(water_id, 0.7);
+        fluids[idx(0, 1, w)] = FluidCell::new(lava_id, 0.9);
+
+        resolve_density_displacement(&mut fluids, &tiles, w, h, &fr, &tr);
+
+        // Lava sinks, water rises — masses preserved
+        assert_eq!(fluids[idx(0, 0, w)].fluid_id, lava_id);
+        assert!((fluids[idx(0, 0, w)].mass - 0.9).abs() < f32::EPSILON);
+        assert_eq!(fluids[idx(0, 1, w)].fluid_id, water_id);
+        assert!((fluids[idx(0, 1, w)].mass - 0.7).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn density_displacement_skips_empty_cells() {
+        let fr = test_fluid_registry();
+        let tr = test_tile_registry();
+        let water_id = fr.by_name("water");
+
+        let w = 1;
+        let h = 2;
+        let len = (w * h) as usize;
+        let mut fluids = vec![FluidCell::EMPTY; len];
+        let tiles = air_tiles(len);
+
+        // Water below, empty above — should not swap
+        fluids[idx(0, 0, w)] = FluidCell::new(water_id, 1.0);
+
+        resolve_density_displacement(&mut fluids, &tiles, w, h, &fr, &tr);
+
+        assert_eq!(fluids[idx(0, 0, w)].fluid_id, water_id);
+        assert!(fluids[idx(0, 1, w)].is_empty());
+    }
+
+    #[test]
+    fn density_displacement_skips_same_fluid() {
+        let fr = test_fluid_registry();
+        let tr = test_tile_registry();
+        let water_id = fr.by_name("water");
+
+        let w = 1;
+        let h = 2;
+        let len = (w * h) as usize;
+        let mut fluids = vec![FluidCell::EMPTY; len];
+        let tiles = air_tiles(len);
+
+        // Same fluid in both cells — no swap needed
+        fluids[idx(0, 0, w)] = FluidCell::new(water_id, 0.5);
+        fluids[idx(0, 1, w)] = FluidCell::new(water_id, 0.8);
+
+        resolve_density_displacement(&mut fluids, &tiles, w, h, &fr, &tr);
+
+        // Masses unchanged
+        assert!((fluids[idx(0, 0, w)].mass - 0.5).abs() < f32::EPSILON);
+        assert!((fluids[idx(0, 1, w)].mass - 0.8).abs() < f32::EPSILON);
+    }
+
+    // --- Reaction registry tests ---
+
+    #[test]
+    fn find_reaction_any_adjacency() {
+        let fr = test_fluid_registry();
+        let tr = test_tile_registry();
+        let defs = test_reaction_defs();
+        let registry = FluidReactionRegistry::from_defs(&defs, &fr, &tr);
+
+        let water_id = fr.by_name("water");
+        let lava_id = fr.by_name("lava");
+
+        // Adjacency::Any in the reaction should match any query adjacency
+        let result = registry.find_reaction(water_id, lava_id, &Adjacency::Side);
+        assert!(result.is_some());
+        let reaction = result.unwrap();
+        assert_eq!(reaction.adjacency, Adjacency::Any);
+        assert_eq!(reaction.result_tile, Some(tr.by_name("stone")));
+    }
+
+    #[test]
+    fn find_reaction_either_order() {
+        let fr = test_fluid_registry();
+        let tr = test_tile_registry();
+        let defs = test_reaction_defs();
+        let registry = FluidReactionRegistry::from_defs(&defs, &fr, &tr);
+
+        let water_id = fr.by_name("water");
+        let lava_id = fr.by_name("lava");
+
+        // (water, lava) should match
+        let r1 = registry.find_reaction(water_id, lava_id, &Adjacency::Any);
+        assert!(r1.is_some());
+
+        // (lava, water) should also match
+        let r2 = registry.find_reaction(lava_id, water_id, &Adjacency::Any);
+        assert!(r2.is_some());
+    }
+
+    #[test]
+    fn find_reaction_specific_adjacency() {
+        let fr = test_fluid_registry();
+        let tr = test_tile_registry();
+
+        // Only a Below-specific reaction
+        let defs = vec![FluidReactionDef {
+            fluid_a: "water".to_string(),
+            fluid_b: "lava".to_string(),
+            adjacency: Adjacency::Below,
+            result_tile: None,
+            result_fluid: Some("steam".to_string()),
+            min_mass_a: 0.0,
+            min_mass_b: 0.0,
+            consume_a: 0.5,
+            consume_b: 0.0,
+            byproduct_fluid: None,
+            byproduct_mass: 0.0,
+        }];
+        let registry = FluidReactionRegistry::from_defs(&defs, &fr, &tr);
+
+        let water_id = fr.by_name("water");
+        let lava_id = fr.by_name("lava");
+
+        // Below matches Below
+        let r = registry.find_reaction(water_id, lava_id, &Adjacency::Below);
+        assert!(r.is_some());
+
+        // Side does NOT match Below
+        let r = registry.find_reaction(water_id, lava_id, &Adjacency::Side);
+        assert!(r.is_none());
+
+        // Any query matches any reaction (Any acts as wildcard from caller side)
+        let r = registry.find_reaction(water_id, lava_id, &Adjacency::Any);
+        assert!(r.is_some());
+    }
+
+    #[test]
+    fn find_reaction_returns_none_for_unknown_pair() {
+        let fr = test_fluid_registry();
+        let tr = test_tile_registry();
+        let defs = test_reaction_defs();
+        let registry = FluidReactionRegistry::from_defs(&defs, &fr, &tr);
+
+        let water_id = fr.by_name("water");
+        let steam_id = fr.by_name("steam");
+
+        // No reaction defined for water + steam
+        let r = registry.find_reaction(water_id, steam_id, &Adjacency::Any);
+        assert!(r.is_none());
+    }
+
+    #[test]
+    fn compiled_reaction_has_correct_ids() {
+        let fr = test_fluid_registry();
+        let tr = test_tile_registry();
+        let defs = test_reaction_defs();
+        let registry = FluidReactionRegistry::from_defs(&defs, &fr, &tr);
+
+        let reaction = &registry.reactions[0];
+        assert_eq!(reaction.fluid_a, fr.by_name("water"));
+        assert_eq!(reaction.fluid_b, fr.by_name("lava"));
+        assert_eq!(reaction.result_tile, Some(tr.by_name("stone")));
+        assert_eq!(reaction.byproduct_fluid, Some(fr.by_name("steam")));
+        assert!((reaction.byproduct_mass - 0.5).abs() < f32::EPSILON);
+        assert!((reaction.consume_a - 1.0).abs() < f32::EPSILON);
+        assert!((reaction.consume_b - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn from_defs_compiles_all_reactions() {
+        let fr = test_fluid_registry();
+        let tr = test_tile_registry();
+        let defs = test_reaction_defs();
+        let registry = FluidReactionRegistry::from_defs(&defs, &fr, &tr);
+
+        assert_eq!(registry.reactions.len(), 2);
+    }
+
+    // --- execute_fluid_reactions tests ---
+
+    fn simple_water_lava_registry() -> FluidReactionRegistry {
+        let fr = test_fluid_registry();
+        let tr = test_tile_registry();
+        // Single reaction: water + lava (Any) → stone tile + steam byproduct
+        let defs = vec![FluidReactionDef {
+            fluid_a: "water".to_string(),
+            fluid_b: "lava".to_string(),
+            adjacency: Adjacency::Any,
+            result_tile: Some("stone".to_string()),
+            result_fluid: None,
+            min_mass_a: 0.0,
+            min_mass_b: 0.0,
+            consume_a: 1.0,
+            consume_b: 1.0,
+            byproduct_fluid: Some("steam".to_string()),
+            byproduct_mass: 0.5,
+        }];
+        FluidReactionRegistry::from_defs(&defs, &fr, &tr)
+    }
+
+    #[test]
+    fn water_lava_produces_stone_and_steam() {
+        let fr = test_fluid_registry();
+        let tr = test_tile_registry();
+        let registry = simple_water_lava_registry();
+        let water_id = fr.by_name("water");
+        let lava_id = fr.by_name("lava");
+        let steam_id = fr.by_name("steam");
+        let stone_id = tr.by_name("stone");
+
+        // 2×1 grid: water at (0,0), lava at (1,0)
+        let w = 2u32;
+        let h = 1u32;
+        let mut tiles = vec![TileId::AIR; (w * h) as usize];
+        let mut fluids = vec![FluidCell::EMPTY; (w * h) as usize];
+        fluids[0] = FluidCell::new(water_id, 1.0);
+        fluids[1] = FluidCell::new(lava_id, 1.0);
+
+        let events = execute_fluid_reactions(&mut fluids, &mut tiles, w, h, &registry, 0, 0, 16.0);
+
+        // Reaction should have occurred
+        assert!(!events.is_empty(), "expected at least one reaction event");
+        // Stone tile placed at water cell
+        assert_eq!(tiles[0], stone_id, "expected stone tile at water position");
+        // Steam byproduct placed (or cell consumed)
+        // Either steam is there or cell is empty (stone replaced it)
+        let water_cell = fluids[0];
+        assert!(
+            water_cell.is_empty() || water_cell.fluid_id == steam_id,
+            "expected steam or empty at reacted cell"
+        );
+    }
+
+    #[test]
+    fn reaction_rate_limited() {
+        let fr = test_fluid_registry();
+        let registry = simple_water_lava_registry();
+        let water_id = fr.by_name("water");
+        let lava_id = fr.by_name("lava");
+
+        // 4×5 grid with alternating water/lava pairs = many possible reactions
+        let w = 4u32;
+        let h = 5u32;
+        let mut tiles = vec![TileId::AIR; (w * h) as usize];
+        let mut fluids = vec![FluidCell::EMPTY; (w * h) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let id = if (x + y) % 2 == 0 { water_id } else { lava_id };
+                fluids[(y * w + x) as usize] = FluidCell::new(id, 1.0);
+            }
+        }
+
+        let events = execute_fluid_reactions(&mut fluids, &mut tiles, w, h, &registry, 0, 0, 16.0);
+
+        assert!(
+            events.len() <= MAX_REACTIONS_PER_CHUNK as usize,
+            "reactions should be capped at MAX_REACTIONS_PER_CHUNK, got {}",
+            events.len()
+        );
+    }
+
+    #[test]
+    fn reaction_respects_min_mass() {
+        let fr = test_fluid_registry();
+        let tr = test_tile_registry();
+        let water_id = fr.by_name("water");
+        let lava_id = fr.by_name("lava");
+
+        // Reaction requires min_mass_a = 0.5
+        let defs = vec![FluidReactionDef {
+            fluid_a: "water".to_string(),
+            fluid_b: "lava".to_string(),
+            adjacency: Adjacency::Any,
+            result_tile: Some("stone".to_string()),
+            result_fluid: None,
+            min_mass_a: 0.5,
+            min_mass_b: 0.0,
+            consume_a: 1.0,
+            consume_b: 1.0,
+            byproduct_fluid: None,
+            byproduct_mass: 0.0,
+        }];
+        let registry = FluidReactionRegistry::from_defs(&defs, &fr, &tr);
+
+        let w = 2u32;
+        let h = 1u32;
+        let mut tiles = vec![TileId::AIR; (w * h) as usize];
+        let mut fluids = vec![FluidCell::EMPTY; (w * h) as usize];
+        // Water mass is below min_mass_a
+        fluids[0] = FluidCell::new(water_id, 0.1);
+        fluids[1] = FluidCell::new(lava_id, 1.0);
+
+        let events = execute_fluid_reactions(&mut fluids, &mut tiles, w, h, &registry, 0, 0, 16.0);
+
+        assert!(
+            events.is_empty(),
+            "reaction should not fire when mass below minimum"
+        );
+        assert_eq!(tiles[0], TileId::AIR, "no tile should be placed");
     }
 }
