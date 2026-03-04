@@ -420,7 +420,7 @@ pub fn draw_fluid_debug_panel(
                             .text("Solver iterations"),
                     );
                     ui.add(
-                        egui::Slider::new(&mut sph_config.epsilon, 1.0..=5000.0)
+                        egui::Slider::new(&mut sph_config.epsilon, 0.001..=10.0)
                             .logarithmic(true)
                             .text("Epsilon (CFM)"),
                     );
