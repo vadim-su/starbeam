@@ -142,10 +142,10 @@ pub const MAX_REACTIONS_PER_CHUNK: u32 = 8;
 pub fn resolve_density_displacement_global(world: &mut FluidWorld, active_chunks: &[(i32, i32)]) {
     let cs = world.chunk_size as i32;
 
-    // Phase 1: Vertical bubble sort — limited to 2 passes per tick
+    // Phase 1: Vertical bubble sort — limited to 1 pass per tick
     // for smooth settling instead of instant teleportation.
-    // Heavy fluids sink ~2 cells/tick; at 60 ticks/sec that's 120 cells/sec.
-    for _pass in 0..2 {
+    // Heavy fluids sink ~1 cell/tick; at 60 ticks/sec that's 60 cells/sec.
+    for _pass in 0..1 {
         let mut any_swap = false;
         for &(cx, cy) in active_chunks {
             let base_gx = cx * cs;
@@ -199,11 +199,16 @@ pub fn resolve_density_displacement_global(world: &mut FluidWorld, active_chunks
     }
 }
 
+/// Fraction of light-fluid mass displaced upward per tick.
+/// Lower values produce smoother, more gradual displacement (less "jumping").
+const DISPLACE_FRACTION: f32 = 0.25;
+
 /// Try a single horizontal displacement between cells at (src_gx, gy) and (dst_gx, gy)
 /// using global coordinates.
 ///
-/// If src is heavier than dst, move src sideways to dst's position and push
-/// dst up one cell. The cell above dst must be available (empty and not solid).
+/// If src is heavier than dst, gradually move a fraction of the light fluid
+/// upward and allow the heavy fluid to seep in from the side. This prevents
+/// the instant "teleport" that caused water to jump when lava was poured.
 fn horizontal_displace_global(world: &mut FluidWorld, src_gx: i32, dst_gx: i32, gy: i32) {
     let src = world.read_current(src_gx, gy);
     let dst = world.read_current(dst_gx, gy);
@@ -230,18 +235,42 @@ fn horizontal_displace_global(world: &mut FluidWorld, src_gx: i32, dst_gx: i32, 
 
     let above = world.read_current(dst_gx, gy + 1);
 
-    if above.is_empty() {
-        // Empty cell above → light fluid goes up
-        world.write(dst_gx, gy + 1, dst);
-        world.write(dst_gx, gy, src);
-        world.write(src_gx, gy, FluidCell::EMPTY);
-    } else if above.fluid_id == dst.fluid_id {
-        // Same-type fluid above → merge light fluid mass upward
-        let mut merged = above;
-        merged.mass += dst.mass;
-        world.write(dst_gx, gy + 1, merged);
-        world.write(dst_gx, gy, src);
-        world.write(src_gx, gy, FluidCell::EMPTY);
+    // How much light-fluid mass to push up this tick
+    let moved_mass = (dst.mass * DISPLACE_FRACTION).max(0.001);
+
+    if above.is_empty() || above.fluid_id == dst.fluid_id {
+        // Push a fraction of the light fluid upward
+        let above_mass = if above.is_empty() { 0.0 } else { above.mass };
+        world.write(
+            dst_gx,
+            gy + 1,
+            FluidCell::new(dst.fluid_id, above_mass + moved_mass),
+        );
+
+        // Light fluid loses mass; heavy fluid seeps in proportionally
+        let seep = moved_mass.min(src.mass);
+        let mut new_dst = dst;
+        new_dst.mass -= moved_mass;
+        if new_dst.mass < 0.001 {
+            // Fully displaced — heavy fluid takes over
+            new_dst = FluidCell::new(src.fluid_id, seep);
+        } else {
+            // Still mixed — keep light fluid with reduced mass
+            // (heavy fluid cannot occupy the same cell, so it stays at src)
+        }
+        world.write(dst_gx, gy, new_dst);
+
+        // Reduce source heavy-fluid mass by the amount that seeped over
+        if new_dst.fluid_id == src.fluid_id {
+            // Heavy fluid moved from src to dst
+            let mut new_src = src;
+            new_src.mass -= seep;
+            if new_src.mass < 0.001 {
+                world.write(src_gx, gy, FluidCell::EMPTY);
+            } else {
+                world.write(src_gx, gy, new_src);
+            }
+        }
     }
 }
 
