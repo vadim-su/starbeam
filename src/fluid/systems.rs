@@ -13,7 +13,7 @@ use bevy::sprite_render::{AlphaMode2d, Material2d, Material2dKey, MeshMaterial2d
 use crate::fluid::events::FluidReactionEvent;
 use crate::fluid::sph_collision::{clamp_velocity, enforce_world_bounds, resolve_tile_collision};
 use crate::fluid::sph_particle::ParticleStore;
-use crate::fluid::sph_render::build_particle_mesh;
+use crate::fluid::sph_render::{build_particle_mesh, DebugColorCtx};
 use crate::fluid::sph_simulation::{sph_step, SphConfig};
 use crate::fluid::reactions::{execute_sph_particle_reactions, FluidReactionRegistry};
 use crate::fluid::registry::FluidRegistry;
@@ -275,6 +275,12 @@ pub fn fluid_rebuild_meshes(
         })
         .unwrap_or(sph_config.smoothing_radius * 0.5);
 
+    // Compute debug color context if debug mode is active
+    let debug_ctx = debug_state
+        .as_ref()
+        .filter(|ds| ds.visible && ds.mode != crate::fluid::debug_overlay::FluidDebugMode::Off)
+        .map(|ds| DebugColorCtx::from_store(&particles, ds.mode));
+
     // Track which display chunks get meshes this frame
     let mut chunks_with_mesh: HashSet<(i32, i32)> = HashSet::new();
 
@@ -300,6 +306,7 @@ pub fn fluid_rebuild_meshes(
             chunk_world_max,
             particle_radius,
             &fluid_registry,
+            debug_ctx.as_ref(),
         ) else {
             continue;
         };

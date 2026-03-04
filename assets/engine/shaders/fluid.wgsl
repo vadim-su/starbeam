@@ -88,6 +88,23 @@ fn vertex(in: VertexInput) -> VertexOutput {
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     var color = in.color;
 
+    // Circle mask: discard pixels outside radius from quad center
+    let center_offset = in.uv - vec2<f32>(0.5, 0.5);
+    let dist_sq = dot(center_offset, center_offset);
+    // Hard circle at radius 0.5, with soft edge for anti-aliasing
+    let radius_sq = 0.25; // 0.5^2
+    if dist_sq > radius_sq {
+        discard;
+    }
+    // Soft edge (anti-alias the last 10% of radius)
+    let edge_softness = smoothstep(radius_sq, radius_sq * 0.8, dist_sq);
+    color = vec4<f32>(color.rgb, color.a * edge_softness);
+
+    // In debug mode, skip visual effects (caustics, shimmer, lightmap)
+    if uniforms.debug_mode != 0u {
+        return color;
+    }
+
     // 1. Caustics
     if uniforms.enable_caustics != 0u {
         let tile_pixels: f32 = 32.0;

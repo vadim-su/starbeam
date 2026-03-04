@@ -15,13 +15,13 @@ pub enum FluidDebugMode {
     /// Normal rendering (no debug overlay).
     #[default]
     Off,
-    /// Heat-map of mass per cell (black=0 -> green=1 -> red=pressurized).
+    /// Heat-map of density per particle (blue=low -> red=high).
     Mass,
-    /// Show which cells are surface cells (bright) vs interior (dim).
+    /// Heat-map of pressure per particle (blue=low -> red=high).
     Surface,
     /// Colour-code by fluid type (each FluidId gets a distinct hue).
     FluidType,
-    /// Depth darkening visualised as grayscale.
+    /// Heat-map of speed per particle (blue=slow -> white=fast).
     Depth,
 }
 
@@ -40,10 +40,10 @@ impl FluidDebugMode {
     fn label(self) -> &'static str {
         match self {
             Self::Off => "Off",
-            Self::Mass => "Mass",
-            Self::Surface => "Surface",
+            Self::Mass => "Density heatmap",
+            Self::Surface => "Pressure heatmap",
             Self::FluidType => "Fluid Type",
-            Self::Depth => "Depth",
+            Self::Depth => "Speed heatmap",
         }
     }
 
@@ -100,7 +100,7 @@ pub fn draw_fluid_debug_panel(
     world_map: Res<WorldMap>,
     active_world: Res<ActiveWorld>,
     fluid_registry: Res<FluidRegistry>,
-    particles: Res<ParticleStore>,
+    mut particles: ResMut<ParticleStore>,
     mut sph_config: ResMut<SphConfig>,
 ) -> Result {
     if !state.visible {
@@ -115,7 +115,7 @@ pub fn draw_fluid_debug_panel(
         .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(60)));
 
     egui::SidePanel::left("fluid_debug_panel")
-        .default_width(300.0)
+        .default_width(320.0)
         .resizable(false)
         .frame(panel_frame)
         .show(ctx, |ui| {
@@ -152,20 +152,64 @@ pub fn draw_fluid_debug_panel(
                             ui.end_row();
 
                             if !particles.is_empty() {
-                                let avg_density: f32 = particles.densities.iter().sum::<f32>() / particles.len() as f32;
-                                let avg_pressure: f32 = particles.pressures.iter().sum::<f32>() / particles.len() as f32;
-                                let avg_speed: f32 = particles.velocities.iter().map(|v| v.length()).sum::<f32>() / particles.len() as f32;
+                                let n = particles.len() as f32;
 
-                                ui.label("Avg density:");
-                                ui.monospace(format!("{avg_density:.4}"));
+                                // Density stats
+                                let mut min_d = f32::MAX;
+                                let mut max_d = f32::MIN;
+                                let mut sum_d: f32 = 0.0;
+                                for &d in &particles.densities {
+                                    sum_d += d;
+                                    if d < min_d { min_d = d; }
+                                    if d > max_d { max_d = d; }
+                                }
+                                let avg_d = sum_d / n;
+
+                                ui.label("Density (avg):");
+                                ui.monospace(format!("{avg_d:.4}"));
                                 ui.end_row();
 
-                                ui.label("Avg pressure:");
-                                ui.monospace(format!("{avg_pressure:.2}"));
+                                ui.label("Density (min/max):");
+                                ui.monospace(format!("{min_d:.4} / {max_d:.4}"));
                                 ui.end_row();
 
-                                ui.label("Avg speed:");
-                                ui.monospace(format!("{avg_speed:.1} px/s"));
+                                // Pressure stats
+                                let mut min_p = f32::MAX;
+                                let mut max_p = f32::MIN;
+                                let mut sum_p: f32 = 0.0;
+                                for &p in &particles.pressures {
+                                    sum_p += p;
+                                    if p < min_p { min_p = p; }
+                                    if p > max_p { max_p = p; }
+                                }
+                                let avg_p = sum_p / n;
+
+                                ui.label("Pressure (avg):");
+                                ui.monospace(format!("{avg_p:.1}"));
+                                ui.end_row();
+
+                                ui.label("Pressure (min/max):");
+                                ui.monospace(format!("{min_p:.1} / {max_p:.1}"));
+                                ui.end_row();
+
+                                // Speed stats
+                                let mut min_s = f32::MAX;
+                                let mut max_s: f32 = 0.0;
+                                let mut sum_s: f32 = 0.0;
+                                for v in &particles.velocities {
+                                    let s = v.length();
+                                    sum_s += s;
+                                    if s < min_s { min_s = s; }
+                                    if s > max_s { max_s = s; }
+                                }
+                                let avg_s = sum_s / n;
+
+                                ui.label("Speed (avg):");
+                                ui.monospace(format!("{avg_s:.1} px/s"));
+                                ui.end_row();
+
+                                ui.label("Speed (max):");
+                                ui.monospace(format!("{max_s:.1} px/s"));
                                 ui.end_row();
 
                                 // Per-fluid-type breakdown
@@ -190,12 +234,35 @@ pub fn draw_fluid_debug_panel(
                                         ui.end_row();
                                     }
                                 }
+
+                                // Diagnostic info
+                                ui.end_row();
+                                ui.label("rest_density:");
+                                let rest_d = sph_config.rest_density;
+                                let ratio = if rest_d > 1e-6 { avg_d / rest_d } else { 0.0 };
+                                let color = if ratio > 2.0 {
+                                    egui::Color32::RED
+                                } else if ratio > 1.5 {
+                                    egui::Color32::YELLOW
+                                } else {
+                                    egui::Color32::LIGHT_GREEN
+                                };
+                                ui.colored_label(color, format!("{rest_d:.4} (avg/rest = {ratio:.1}x)"));
+                                ui.end_row();
                             }
                         });
+
+                    // Action buttons
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        if ui.button("Clear all particles").clicked() {
+                            particles.clear();
+                        }
+                    });
                 });
 
-            // --- Cell at cursor (still useful for tile/chunk inspection) ---
-            egui::CollapsingHeader::new(egui::RichText::new("Cell at Cursor").strong())
+            // --- Particle at cursor ---
+            egui::CollapsingHeader::new(egui::RichText::new("Particle at Cursor").strong())
                 .default_open(true)
                 .show(ui, |ui| {
                     let cursor_info = (|| {
@@ -228,50 +295,91 @@ pub fn draw_fluid_debug_panel(
                             .num_columns(2)
                             .spacing([20.0, 4.0])
                             .show(ui, |ui| {
+                                ui.label("World pos:");
+                                ui.monospace(format!("{:.0}, {:.0}", world_pos.x, world_pos.y));
+                                ui.end_row();
+
                                 ui.label("Tile:");
                                 ui.monospace(format!("{wrapped_tx}, {ty}"));
                                 ui.end_row();
 
-                                ui.label("Local:");
-                                ui.monospace(format!("{lx}, {ly}"));
-                                ui.end_row();
-
                                 ui.label("Chunk:");
-                                ui.monospace(format!("{cx}, {cy}"));
+                                ui.monospace(format!("{cx}, {cy} [{lx},{ly}]"));
                                 ui.end_row();
 
                                 if let Some(cell) = cell_info {
-                                    if cell.is_empty() {
+                                    if !cell.is_empty() && !cell.primary.is_empty() {
+                                        let def = fluid_registry.get(cell.primary.fluid_id);
                                         ui.label("CA Cell:");
-                                        ui.colored_label(egui::Color32::GRAY, "(empty)");
+                                        ui.colored_label(
+                                            egui::Color32::from_rgb(def.color[0], def.color[1], def.color[2]),
+                                            format!("{} m={:.3}", def.id, cell.primary.mass),
+                                        );
                                         ui.end_row();
-                                    } else {
-                                        if !cell.primary.is_empty() {
-                                            let def = fluid_registry.get(cell.primary.fluid_id);
-                                            ui.label("CA Cell:");
-                                            ui.colored_label(
-                                                egui::Color32::from_rgb(def.color[0], def.color[1], def.color[2]),
-                                                format!("{} m={:.3}", def.id, cell.primary.mass),
-                                            );
-                                            ui.end_row();
+                                    }
+                                }
+
+                                // Find nearest SPH particle
+                                let search_radius = sph_config.smoothing_radius;
+                                let mut nearest_idx: Option<usize> = None;
+                                let mut nearest_dist = f32::MAX;
+                                let mut nearby_count = 0u32;
+                                for i in 0..particles.len() {
+                                    let d = world_pos.distance(particles.positions[i]);
+                                    if d < search_radius {
+                                        nearby_count += 1;
+                                        if d < nearest_dist {
+                                            nearest_dist = d;
+                                            nearest_idx = Some(i);
                                         }
                                     }
                                 }
 
-                                // SPH particles near cursor
-                                let near_radius = sph_config.smoothing_radius;
-                                let mut nearby_count = 0u32;
-                                for i in 0..particles.len() {
-                                    if world_pos.distance(particles.positions[i]) < near_radius {
-                                        nearby_count += 1;
-                                    }
-                                }
                                 ui.label("SPH nearby:");
                                 ui.colored_label(
                                     if nearby_count > 0 { egui::Color32::LIGHT_BLUE } else { egui::Color32::GRAY },
                                     format!("{nearby_count}"),
                                 );
                                 ui.end_row();
+
+                                // Show nearest particle details
+                                if let Some(idx) = nearest_idx {
+                                    ui.label("Nearest particle:");
+                                    ui.monospace(format!("#{idx} (d={nearest_dist:.1})"));
+                                    ui.end_row();
+
+                                    ui.label("  density:");
+                                    let d = particles.densities[idx];
+                                    let rest = sph_config.rest_density;
+                                    let ratio = if rest > 1e-6 { d / rest } else { 0.0 };
+                                    let dcolor = if ratio > 2.0 { egui::Color32::RED }
+                                        else if ratio > 1.2 { egui::Color32::YELLOW }
+                                        else { egui::Color32::LIGHT_GREEN };
+                                    ui.colored_label(dcolor, format!("{d:.4} ({ratio:.1}x rest)"));
+                                    ui.end_row();
+
+                                    ui.label("  pressure:");
+                                    let p = particles.pressures[idx];
+                                    let pcolor = if p > 100.0 { egui::Color32::RED }
+                                        else if p < -100.0 { egui::Color32::LIGHT_BLUE }
+                                        else { egui::Color32::LIGHT_GREEN };
+                                    ui.colored_label(pcolor, format!("{p:.1}"));
+                                    ui.end_row();
+
+                                    ui.label("  velocity:");
+                                    let v = particles.velocities[idx];
+                                    ui.monospace(format!("({:.1}, {:.1}) |{:.1}|", v.x, v.y, v.length()));
+                                    ui.end_row();
+
+                                    ui.label("  force:");
+                                    let f = particles.forces[idx];
+                                    ui.monospace(format!("({:.1}, {:.1})", f.x, f.y));
+                                    ui.end_row();
+
+                                    ui.label("  mass:");
+                                    ui.monospace(format!("{:.2}", particles.masses[idx]));
+                                    ui.end_row();
+                                }
                             });
                     } else {
                         ui.label("-- (cursor outside)");
@@ -324,6 +432,16 @@ pub fn draw_fluid_debug_panel(
                         egui::Slider::new(&mut sph_config.particle_mass, 0.1..=10.0)
                             .text("Particle mass"),
                     );
+
+                    ui.separator();
+                    ui.label(egui::RichText::new("Diagnostics").underline());
+                    // Show computed kernel values for tuning
+                    let h = sph_config.smoothing_radius;
+                    let p0 = crate::fluid::sph_kernels::poly6(0.0, h);
+                    let p_half = crate::fluid::sph_kernels::poly6(h * 0.5, h);
+                    ui.monospace(format!("poly6(0, {h:.0}) = {p0:.6}"));
+                    ui.monospace(format!("poly6({:.0}, {h:.0}) = {p_half:.6}", h * 0.5));
+                    ui.monospace(format!("self-density = {:.6}", p0 * sph_config.particle_mass));
                 });
         });
 
