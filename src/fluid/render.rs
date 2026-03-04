@@ -3,7 +3,7 @@ use bevy::mesh::{Indices, MeshVertexAttribute, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::VertexFormat;
 
-use super::cell::{FluidCell, FluidId};
+use super::cell::{FluidCell, FluidId, FluidSlot};
 use super::registry::FluidRegistry;
 use crate::registry::tile::{TileId, TileRegistry};
 
@@ -55,14 +55,14 @@ fn is_liquid_surface(
         return match neighbor_above_row {
             Some(row) => {
                 let above = &row[local_x as usize];
-                above.is_empty() || fluid_registry.get(above.fluid_id).is_gas
+                above.is_empty() || fluid_registry.get(above.fluid_id()).is_gas
             }
             None => true,
         };
     }
     let above_idx = (above_y * chunk_size + local_x) as usize;
     let above = &fluids[above_idx];
-    above.is_empty() || fluid_registry.get(above.fluid_id).is_gas
+    above.is_empty() || fluid_registry.get(above.fluid_id()).is_gas
 }
 
 /// Determine whether a gas cell is at the surface (exposed to air/liquid below).
@@ -83,14 +83,14 @@ fn is_gas_surface(
         return match neighbor_below_row {
             Some(row) => {
                 let below = &row[local_x as usize];
-                below.is_empty() || !fluid_registry.get(below.fluid_id).is_gas
+                below.is_empty() || !fluid_registry.get(below.fluid_id()).is_gas
             }
             None => true,
         };
     }
     let below_idx = ((local_y - 1) * chunk_size + local_x) as usize;
     let below = &fluids[below_idx];
-    below.is_empty() || !fluid_registry.get(below.fluid_id).is_gas
+    below.is_empty() || !fluid_registry.get(below.fluid_id()).is_gas
 }
 
 /// Compute depth_in_fluid: normalized 0..1 (0 = surface, 1 = deepest).
@@ -136,7 +136,7 @@ fn compute_depth(
             sy -= 1;
             let idx = (sy * chunk_size + local_x) as usize;
             let neighbor = &fluids[idx];
-            if neighbor.is_empty() || neighbor.fluid_id != fluid_id {
+            if neighbor.is_empty() || neighbor.fluid_id() != fluid_id {
                 break; // found surface
             }
             distance += 1;
@@ -152,7 +152,7 @@ fn compute_depth(
             }
             let idx = (sy * chunk_size + local_x) as usize;
             let neighbor = &fluids[idx];
-            if neighbor.is_empty() || neighbor.fluid_id != fluid_id {
+            if neighbor.is_empty() || neighbor.fluid_id() != fluid_id {
                 break; // found surface
             }
             distance += 1;
@@ -174,7 +174,7 @@ fn compute_depth(
                 // fall back to MAX_DEPTH_SCAN so the cell appears deep.
                 let fluid_continues = neighbor_above_row.is_some_and(|row| {
                     let cell = &row[local_x as usize];
-                    !cell.is_empty() && cell.fluid_id == fluid_id
+                    !cell.is_empty() && cell.fluid_id() == fluid_id
                 });
                 if fluid_continues {
                     distance = MAX_DEPTH_SCAN;
@@ -185,7 +185,7 @@ fn compute_depth(
             // Gas: surface is somewhere in the chunk below.
             let fluid_continues = neighbor_below_row.is_some_and(|row| {
                 let cell = &row[local_x as usize];
-                !cell.is_empty() && cell.fluid_id == fluid_id
+                !cell.is_empty() && cell.fluid_id() == fluid_id
             });
             if fluid_continues {
                 distance = MAX_DEPTH_SCAN;
@@ -218,9 +218,9 @@ pub fn column_liquid_surface_h(
         let idx = (local_y * chunk_size + local_x) as usize;
         let cell = &fluids[idx];
         if !cell.is_empty() {
-            let def = fluid_registry.get(cell.fluid_id);
+            let def = fluid_registry.get(cell.fluid_id());
             if !def.is_gas {
-                return Some(local_y as f32 + cell.mass.min(1.0));
+                return Some(local_y as f32 + cell.total_mass().min(1.0));
             }
         }
     }
@@ -241,9 +241,9 @@ pub fn column_gas_surface_h(
         let idx = (local_y * chunk_size + local_x) as usize;
         let cell = &fluids[idx];
         if !cell.is_empty() {
-            let def = fluid_registry.get(cell.fluid_id);
+            let def = fluid_registry.get(cell.fluid_id());
             if def.is_gas {
-                return Some(local_y as f32 + (1.0 - cell.mass.min(1.0)));
+                return Some(local_y as f32 + (1.0 - cell.total_mass().min(1.0)));
             }
         }
     }
@@ -337,11 +337,11 @@ fn compute_column_surface_data(
                 let idx = (local_y * chunk_size + local_x) as usize;
                 let cell = &fluids[idx];
                 if !cell.is_empty() {
-                    let def = fluid_registry.get(cell.fluid_id);
+                    let def = fluid_registry.get(cell.fluid_id());
                     if def.is_gas {
-                        let fill = cell.mass.min(1.0);
+                        let fill = cell.total_mass().min(1.0);
                         data[local_x as usize] =
-                            Some((local_y as f32 + (1.0 - fill), cell.fluid_id));
+                            Some((local_y as f32 + (1.0 - fill), cell.fluid_id()));
                         break;
                     }
                 }
@@ -351,10 +351,10 @@ fn compute_column_surface_data(
                 let idx = (local_y * chunk_size + local_x) as usize;
                 let cell = &fluids[idx];
                 if !cell.is_empty() {
-                    let def = fluid_registry.get(cell.fluid_id);
+                    let def = fluid_registry.get(cell.fluid_id());
                     if !def.is_gas {
-                        let fill = cell.mass.min(1.0);
-                        data[local_x as usize] = Some((local_y as f32 + fill, cell.fluid_id));
+                        let fill = cell.total_mass().min(1.0);
+                        data[local_x as usize] = Some((local_y as f32 + fill, cell.fluid_id()));
                         break;
                     }
                 }
@@ -439,7 +439,7 @@ pub fn build_fluid_mesh(
     for lx in 0..chunk_size {
         // Start from the row above the chunk (cross-chunk neighbour).
         let mut top_fluid = neighbor_above_row
-            .map(|row| row[lx as usize].fluid_id)
+            .map(|row| row[lx as usize].fluid_id())
             .filter(|id| *id != FluidId::NONE)
             .unwrap_or(FluidId::NONE);
         // Seed from calling code: if the chunk(s) above already determined
@@ -457,8 +457,8 @@ pub fn build_fluid_mesh(
                 cover_active = false;
             } else {
                 if top_fluid == FluidId::NONE {
-                    top_fluid = cell.fluid_id;
-                } else if cell.fluid_id != top_fluid {
+                    top_fluid = cell.fluid_id();
+                } else if cell.fluid_id() != top_fluid {
                     cover_active = true;
                 }
                 if cover_active {
@@ -467,6 +467,161 @@ pub fn build_fluid_mesh(
             }
         }
     }
+
+    // Helper closure: emit one quad for a single fluid slot within a cell.
+    // `slot` is the FluidSlot to render, `slot_y0`/`slot_y1` are the
+    // pre-computed vertical extents in world coordinates.
+    // `is_surface_slot` indicates whether this slot is at the fluid surface.
+    // `suppress_emission` suppresses light emission (e.g. primary covered by secondary).
+    let emit_quad = |slot: &FluidSlot,
+                         slot_def: &super::registry::FluidDef,
+                         slot_fill: f32,
+                         slot_y0: f32,
+                         slot_y1: f32,
+                         is_surface_slot: bool,
+                         suppress_emission: bool,
+                         world_x: f32,
+                         local_x: u32,
+                         local_y: u32,
+                         idx: usize,
+                         positions: &mut Vec<[f32; 3]>,
+                         colors: &mut Vec<[f32; 4]>,
+                         uvs: &mut Vec<[f32; 2]>,
+                         fluid_data: &mut Vec<[f32; 4]>,
+                         wave_data: &mut Vec<f32>,
+                         wave_params_data: &mut Vec<[f32; 2]>,
+                         edge_flags_data: &mut Vec<f32>,
+                         indices: &mut Vec<u32>| {
+        let color = [
+            slot_def.color[0] as f32 / 255.0,
+            slot_def.color[1] as f32 / 255.0,
+            slot_def.color[2] as f32 / 255.0,
+            (slot_def.color[3] as f32 / 255.0) * slot_fill,
+        ];
+
+        let col_above_surface_world_y = above_surface_world_ys
+            .and_then(|arr| arr.get(local_x as usize))
+            .and_then(|v| *v);
+        let depth = compute_depth(
+            fluids,
+            local_x,
+            local_y,
+            chunk_size,
+            slot.fluid_id,
+            slot_def.is_gas,
+            neighbor_above_row,
+            neighbor_below_row,
+            chunk_base_y,
+            col_above_surface_world_y,
+        );
+        let uv = [slot_fill, depth];
+
+        let mut emission = [
+            slot_def.light_emission[0] as f32 / 255.0,
+            slot_def.light_emission[1] as f32 / 255.0,
+            slot_def.light_emission[2] as f32 / 255.0,
+        ];
+        if suppress_emission || emission_covered[idx] {
+            emission = [0.0, 0.0, 0.0];
+        }
+
+        let is_gas_flag = if slot_def.is_gas { 2.0 } else { 0.0 };
+
+        let wave_flags: [f32; 4] = if is_surface_slot {
+            if slot_def.is_gas {
+                [1.0, 1.0, 0.0, 0.0]
+            } else {
+                [0.0, 0.0, 1.0, 1.0]
+            }
+        } else {
+            [0.0, 0.0, 0.0, 0.0]
+        };
+
+        // Surface smoothing
+        let (y0_left, y0_right, y1_left, y1_right) = if is_surface_slot {
+            let surface_data = if slot_def.is_gas {
+                &gas_surface
+            } else {
+                &liquid_surface
+            };
+            let (this_h, this_fid) = surface_data[local_x as usize]
+                .unwrap_or((0.0, slot.fluid_id));
+
+            let left_h: Option<f32> = if local_x > 0 {
+                surface_data[(local_x - 1) as usize]
+                    .filter(|(_, fid)| *fid == this_fid)
+                    .map(|(h, _)| h)
+            } else if slot_def.is_gas {
+                left_edge_gas_h
+            } else {
+                left_edge_liquid_h
+            };
+            let right_h: Option<f32> = if local_x + 1 < chunk_size {
+                surface_data[(local_x + 1) as usize]
+                    .filter(|(_, fid)| *fid == this_fid)
+                    .map(|(h, _)| h)
+            } else if slot_def.is_gas {
+                right_edge_gas_h
+            } else {
+                right_edge_liquid_h
+            };
+
+            let base = base_y as f32;
+
+            if slot_def.is_gas {
+                let y0_l = match left_h {
+                    Some(lh) => (base + (this_h + lh) / 2.0) * tile_size,
+                    None => slot_y0,
+                };
+                let y0_r = match right_h {
+                    Some(rh) => (base + (this_h + rh) / 2.0) * tile_size,
+                    None => slot_y0,
+                };
+                (y0_l, y0_r, slot_y1, slot_y1)
+            } else {
+                let y1_l = match left_h {
+                    Some(lh) => (base + (this_h + lh) / 2.0) * tile_size,
+                    None => slot_y1,
+                };
+                let y1_r = match right_h {
+                    Some(rh) => (base + (this_h + rh) / 2.0) * tile_size,
+                    None => slot_y1,
+                };
+                (slot_y0, slot_y0, y1_l, y1_r)
+            }
+        } else {
+            (slot_y0, slot_y0, slot_y1, slot_y1)
+        };
+
+        let vi = positions.len() as u32;
+
+        positions.extend_from_slice(&[
+            [world_x, y0_left, FLUID_Z],
+            [world_x + tile_size, y0_right, FLUID_Z],
+            [world_x + tile_size, y1_right, FLUID_Z],
+            [world_x, y1_left, FLUID_Z],
+        ]);
+
+        colors.extend_from_slice(&[color, color, color, color]);
+        uvs.extend_from_slice(&[uv, uv, uv, uv]);
+
+        for i in 0..4 {
+            let flags = wave_flags[i] * 1.0 + is_gas_flag;
+            fluid_data.push([emission[0], emission[1], emission[2], flags]);
+        }
+
+        let wave_h = wave_heights.map(|wh| wh[idx] * tile_size).unwrap_or(0.0);
+        wave_data.extend_from_slice(&[wave_h, wave_h, wave_h, wave_h]);
+
+        let wp = [slot_def.wave_amplitude, slot_def.wave_speed];
+        wave_params_data.extend_from_slice(&[wp, wp, wp, wp]);
+
+        let edge_flags =
+            compute_edge_flags(fluids, tiles, local_x, local_y, chunk_size, tile_registry);
+        edge_flags_data.extend_from_slice(&[edge_flags, edge_flags, edge_flags, edge_flags]);
+
+        indices.extend_from_slice(&[vi, vi + 1, vi + 2, vi, vi + 2, vi + 3]);
+    };
 
     for local_y in 0..chunk_size {
         for local_x in 0..chunk_size {
@@ -477,212 +632,86 @@ pub fn build_fluid_mesh(
                 continue;
             }
 
-            let def = fluid_registry.get(cell.fluid_id);
-            let fill = cell.mass.min(1.0);
-
             let world_x = (base_x + local_x as i32) as f32 * tile_size;
             let world_y = (base_y + local_y as i32) as f32 * tile_size;
 
-            // Vertical extent depends on fluid type:
-            //   liquid → fills from bottom up
-            //   gas    → fills from top down
-            let (y0, y1) = if def.is_gas {
-                let y0 = world_y + (1.0 - fill) * tile_size;
-                let y1 = world_y + tile_size;
-                (y0, y1)
-            } else {
-                let y0 = world_y;
-                let y1 = world_y + fill * tile_size;
-                (y0, y1)
-            };
+            let has_secondary = !cell.secondary.is_empty();
 
-            // RGBA colour from definition, alpha scaled by fill level.
-            let color = [
-                def.color[0] as f32 / 255.0,
-                def.color[1] as f32 / 255.0,
-                def.color[2] as f32 / 255.0,
-                (def.color[3] as f32 / 255.0) * fill,
-            ];
+            // --- Primary slot ---
+            if !cell.primary.is_empty() {
+                let primary_def = fluid_registry.get(cell.primary.fluid_id);
+                let primary_fill = cell.primary.mass.min(1.0);
 
-            // UV_0: [fill_level, depth_in_fluid]
-            // Look up the per-column surface world Y for the chunk above (for accurate
-            // cross-chunk depth when the scan reaches the top boundary).
-            let col_above_surface_world_y = above_surface_world_ys
-                .and_then(|arr| arr.get(local_x as usize))
-                .and_then(|v| *v);
-            let depth = compute_depth(
-                fluids,
-                local_x,
-                local_y,
-                chunk_size,
-                cell.fluid_id,
-                def.is_gas,
-                neighbor_above_row,
-                neighbor_below_row,
-                chunk_base_y,
-                col_above_surface_world_y,
-            );
-            let uv = [fill, depth];
+                let (p_y0, p_y1) = if primary_def.is_gas {
+                    let y0 = world_y + (1.0 - primary_fill) * tile_size;
+                    let y1 = world_y + tile_size;
+                    (y0, y1)
+                } else {
+                    let y0 = world_y;
+                    let y1 = world_y + primary_fill * tile_size;
+                    (y0, y1)
+                };
 
-            // Emission from FluidDef.light_emission.
-            // Suppress emission when this cell is covered by a different fluid
-            // anywhere above in the same column (e.g. lava under water).
-            // Uses the pre-computed `emission_covered` array which walks each
-            // column top-down marking all cells beneath a foreign-fluid body.
-            let mut emission = [
-                def.light_emission[0] as f32 / 255.0,
-                def.light_emission[1] as f32 / 255.0,
-                def.light_emission[2] as f32 / 255.0,
-            ];
-            if emission_covered[idx] {
-                emission = [0.0, 0.0, 0.0];
+                // Primary is surface only if secondary is empty AND the cell-level
+                // surface check passes (cell above is empty or gas).
+                let primary_is_surface = !has_secondary && if primary_def.is_gas {
+                    is_gas_surface(
+                        fluids, local_x, local_y, chunk_size,
+                        cell.primary.fluid_id, neighbor_below_row, fluid_registry,
+                    )
+                } else {
+                    is_liquid_surface(
+                        fluids, local_x, local_y, chunk_size,
+                        cell.primary.fluid_id, neighbor_above_row, fluid_registry,
+                    )
+                };
+
+                // Suppress primary emission when secondary covers it
+                let suppress_primary_emission = has_secondary;
+
+                emit_quad(
+                    &cell.primary, primary_def, primary_fill,
+                    p_y0, p_y1, primary_is_surface, suppress_primary_emission,
+                    world_x, local_x, local_y, idx,
+                    &mut positions, &mut colors, &mut uvs, &mut fluid_data,
+                    &mut wave_data, &mut wave_params_data, &mut edge_flags_data,
+                    &mut indices,
+                );
             }
 
-            // Surface detection for wave vertices
-            let is_surface = if def.is_gas {
-                is_gas_surface(
-                    fluids,
-                    local_x,
-                    local_y,
-                    chunk_size,
-                    cell.fluid_id,
-                    neighbor_below_row,
-                    fluid_registry,
-                )
-            } else {
-                is_liquid_surface(
-                    fluids,
-                    local_x,
-                    local_y,
-                    chunk_size,
-                    cell.fluid_id,
-                    neighbor_above_row,
-                    fluid_registry,
-                )
-            };
+            // --- Secondary slot ---
+            if has_secondary {
+                let secondary_def = fluid_registry.get(cell.secondary.fluid_id);
+                let primary_fill = cell.primary.mass.min(1.0);
+                let secondary_fill = cell.secondary.mass.min(1.0 - primary_fill);
 
-            let is_gas_flag = if def.is_gas { 2.0 } else { 0.0 };
+                if secondary_fill > 0.0 {
+                    let s_y0 = world_y + primary_fill * tile_size;
+                    let s_y1 = s_y0 + secondary_fill * tile_size;
 
-            // Vertex indices in quad:
-            //   0 = bottom-left, 1 = bottom-right, 2 = top-right, 3 = top-left
-            // Liquid surface: wave on top vertices (2, 3)
-            // Gas surface: wave on bottom vertices (0, 1)
-            let wave_flags: [f32; 4] = if is_surface {
-                if def.is_gas {
-                    // Gas: bottom vertices (0, 1) are wave vertices
-                    [1.0, 1.0, 0.0, 0.0]
-                } else {
-                    // Liquid: top vertices (2, 3) are wave vertices
-                    [0.0, 0.0, 1.0, 1.0]
-                }
-            } else {
-                [0.0, 0.0, 0.0, 0.0]
-            };
-
-            // Smooth surface vertices by interpolating absolute surface heights
-            // between adjacent columns. Only smooth when the adjacent column has
-            // the same fluid type at the surface (prevents interpolating between
-            // e.g. water and lava surfaces which are at different heights).
-            let (y0_left, y0_right, y1_left, y1_right) = if is_surface {
-                let surface_data = if def.is_gas {
-                    &gas_surface
-                } else {
-                    &liquid_surface
-                };
-                let (this_h, this_fid) = surface_data[local_x as usize]
-                    .unwrap_or((0.0, cell.fluid_id));
-
-                // Helper: extract neighbor height only if same fluid type
-                let left_h: Option<f32> = if local_x > 0 {
-                    surface_data[(local_x - 1) as usize]
-                        .filter(|(_, fid)| *fid == this_fid)
-                        .map(|(h, _)| h)
-                } else {
-                    if def.is_gas {
-                        left_edge_gas_h
+                    // Secondary is surface if cell above is empty or gas
+                    let secondary_is_surface = if secondary_def.is_gas {
+                        is_gas_surface(
+                            fluids, local_x, local_y, chunk_size,
+                            cell.secondary.fluid_id, neighbor_below_row, fluid_registry,
+                        )
                     } else {
-                        left_edge_liquid_h
-                    }
-                };
-                let right_h: Option<f32> = if local_x + 1 < chunk_size {
-                    surface_data[(local_x + 1) as usize]
-                        .filter(|(_, fid)| *fid == this_fid)
-                        .map(|(h, _)| h)
-                } else {
-                    if def.is_gas {
-                        right_edge_gas_h
-                    } else {
-                        right_edge_liquid_h
-                    }
-                };
+                        is_liquid_surface(
+                            fluids, local_x, local_y, chunk_size,
+                            cell.secondary.fluid_id, neighbor_above_row, fluid_registry,
+                        )
+                    };
 
-                let base = base_y as f32;
-
-                if def.is_gas {
-                    // Gas surface: smooth bottom vertices
-                    let y0_l = match left_h {
-                        Some(lh) => (base + (this_h + lh) / 2.0) * tile_size,
-                        None => y0,
-                    };
-                    let y0_r = match right_h {
-                        Some(rh) => (base + (this_h + rh) / 2.0) * tile_size,
-                        None => y0,
-                    };
-                    (y0_l, y0_r, y1, y1)
-                } else {
-                    // Liquid surface: smooth top vertices
-                    let y1_l = match left_h {
-                        Some(lh) => (base + (this_h + lh) / 2.0) * tile_size,
-                        None => y1,
-                    };
-                    let y1_r = match right_h {
-                        Some(rh) => (base + (this_h + rh) / 2.0) * tile_size,
-                        None => y1,
-                    };
-                    (y0, y0, y1_l, y1_r)
+                    emit_quad(
+                        &cell.secondary, secondary_def, secondary_fill,
+                        s_y0, s_y1, secondary_is_surface, false,
+                        world_x, local_x, local_y, idx,
+                        &mut positions, &mut colors, &mut uvs, &mut fluid_data,
+                        &mut wave_data, &mut wave_params_data, &mut edge_flags_data,
+                        &mut indices,
+                    );
                 }
-            } else {
-                (y0, y0, y1, y1)
-            };
-
-            let vi = positions.len() as u32;
-
-            positions.extend_from_slice(&[
-                [world_x, y0_left, FLUID_Z],              // 0: bottom-left
-                [world_x + tile_size, y0_right, FLUID_Z], // 1: bottom-right
-                [world_x + tile_size, y1_right, FLUID_Z], // 2: top-right
-                [world_x, y1_left, FLUID_Z],              // 3: top-left
-            ]);
-
-            colors.extend_from_slice(&[color, color, color, color]);
-
-            // UV_0: [fill_level, depth_in_fluid] — uniform for all cells.
-            // Wave animation uses vertex displacement (not fragment discard),
-            // so local_y gradient is no longer needed here.
-            uvs.extend_from_slice(&[uv, uv, uv, uv]);
-
-            // FLUID_DATA: [emission_r, emission_g, emission_b, flags]
-            for i in 0..4 {
-                let flags = wave_flags[i] * 1.0 + is_gas_flag;
-                fluid_data.push([emission[0], emission[1], emission[2], flags]);
             }
-
-            // WAVE_HEIGHT: dynamic wave displacement from wave propagation simulation.
-            // Scale from abstract wave units to world units (pixels) by tile_size,
-            // so vertex displacement in the shader matches the mesh coordinate space.
-            let wave_h = wave_heights.map(|wh| wh[idx] * tile_size).unwrap_or(0.0);
-            wave_data.extend_from_slice(&[wave_h, wave_h, wave_h, wave_h]);
-
-            // WAVE_PARAMS: per-fluid amplitude and speed multipliers from FluidDef
-            let wp = [def.wave_amplitude, def.wave_speed];
-            wave_params_data.extend_from_slice(&[wp, wp, wp, wp]);
-
-            // EDGE_FLAGS: bitmask of which sides border solid tiles or open air
-            let edge_flags =
-                compute_edge_flags(fluids, tiles, local_x, local_y, chunk_size, tile_registry);
-            edge_flags_data.extend_from_slice(&[edge_flags, edge_flags, edge_flags, edge_flags]);
-
-            indices.extend_from_slice(&[vi, vi + 1, vi + 2, vi, vi + 2, vi + 3]);
         }
     }
 
