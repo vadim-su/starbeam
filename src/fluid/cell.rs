@@ -1,4 +1,3 @@
-use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 /// Compact fluid type identifier. Index into FluidRegistry.defs.
@@ -31,12 +30,6 @@ impl FluidCell {
     pub fn is_empty(&self) -> bool {
         self.fluid_id == FluidId::NONE || self.mass <= 0.0
     }
-}
-
-/// Tracks whether an entity was in fluid last frame.
-#[derive(Component, Default)]
-pub struct FluidContactState {
-    pub last_fluid: FluidId,
 }
 
 #[cfg(test)]
