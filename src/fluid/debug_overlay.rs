@@ -432,6 +432,14 @@ pub fn draw_fluid_debug_panel(
                         egui::Slider::new(&mut sph_config.particle_mass, 0.1..=10.0)
                             .text("Particle mass"),
                     );
+                    ui.add(
+                        egui::Slider::new(&mut sph_config.eos_gamma, 1.0..=10.0)
+                            .text("EOS gamma (γ)"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut sph_config.xsph_factor, 0.0..=1.0)
+                            .text("XSPH smoothing"),
+                    );
 
                     ui.separator();
                     ui.label(egui::RichText::new("Diagnostics").underline());

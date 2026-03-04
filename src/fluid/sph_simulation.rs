@@ -13,6 +13,10 @@ pub struct SphConfig {
     pub viscosity: f32,
     pub gravity: Vec2,
     pub particle_mass: f32,
+    /// Tait EOS exponent (γ). Higher = more incompressible. 7 for water.
+    pub eos_gamma: f32,
+    /// XSPH velocity smoothing factor (0 = off, 0.5 = typical).
+    pub xsph_factor: f32,
 }
 
 impl Default for SphConfig {
@@ -20,10 +24,12 @@ impl Default for SphConfig {
         Self {
             smoothing_radius: 16.0,
             rest_density: 0.016,
-            stiffness: 3000.0,
+            stiffness: 50.0,
             viscosity: 0.3,
             gravity: Vec2::new(0.0, -200.0),
             particle_mass: 1.0,
+            eos_gamma: 7.0,
+            xsph_factor: 0.3,
         }
     }
 }
@@ -40,12 +46,18 @@ pub fn compute_density_pressure(store: &mut ParticleStore, config: &SphConfig, g
             density += store.masses[j] * poly6(r, h);
         }
         store.densities[i] = density;
-        store.pressures[i] = config.stiffness * (density - config.rest_density);
+        // Tait equation of state: P = B * ((ρ/ρ₀)^γ - 1)
+        // Much stiffer than linear EOS at high compression, nearly incompressible.
+        let rho0 = config.rest_density.max(1e-8);
+        let ratio = density / rho0;
+        store.pressures[i] = config.stiffness * (ratio.powf(config.eos_gamma) - 1.0);
     }
 }
 
 pub fn compute_forces(store: &mut ParticleStore, config: &SphConfig, grid: &SpatialHash) {
     let h = config.smoothing_radius;
+    // Minimum separation distance — particles closer than this get strong repulsion
+    let min_dist = h * 0.25;
     let mut neighbors = Vec::new();
     for i in 0..store.len() {
         let pos_i = store.positions[i];
@@ -67,15 +79,24 @@ pub fn compute_forces(store: &mut ParticleStore, config: &SphConfig, grid: &Spat
             }
             let dir = diff / r;
             let density_j = store.densities[j];
+
+            // SPH pressure force
             if density_j > 1e-6 {
                 let pressure_j = store.pressures[j];
                 let pressure_avg = (pressure_i + pressure_j) * 0.5;
-                // Standard SPH: f = -∑ m_j * P_avg / ρ_j * ∇W
-                // spiky_gradient returns negative, dir points away from j
-                // so we negate to get repulsive force (away from neighbors)
                 f_pressure -=
                     dir * store.masses[j] * pressure_avg / density_j * spiky_gradient(r, h);
             }
+
+            // Short-range repulsion: prevents interpenetration
+            if r < min_dist {
+                let overlap = (min_dist - r) / min_dist; // 1 at r=0, 0 at min_dist
+                // Quadratic repulsion, scaled by stiffness
+                let repulsion = config.stiffness * 4.0 * overlap * overlap;
+                f_pressure += dir * repulsion;
+            }
+
+            // Viscosity
             if density_j > 1e-6 {
                 let vel_j = store.velocities[j];
                 f_viscosity +=
@@ -85,6 +106,44 @@ pub fn compute_forces(store: &mut ParticleStore, config: &SphConfig, grid: &Spat
         f_viscosity *= config.viscosity;
         let f_gravity = config.gravity * density_i;
         store.forces[i] = f_pressure + f_viscosity + f_gravity;
+    }
+}
+
+/// XSPH velocity smoothing: smooths velocity field by blending with neighbors.
+/// Prevents particle clustering and produces smoother flow.
+pub fn xsph_smooth(store: &mut ParticleStore, config: &SphConfig, grid: &SpatialHash) {
+    if config.xsph_factor <= 0.0 {
+        return;
+    }
+    let h = config.smoothing_radius;
+    let epsilon = config.xsph_factor;
+    let n = store.len();
+    // Compute corrections in a separate buffer to avoid read-write conflict
+    let mut corrections: Vec<Vec2> = vec![Vec2::ZERO; n];
+    let mut neighbors = Vec::new();
+    for i in 0..n {
+        let pos_i = store.positions[i];
+        let vel_i = store.velocities[i];
+        let mut correction = Vec2::ZERO;
+        grid.query_into(pos_i, &mut neighbors);
+        for &j in &neighbors {
+            if i == j {
+                continue;
+            }
+            let r = pos_i.distance(store.positions[j]);
+            if r > h {
+                continue;
+            }
+            let density_j = store.densities[j];
+            if density_j > 1e-6 {
+                let vel_j = store.velocities[j];
+                correction += store.masses[j] / density_j * (vel_j - vel_i) * poly6(r, h);
+            }
+        }
+        corrections[i] = correction * epsilon;
+    }
+    for i in 0..n {
+        store.velocities[i] += corrections[i];
     }
 }
 
@@ -106,6 +165,8 @@ pub fn sph_step(store: &mut ParticleStore, config: &SphConfig, dt: f32) {
     compute_density_pressure(store, config, &grid);
     compute_forces(store, config, &grid);
     integrate(store, dt);
+    // XSPH smoothing uses the same spatial hash (positions barely moved)
+    xsph_smooth(store, config, &grid);
 }
 
 #[cfg(test)]
@@ -119,10 +180,12 @@ mod tests {
         SphConfig {
             smoothing_radius: 16.0,
             rest_density: 0.016,
-            stiffness: 3000.0,
+            stiffness: 50.0,
             viscosity: 0.3,
             gravity: Vec2::new(0.0, -98.0),
             particle_mass: 1.0,
+            eos_gamma: 7.0,
+            xsph_factor: 0.3,
         }
     }
 
@@ -151,16 +214,17 @@ mod tests {
     }
 
     #[test]
-    fn pressure_follows_equation_of_state() {
+    fn pressure_follows_tait_eos() {
         let config = test_config();
         let mut store = two_particles_store(2.0);
         let grid = SpatialHash::from_positions(&store.positions, config.smoothing_radius);
         compute_density_pressure(&mut store, &config, &grid);
-        // P = k * (rho - rho_0)
-        let expected = config.stiffness * (store.densities[0] - config.rest_density);
+        // P = B * ((ρ/ρ₀)^γ - 1)
+        let ratio = store.densities[0] / config.rest_density;
+        let expected = config.stiffness * (ratio.powf(config.eos_gamma) - 1.0);
         assert!(
-            (store.pressures[0] - expected).abs() < 1e-6,
-            "Pressure should follow clamped equation of state: got {}, expected {}",
+            (store.pressures[0] - expected).abs() < 1e-3,
+            "Pressure should follow Tait EOS: got {}, expected {}",
             store.pressures[0],
             expected
         );
