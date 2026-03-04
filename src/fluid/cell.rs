@@ -16,16 +16,24 @@ pub struct FluidCell {
     pub fluid_id: FluidId,
     /// Mass of fluid in this cell. 0.0 = empty, 1.0 = full, >1.0 = pressurized.
     pub mass: f32,
+    /// Previous tick mass, used for visual interpolation between CA steps.
+    #[serde(default)]
+    pub prev_mass: f32,
 }
 
 impl FluidCell {
     pub const EMPTY: FluidCell = FluidCell {
         fluid_id: FluidId::NONE,
         mass: 0.0,
+        prev_mass: 0.0,
     };
 
     pub fn new(fluid_id: FluidId, mass: f32) -> Self {
-        Self { fluid_id, mass }
+        Self {
+            fluid_id,
+            mass,
+            prev_mass: mass,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -75,5 +83,6 @@ mod tests {
         let deserialized: FluidCell = ron::from_str(&serialized).unwrap();
         assert_eq!(deserialized.fluid_id, FluidId(2));
         assert!((deserialized.mass - 1.5).abs() < f32::EPSILON);
+        assert!((deserialized.prev_mass - 1.5).abs() < f32::EPSILON);
     }
 }

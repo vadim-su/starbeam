@@ -5,7 +5,23 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::cosmos::persistence::{DirtyChunks, Universe};
-use crate::fluid::FluidCell;
+use bevy::ecs::system::SystemParam;
+use crate::fluid::cell::FluidCell;
+use crate::fluid::material::SharedFluidMaterial;
+use crate::fluid::registry::FluidRegistry;
+use crate::fluid::render::{build_fluid_mesh, FluidChunkMarker, FluidMeshBuffers};
+use crate::fluid::simulation::{FluidSimConfig, FluidSimState, sim_interpolation_frac};
+
+/// Bundled fluid resources for chunk spawning, kept as a SystemParam to
+/// avoid exceeding Bevy's 16-parameter limit on systems.
+#[derive(SystemParam)]
+pub struct ChunkFluidCtx<'w> {
+    pub fluid_material: Option<Res<'w, SharedFluidMaterial>>,
+    pub fluid_registry: Option<Res<'w, FluidRegistry>>,
+    pub fluid_buffers: ResMut<'w, FluidMeshBuffers>,
+    pub sim_state: Res<'w, FluidSimState>,
+    pub sim_config: Res<'w, FluidSimConfig>,
+}
 use crate::item::DroppedItem;
 use crate::object::definition::ObjectId;
 use crate::object::placed::{OccupancyRef, PlacedObject};
@@ -43,6 +59,7 @@ pub struct ChunkLayer(pub Layer);
 pub struct ChunkEntities {
     pub fg: Entity,
     pub bg: Entity,
+    pub fluid: Entity,
 }
 
 /// Identifies which tile layer to operate on.
@@ -416,6 +433,11 @@ pub fn spawn_chunk(
     atlas: &TileAtlas,
     material: &SharedTileMaterial,
     buffers: &mut MeshBuildBuffers,
+    fluid_material: Option<&SharedFluidMaterial>,
+    fluid_registry: Option<&FluidRegistry>,
+    fluid_buffers: &mut FluidMeshBuffers,
+    fluid_sim_state: &FluidSimState,
+    fluid_sim_config: &FluidSimConfig,
     display_chunk_x: i32,
     chunk_y: i32,
 ) {
@@ -469,6 +491,27 @@ pub fn spawn_chunk(
     );
     let fg_handle = meshes.add(fg_mesh);
 
+    // Build fluid mesh (between bg and fg at z=-0.5)
+    let sim_frac = sim_interpolation_frac(fluid_sim_state, fluid_sim_config);
+    let fluid_mesh_handle = if let Some(fr) = fluid_registry {
+        let fluid_mesh = build_fluid_mesh(
+            &chunk_data.fluids,
+            display_chunk_x,
+            chunk_y,
+            ctx.config.chunk_size,
+            ctx.config.tile_size,
+            sim_frac,
+            fr,
+            fluid_buffers,
+        );
+        meshes.add(fluid_mesh)
+    } else {
+        meshes.add(Mesh::new(
+            bevy::mesh::PrimitiveTopology::TriangleList,
+            bevy::asset::RenderAssetUsages::default(),
+        ))
+    };
+
     // Spawn bg entity (z=-1.0, behind foreground)
     let bg_entity = commands
         .spawn((
@@ -499,11 +542,42 @@ pub fn spawn_chunk(
         ))
         .id();
 
+    // Spawn fluid entity (z=-0.5, between bg and fg)
+    let fluid_entity = if let Some(fm) = fluid_material {
+        commands
+            .spawn((
+                ChunkCoord {
+                    x: display_chunk_x,
+                    y: chunk_y,
+                },
+                FluidChunkMarker,
+                Mesh2d(fluid_mesh_handle),
+                MeshMaterial2d(fm.0.clone()),
+                Transform::from_translation(Vec3::new(0.0, 0.0, -0.5)),
+                Visibility::default(),
+            ))
+            .id()
+    } else {
+        // Spawn a placeholder entity so ChunkEntities always has a valid fluid entity
+        commands
+            .spawn((
+                ChunkCoord {
+                    x: display_chunk_x,
+                    y: chunk_y,
+                },
+                FluidChunkMarker,
+                Transform::from_translation(Vec3::new(0.0, 0.0, -0.5)),
+                Visibility::Hidden,
+            ))
+            .id()
+    };
+
     loaded_chunks.map.insert(
         (display_chunk_x, chunk_y),
         ChunkEntities {
             fg: fg_entity,
             bg: bg_entity,
+            fluid: fluid_entity,
         },
     );
 }
@@ -517,6 +591,7 @@ pub fn despawn_chunk(
     if let Some(entities) = loaded_chunks.map.remove(&(chunk_x, chunk_y)) {
         commands.entity(entities.fg).despawn();
         commands.entity(entities.bg).despawn();
+        commands.entity(entities.fluid).despawn();
     }
 }
 
@@ -587,6 +662,7 @@ pub fn chunk_loading_system(
     quad: Option<Res<SharedLitQuad>>,
     mut lit_materials: ResMut<Assets<LitSpriteMaterial>>,
     object_entities: Query<(Entity, &ObjectDisplayChunk)>,
+    mut fluid_ctx: ChunkFluidCtx,
 ) {
     let Ok(camera_transform) = camera_query.single() else {
         return;
@@ -633,6 +709,11 @@ pub fn chunk_loading_system(
                 &atlas,
                 &material,
                 &mut buffers,
+                fluid_ctx.fluid_material.as_deref(),
+                fluid_ctx.fluid_registry.as_deref(),
+                &mut fluid_ctx.fluid_buffers,
+                &fluid_ctx.sim_state,
+                &fluid_ctx.sim_config,
                 display_cx,
                 cy,
             );
