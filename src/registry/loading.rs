@@ -19,6 +19,7 @@ use super::tile::TileRegistry;
 use super::world::WorldConfig;
 use super::{AppState, BiomeParallaxConfigs, RegistryHandles};
 
+use crate::fluid::{FluidRegistry, FluidRegistryAsset};
 use crate::parallax::config::ParallaxConfig;
 use crate::world::atlas::{build_combined_atlas, AtlasParams, TileAtlas};
 use crate::world::autotile::{AutotileEntry, AutotileRegistry};
@@ -32,6 +33,7 @@ pub(crate) struct LoadingAssets {
     tiles: Handle<TileRegistryAsset>,
     player: Handle<PlayerDefAsset>,
     world_config: Handle<WorldConfigAsset>,
+    fluids: Handle<FluidRegistryAsset>,
 }
 
 /// Intermediate resource holding autotile asset handles during loading.
@@ -53,10 +55,12 @@ pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServe
     let tiles = asset_server.load::<TileRegistryAsset>("world/tiles.registry.ron");
     let player = asset_server.load::<PlayerDefAsset>("characters/adventurer/adventurer.def.ron");
     let world_config = asset_server.load::<WorldConfigAsset>("world/world.config.ron");
+    let fluids = asset_server.load::<FluidRegistryAsset>("world/fluids.fluids.ron");
     commands.insert_resource(LoadingAssets {
         tiles,
         player,
         world_config,
+        fluids,
     });
 }
 
@@ -67,12 +71,14 @@ pub(crate) fn check_loading(
     tile_assets: Res<Assets<TileRegistryAsset>>,
     player_assets: Res<Assets<PlayerDefAsset>>,
     world_assets: Res<Assets<WorldConfigAsset>>,
+    fluid_assets: Res<Assets<FluidRegistryAsset>>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
-    let (Some(tiles), Some(player), Some(world_cfg)) = (
+    let (Some(tiles), Some(player), Some(world_cfg), Some(fluids)) = (
         tile_assets.get(&loading.tiles),
         player_assets.get(&loading.player),
         world_assets.get(&loading.world_config),
+        fluid_assets.get(&loading.fluids),
     ) else {
         return; // not loaded yet
     };
@@ -80,6 +86,7 @@ pub(crate) fn check_loading(
     // Build resources from loaded assets
     let registry_ref = TileRegistry::from_defs(tiles.tiles.clone());
     commands.insert_resource(registry_ref);
+    commands.insert_resource(FluidRegistry::from_defs(fluids.fluids.clone()));
     commands.insert_resource(PlayerConfig {
         speed: player.speed,
         jump_velocity: player.jump_velocity,

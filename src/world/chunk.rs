@@ -3,6 +3,7 @@ use std::collections::HashSet;
 
 use bevy::prelude::*;
 
+use crate::fluid::FluidCell;
 use crate::registry::tile::{TileId, TileRegistry};
 use crate::registry::world::WorldConfig;
 use crate::world::atlas::TileAtlas;
@@ -70,6 +71,9 @@ pub struct ChunkData {
     pub bg: TileLayer,
     #[allow(dead_code)] // Reserved for future block-damage system
     pub damage: Vec<u8>,
+    #[allow(dead_code)] // Used by fluid simulation system (Phase 2)
+    /// Per-tile fluid state (type + level). Only meaningful where fg tile is AIR.
+    pub fluid: Vec<FluidCell>,
 }
 
 impl ChunkData {
@@ -127,6 +131,7 @@ impl WorldMap {
                     bitmasks: vec![0; len],
                 },
                 damage: vec![0; len],
+                fluid: vec![FluidCell::default(); len],
             }
         })
     }
@@ -204,6 +209,45 @@ impl WorldMap {
     pub fn is_solid(&self, tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> bool {
         self.get_tile(tile_x, tile_y, Layer::Fg, ctx)
             .is_some_and(|tile| ctx.tile_registry.is_solid(tile))
+    }
+
+    #[allow(dead_code)] // Used by fluid simulation system (Phase 2)
+    /// Read-only: returns fluid cell if chunk is loaded, None otherwise.
+    pub fn get_fluid(
+        &self,
+        tile_x: i32,
+        tile_y: i32,
+        ctx: &WorldCtxRef,
+    ) -> Option<FluidCell> {
+        if tile_y < 0 || tile_y >= ctx.config.height_tiles {
+            return Some(FluidCell::default());
+        }
+        let wrapped_x = ctx.config.wrap_tile_x(tile_x);
+        let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, ctx.config.chunk_size);
+        let (lx, ly) = tile_to_local(wrapped_x, tile_y, ctx.config.chunk_size);
+        self.chunks
+            .get(&(cx, cy))
+            .map(|chunk| chunk.fluid[(ly * ctx.config.chunk_size + lx) as usize])
+    }
+
+    #[allow(dead_code)] // Used by fluid simulation system (Phase 2)
+    /// Set fluid cell at a world position. Lazily generates the chunk if needed.
+    pub fn set_fluid(
+        &mut self,
+        tile_x: i32,
+        tile_y: i32,
+        cell: FluidCell,
+        ctx: &WorldCtxRef,
+    ) {
+        if tile_y < 0 || tile_y >= ctx.config.height_tiles {
+            return;
+        }
+        let wrapped_x = ctx.config.wrap_tile_x(tile_x);
+        let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, ctx.config.chunk_size);
+        let (lx, ly) = tile_to_local(wrapped_x, tile_y, ctx.config.chunk_size);
+        self.get_or_generate_chunk(cx, cy, ctx);
+        let idx = (ly * ctx.config.chunk_size + lx) as usize;
+        self.chunks.get_mut(&(cx, cy)).unwrap().fluid[idx] = cell;
     }
 }
 

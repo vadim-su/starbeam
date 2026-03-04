@@ -1,0 +1,24 @@
+(
+    fluids: [
+        (
+            id: "water",
+            viscosity: 1.0,
+            density: 1.0,
+            color: (64, 128, 255),
+            light_opacity: 2,
+            damage_on_contact: 0.0,
+            flow_rate: 6,
+            light_emission: (0, 0, 0),
+        ),
+        (
+            id: "lava",
+            viscosity: 4.0,
+            density: 3.0,
+            color: (255, 100, 20),
+            light_opacity: 0,
+            damage_on_contact: 40.0,
+            flow_rate: 2,
+            light_emission: (200, 100, 20),
+        ),
+    ]
+)

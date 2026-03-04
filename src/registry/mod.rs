@@ -15,6 +15,7 @@ use assets::{
     AutotileAsset, BiomeAsset, ParallaxConfigAsset, PlanetTypeAsset, PlayerDefAsset,
     TileRegistryAsset, WorldConfigAsset,
 };
+use crate::fluid::FluidRegistryAsset;
 use biome::BiomeId;
 use hot_reload::{
     hot_reload_biome_parallax, hot_reload_biomes, hot_reload_planet_type, hot_reload_player,
@@ -69,8 +70,10 @@ impl Plugin for RegistryPlugin {
             .register_asset_loader(RonLoader::<AutotileAsset>::new(&["autotile.ron"]))
             .init_asset::<PlanetTypeAsset>()
             .init_asset::<BiomeAsset>()
+            .init_asset::<FluidRegistryAsset>()
             .register_asset_loader(RonLoader::<PlanetTypeAsset>::new(&["planet.ron"]))
             .register_asset_loader(RonLoader::<BiomeAsset>::new(&["biome.ron"]))
+            .register_asset_loader(RonLoader::<FluidRegistryAsset>::new(&["fluids.ron"]))
             .add_systems(Startup, start_loading)
             .add_systems(Update, check_loading.run_if(in_state(AppState::Loading)))
             .add_systems(

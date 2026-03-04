@@ -1,5 +1,6 @@
 mod camera;
 pub mod crafting;
+pub mod fluid;
 mod interaction;
 pub mod inventory;
 pub mod item;
@@ -45,6 +46,7 @@ fn main() {
         .add_plugins(item::ItemPlugin)
         .add_plugins(inventory::InventoryPlugin)
         .add_plugins(crafting::CraftingPlugin)
+        .add_plugins(fluid::FluidPlugin)
         .configure_sets(
             Update,
             (
