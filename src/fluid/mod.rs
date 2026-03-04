@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy::sprite_render::Material2dPlugin;
 
 pub mod cell;
+pub mod debug_tool;
 pub mod material;
 pub mod reactions;
 pub mod registry;
@@ -27,9 +28,19 @@ impl Plugin for FluidPlugin {
             .init_resource::<FluidSimState>()
             .init_resource::<DirtyFluidChunks>()
             .init_resource::<FluidMeshBuffers>()
+            .init_resource::<debug_tool::FluidDebugTool>()
             .add_systems(
                 OnEnter(AppState::InGame),
                 render::init_fluid_material,
+            )
+            .add_systems(
+                Update,
+                (
+                    debug_tool::toggle_fluid_tool,
+                    debug_tool::cycle_fluid_type,
+                    debug_tool::pour_fluid,
+                )
+                    .in_set(GameSet::Input),
             )
             .add_systems(
                 Update,
