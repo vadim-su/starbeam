@@ -1,6 +1,10 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
+use crate::fluid::active::ActiveFluids;
+use crate::fluid::cell::FluidCell;
+use crate::fluid::displacement::displace_fluid;
+use crate::fluid::simulation::wake_adjacent_fluids;
 use crate::inventory::{Hotbar, Inventory};
 use crate::item::{calculate_drops, DroppedItem, DroppedItemPhysics, ItemRegistry, SpawnParams};
 use crate::player::Player;
@@ -23,6 +27,7 @@ pub fn block_interaction_system(
     mut world_map: ResMut<WorldMap>,
     loaded_chunks: Res<LoadedChunks>,
     item_registry: Res<ItemRegistry>,
+    mut active_fluids: ResMut<ActiveFluids>,
 ) {
     let left_click = mouse.just_pressed(MouseButton::Left);
     let right_click = mouse.just_pressed(MouseButton::Right);
@@ -89,6 +94,8 @@ pub fn block_interaction_system(
                     Transform::from_translation(tile_center.extend(1.0)),
                 ));
             }
+            // Wake adjacent fluid tiles — fluid may flow into opened space
+            wake_adjacent_fluids(tile_x, tile_y, &mut active_fluids, &world_map, &ctx_ref);
         } else {
             // Place fg tile from left hand of active hotbar slot
             let has_neighbor = [(-1, 0), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
@@ -115,8 +122,26 @@ pub fn block_interaction_system(
                 return;
             }
 
+            // Save and displace existing fluid before placing block
+            let existing_fluid = world_map
+                .get_fluid(tile_x, tile_y, &ctx_ref)
+                .unwrap_or_default();
+
             world_map.set_tile(tile_x, tile_y, Layer::Fg, place_id, &ctx_ref);
+            world_map.set_fluid(tile_x, tile_y, FluidCell::default(), &ctx_ref);
             inventory.remove_item(item_id, 1);
+
+            if !existing_fluid.is_empty() {
+                displace_fluid(
+                    tile_x,
+                    tile_y,
+                    existing_fluid,
+                    &mut world_map,
+                    &mut active_fluids,
+                    &ctx_ref,
+                );
+            }
+            wake_adjacent_fluids(tile_x, tile_y, &mut active_fluids, &world_map, &ctx_ref);
         }
     } else if right_click {
         // Background layer interaction
