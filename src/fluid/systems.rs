@@ -13,6 +13,9 @@ use bevy::sprite_render::{AlphaMode2d, Material2d, Material2dKey, MeshMaterial2d
 use crate::fluid::cell::FluidCell;
 use crate::fluid::events::{FluidReactionEvent, ImpactKind, WaterImpactEvent};
 use crate::fluid::fluid_world::FluidWorld;
+use crate::fluid::sph_collision::{enforce_world_bounds, resolve_tile_collision};
+use crate::fluid::sph_particle::ParticleStore;
+use crate::fluid::sph_simulation::{sph_step, SphConfig};
 use crate::fluid::reactions::{
     execute_fluid_reactions_global, resolve_density_displacement_global, FluidReactionRegistry,
 };
@@ -641,4 +644,64 @@ pub fn wave_simulation(
     wave_state
         .buffers
         .retain(|_, buf| !buf.is_calm(wave_config.epsilon));
+}
+
+/// SPH particle-based fluid simulation system.
+/// Runs alongside the existing CA system. Particles are simulated with SPH
+/// physics and collided against the tile world.
+pub fn sph_fluid_simulation(
+    _time: Res<Time>,
+    sph_config: Res<SphConfig>,
+    _accumulator: ResMut<FluidTickAccumulator>,
+    mut particles: ResMut<ParticleStore>,
+    world_map: Res<WorldMap>,
+    active_world: Res<ActiveWorld>,
+) {
+    if particles.is_empty() {
+        return;
+    }
+
+    let dt = 1.0 / 60.0;
+
+    sph_step(&mut particles, &sph_config, dt);
+
+    // Tile collisions
+    let tile_size = active_world.tile_size;
+    let chunk_size = active_world.chunk_size;
+    let width_chunks = active_world.width_chunks();
+    let world_width = width_chunks as f32 * chunk_size as f32 * tile_size;
+    let world_height = active_world.height_chunks() as f32 * chunk_size as f32 * tile_size;
+
+    let is_solid = |gx: i32, gy: i32| -> bool {
+        let cx = gx.div_euclid(chunk_size as i32);
+        let cy = gy.div_euclid(chunk_size as i32);
+        let lx = gx.rem_euclid(chunk_size as i32) as u32;
+        let ly = gy.rem_euclid(chunk_size as i32) as u32;
+        let data_cx = cx.rem_euclid(width_chunks);
+        world_map
+            .chunks
+            .get(&(data_cx, cy))
+            .map_or(true, |chunk| {
+                let idx = (ly * chunk_size + lx) as usize;
+                chunk
+                    .fg
+                    .tiles
+                    .get(idx)
+                    .map_or(true, |t| *t != crate::registry::tile::TileId::AIR)
+            })
+    };
+
+    let particles = &mut *particles;
+    let (positions, velocities) = (&mut particles.positions, &mut particles.velocities);
+    for i in 0..positions.len() {
+        resolve_tile_collision(&mut positions[i], &mut velocities[i], tile_size, &is_solid, 0.2);
+        enforce_world_bounds(
+            &mut positions[i],
+            &mut velocities[i],
+            0.0,
+            world_width,
+            0.0,
+            world_height,
+        );
+    }
 }

@@ -48,6 +48,8 @@ impl Plugin for FluidPlugin {
             .init_resource::<splash::SplashConfig>()
             .init_resource::<detectors::SwimThrottle>()
             .init_resource::<debug_overlay::FluidDebugState>()
+            .init_resource::<sph_particle::ParticleStore>()
+            .init_resource::<sph_simulation::SphConfig>()
             .add_systems(Startup, systems::init_fluid_material)
             .add_systems(
                 Update,
@@ -56,6 +58,7 @@ impl Plugin for FluidPlugin {
                     detectors::detect_entity_swimming,
                     detectors::detect_projectile_in_fluid,
                     systems::fluid_simulation,
+                    systems::sph_fluid_simulation,
                     systems::wave_consume_events,
                     systems::wave_simulation,
                     splash::spawn_splash_particles,
