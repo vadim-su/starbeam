@@ -149,6 +149,9 @@ pub fn update_fluid_time(
 
 /// SPH particle-based fluid simulation system.
 /// Particles are simulated with SPH physics and collided against the tile world.
+/// How many frames to skip between reaction checks.
+const REACTION_COOLDOWN_FRAMES: u32 = 10;
+
 pub fn sph_fluid_simulation(
     _time: Res<Time>,
     sph_config: Res<SphConfig>,
@@ -158,6 +161,7 @@ pub fn sph_fluid_simulation(
     active_world: Res<ActiveWorld>,
     reaction_registry: Option<Res<FluidReactionRegistry>>,
     mut reaction_events: MessageWriter<FluidReactionEvent>,
+    mut reaction_frame_counter: Local<u32>,
 ) {
     if particles.is_empty() {
         return;
@@ -207,16 +211,19 @@ pub fn sph_fluid_simulation(
         );
     }
 
-    // SPH particle reactions
-    if let Some(rr) = reaction_registry {
-        let (events, to_remove) =
-            execute_sph_particle_reactions(&particles, sph_config.smoothing_radius, &rr);
-        for evt in events {
-            reaction_events.write(evt);
-        }
-        // Remove consumed particles in descending index order
-        for idx in to_remove {
-            particles.remove_swap(idx);
+    // SPH particle reactions (only every N frames to avoid redundant spatial hash builds)
+    *reaction_frame_counter = reaction_frame_counter.wrapping_add(1);
+    if *reaction_frame_counter % REACTION_COOLDOWN_FRAMES == 0 {
+        if let Some(rr) = reaction_registry {
+            let (events, to_remove) =
+                execute_sph_particle_reactions(&particles, sph_config.smoothing_radius, &rr);
+            for evt in events {
+                reaction_events.write(evt);
+            }
+            // Remove consumed particles in descending index order
+            for idx in to_remove {
+                particles.remove_swap(idx);
+            }
         }
     }
 }
@@ -237,14 +244,22 @@ pub fn fluid_rebuild_meshes(
     particles: Res<ParticleStore>,
     sph_config: Res<SphConfig>,
     debug_state: Option<Res<crate::fluid::debug_overlay::FluidDebugState>>,
+    mut last_generation: Local<u64>,
 ) {
     if particles.is_empty() {
         // Remove all existing fluid mesh entities when no particles
         for (entity, _) in &existing_fluid_meshes {
             commands.entity(entity).despawn();
         }
+        *last_generation = 0;
         return;
     }
+
+    // Skip rebuild if particles haven't changed since last frame
+    if particles.generation == *last_generation {
+        return;
+    }
+    *last_generation = particles.generation;
 
     let chunk_size = active_world.chunk_size;
     let tile_size = active_world.tile_size;

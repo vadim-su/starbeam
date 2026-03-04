@@ -20,9 +20,12 @@ pub fn build_particle_mesh(
     particle_radius: f32,
     registry: &FluidRegistry,
 ) -> Option<Mesh> {
-    let mut positions: Vec<[f32; 3]> = Vec::new();
-    let mut colors: Vec<[f32; 4]> = Vec::new();
-    let mut uvs: Vec<[f32; 2]> = Vec::new();
+    // Pre-allocate assuming ~25% of particles fall in this chunk region.
+    // Each particle produces 6 vertices (2 triangles).
+    let estimated_verts = (particles.len() / 4).max(64) * 6;
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(estimated_verts);
+    let mut colors: Vec<[f32; 4]> = Vec::with_capacity(estimated_verts);
+    let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(estimated_verts);
 
     let margin = particle_radius * 2.0;
     let min = chunk_world_min - Vec2::splat(margin);

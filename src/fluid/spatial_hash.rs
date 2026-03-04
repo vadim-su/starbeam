@@ -37,8 +37,16 @@ impl SpatialHash {
     }
 
     pub fn query(&self, pos: Vec2) -> Vec<usize> {
-        let (cx, cy) = self.cell_coord(pos);
         let mut result = Vec::new();
+        self.query_into(pos, &mut result);
+        result
+    }
+
+    /// Query neighbors into a reusable buffer, avoiding allocation on each call.
+    /// The buffer is cleared before use.
+    pub fn query_into(&self, pos: Vec2, result: &mut Vec<usize>) {
+        result.clear();
+        let (cx, cy) = self.cell_coord(pos);
         for dx in -1..=1 {
             for dy in -1..=1 {
                 if let Some(indices) = self.cells.get(&(cx + dx, cy + dy)) {
@@ -46,7 +54,6 @@ impl SpatialHash {
                 }
             }
         }
-        result
     }
 
     pub fn cell(&self, cx: i32, cy: i32) -> &[usize] {

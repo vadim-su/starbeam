@@ -28,13 +28,14 @@ impl Default for SphConfig {
     }
 }
 
-pub fn compute_density_pressure(store: &mut ParticleStore, config: &SphConfig) {
+pub fn compute_density_pressure(store: &mut ParticleStore, config: &SphConfig, grid: &SpatialHash) {
     let h = config.smoothing_radius;
-    let grid = SpatialHash::from_positions(&store.positions, h);
+    let mut neighbors = Vec::new();
     for i in 0..store.len() {
         let pos_i = store.positions[i];
         let mut density = 0.0f32;
-        for &j in &grid.query(pos_i) {
+        grid.query_into(pos_i, &mut neighbors);
+        for &j in &neighbors {
             let r = pos_i.distance(store.positions[j]);
             density += store.masses[j] * poly6(r, h);
         }
@@ -43,9 +44,9 @@ pub fn compute_density_pressure(store: &mut ParticleStore, config: &SphConfig) {
     }
 }
 
-pub fn compute_forces(store: &mut ParticleStore, config: &SphConfig) {
+pub fn compute_forces(store: &mut ParticleStore, config: &SphConfig, grid: &SpatialHash) {
     let h = config.smoothing_radius;
-    let grid = SpatialHash::from_positions(&store.positions, h);
+    let mut neighbors = Vec::new();
     for i in 0..store.len() {
         let pos_i = store.positions[i];
         let vel_i = store.velocities[i];
@@ -53,7 +54,8 @@ pub fn compute_forces(store: &mut ParticleStore, config: &SphConfig) {
         let density_i = store.densities[i];
         let mut f_pressure = Vec2::ZERO;
         let mut f_viscosity = Vec2::ZERO;
-        for &j in &grid.query(pos_i) {
+        grid.query_into(pos_i, &mut neighbors);
+        for &j in &neighbors {
             if i == j {
                 continue;
             }
@@ -90,14 +92,16 @@ pub fn integrate(store: &mut ParticleStore, dt: f32) {
         store.velocities[i] += acceleration * dt;
         store.positions[i] += store.velocities[i] * dt;
     }
+    store.mark_changed();
 }
 
 pub fn sph_step(store: &mut ParticleStore, config: &SphConfig, dt: f32) {
     if store.is_empty() {
         return;
     }
-    compute_density_pressure(store, config);
-    compute_forces(store, config);
+    let grid = SpatialHash::from_positions(&store.positions, config.smoothing_radius);
+    compute_density_pressure(store, config, &grid);
+    compute_forces(store, config, &grid);
     integrate(store, dt);
 }
 
@@ -131,8 +135,10 @@ mod tests {
         let config = test_config();
         let mut close = two_particles_store(4.0);
         let mut far = two_particles_store(12.0);
-        compute_density_pressure(&mut close, &config);
-        compute_density_pressure(&mut far, &config);
+        let grid_close = SpatialHash::from_positions(&close.positions, config.smoothing_radius);
+        let grid_far = SpatialHash::from_positions(&far.positions, config.smoothing_radius);
+        compute_density_pressure(&mut close, &config, &grid_close);
+        compute_density_pressure(&mut far, &config, &grid_far);
         assert!(
             close.densities[0] > far.densities[0],
             "Closer particles should have higher density: {} vs {}",
@@ -145,7 +151,8 @@ mod tests {
     fn pressure_follows_equation_of_state() {
         let config = test_config();
         let mut store = two_particles_store(2.0);
-        compute_density_pressure(&mut store, &config);
+        let grid = SpatialHash::from_positions(&store.positions, config.smoothing_radius);
+        compute_density_pressure(&mut store, &config, &grid);
         // P = k * (rho - rho_0)
         let expected = config.stiffness * (store.densities[0] - config.rest_density);
         assert!(
@@ -161,8 +168,9 @@ mod tests {
         let config = test_config();
         let mut store = ParticleStore::new();
         store.add(Particle::new(Vec2::new(0.0, 100.0), FluidId(1), 1.0));
-        compute_density_pressure(&mut store, &config);
-        compute_forces(&mut store, &config);
+        let grid = SpatialHash::from_positions(&store.positions, config.smoothing_radius);
+        compute_density_pressure(&mut store, &config, &grid);
+        compute_forces(&mut store, &config, &grid);
         assert!(store.forces[0].y < 0.0, "Gravity should pull down");
     }
 
@@ -170,8 +178,9 @@ mod tests {
     fn pressure_pushes_apart() {
         let config = test_config();
         let mut store = two_particles_store(4.0);
-        compute_density_pressure(&mut store, &config);
-        compute_forces(&mut store, &config);
+        let grid = SpatialHash::from_positions(&store.positions, config.smoothing_radius);
+        compute_density_pressure(&mut store, &config, &grid);
+        compute_forces(&mut store, &config, &grid);
         // Particle 0 at x=0 pushed left, particle 1 at x=4 pushed right
         assert!(
             store.forces[0].x < 0.0,
@@ -190,8 +199,9 @@ mod tests {
         let config = test_config();
         let mut store = ParticleStore::new();
         store.add(Particle::new(Vec2::new(0.0, 100.0), FluidId(1), 1.0));
-        compute_density_pressure(&mut store, &config);
-        compute_forces(&mut store, &config);
+        let grid = SpatialHash::from_positions(&store.positions, config.smoothing_radius);
+        compute_density_pressure(&mut store, &config, &grid);
+        compute_forces(&mut store, &config, &grid);
         integrate(&mut store, 1.0 / 60.0);
         assert!(store.positions[0].y < 100.0, "Particle should fall");
         assert!(store.velocities[0].y < 0.0, "Velocity should be downward");

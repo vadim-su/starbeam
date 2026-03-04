@@ -24,6 +24,9 @@ pub struct ParticleStore {
     pub forces: Vec<Vec2>,
     pub fluid_ids: Vec<FluidId>,
     pub masses: Vec<f32>,
+    /// Monotonically increasing counter that increments on any mutation.
+    /// Used to skip expensive rebuilds (e.g. mesh) when nothing changed.
+    pub generation: u64,
 }
 
 impl ParticleStore {
@@ -38,6 +41,7 @@ impl ParticleStore {
             forces: Vec::with_capacity(cap),
             fluid_ids: Vec::with_capacity(cap),
             masses: Vec::with_capacity(cap),
+            generation: 0,
         }
     }
 
@@ -52,6 +56,7 @@ impl ParticleStore {
         self.forces.push(Vec2::ZERO);
         self.fluid_ids.push(p.fluid_id);
         self.masses.push(p.mass);
+        self.generation = self.generation.wrapping_add(1);
     }
 
     pub fn remove_swap(&mut self, index: usize) {
@@ -62,6 +67,7 @@ impl ParticleStore {
         self.forces.swap_remove(index);
         self.fluid_ids.swap_remove(index);
         self.masses.swap_remove(index);
+        self.generation = self.generation.wrapping_add(1);
     }
 
     pub fn clear(&mut self) {
@@ -72,6 +78,12 @@ impl ParticleStore {
         self.forces.clear();
         self.fluid_ids.clear();
         self.masses.clear();
+        self.generation = self.generation.wrapping_add(1);
+    }
+
+    /// Bump generation counter after external mutation (e.g. physics step modifying positions).
+    pub fn mark_changed(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
     }
 }
 
