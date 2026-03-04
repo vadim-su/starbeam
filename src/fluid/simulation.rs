@@ -24,7 +24,7 @@ impl Default for FluidSimConfig {
     fn default() -> Self {
         Self {
             sim_rate: 15.0,
-            min_mass: 0.001,
+            min_mass: 0.01,
             flow_speed: 1.0,
             max_steps_per_frame: 4,
         }

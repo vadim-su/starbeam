@@ -59,7 +59,7 @@ pub fn build_fluid_mesh(
 
             // Interpolate between previous and current mass for smooth visuals
             let visual_mass = cell.prev_mass + (cell.mass - cell.prev_mass) * sim_frac;
-            if visual_mass < 0.001 {
+            if visual_mass < 0.02 {
                 continue;
             }
 
