@@ -107,10 +107,6 @@ fn vertex(in: VertexInput) -> VertexOutput {
 // Fragment shader
 // ------------------------------------------------------------------ //
 
-// DEBUG: visualize chunk boundaries.
-// chunk_size=32, tile_size=8 → chunk world size = 256 units.
-// Each chunk gets a different shade so boundaries are clearly visible.
-// Set to true to enable.
 const DEBUG_CHUNK_BOUNDARIES: bool = false;
 
 @fragment
@@ -123,11 +119,14 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let emission   = in.fluid_data.xyz;
     let amp        = in.wave_params.x;
     let speed      = in.wave_params.y;
+    let fill       = in.uv.x;
     let depth      = in.uv.y; // depth_in_fluid: 0=surface, up to 1.0
     let edge       = u32(in.edge_flags);
 
     // ------------------------------------------------------------------ //
     // 1. Depth darkening (liquids only, not gas)
+    //    Stronger darkening for deeper cells, capped so deep cells are
+    //    still visible.
     // ------------------------------------------------------------------ //
     if !is_gas {
         let darken = clamp(depth * 0.4, 0.0, 0.65);
@@ -135,7 +134,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     // ------------------------------------------------------------------ //
-    // 2. Caustics (liquids only, depth < 0.5)
+    // 2. Caustics (liquids only, near surface: depth < 0.5)
+    //    Pixelated voronoi pattern scrolled with time for underwater
+    //    light refraction effect.
     // ------------------------------------------------------------------ //
     if !is_gas && depth < 0.5 {
         let tile_pixels: f32 = 32.0;
@@ -147,16 +148,19 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     // ------------------------------------------------------------------ //
-    // 3. Shimmer (all fluids)
+    // 3. Shimmer (all fluids — subtle brightness oscillation)
     // ------------------------------------------------------------------ //
     let shimmer = 1.0 + 0.05 * sin(in.world_pos.x * 0.5 + uniforms.time * 0.8);
     color = vec4<f32>(color.rgb * shimmer, color.a);
 
     // ------------------------------------------------------------------ //
-    // 4. Surface effects (only surface && !gas)
+    // 4. Surface effects (only true surface cells — not submerged fluids)
+    //    With the fixed surface detection, is_surface is only set for cells
+    //    that are genuinely exposed to air/gas, never at internal lava-water
+    //    boundaries.
     // ------------------------------------------------------------------ //
     if is_surface && !is_gas {
-        // Surface glint
+        // Surface glint: additive highlight proportional to wave amplitude
         color = vec4<f32>(min(color.rgb + amp * 0.3, vec3<f32>(1.0)), color.a);
 
         // Shore foam where solid neighbors exist (bit 0=left, bit 1=right, bit 3=below)
@@ -178,23 +182,40 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // ------------------------------------------------------------------ //
     // 6. Emission glow (all fluids)
+    //    Emission is pre-suppressed in the mesh builder for cells that are
+    //    covered by a different fluid above (emission_covered), so there's
+    //    no lava glow bleeding through water.
     // ------------------------------------------------------------------ //
-    color = vec4<f32>(max(color.rgb, emission), color.a);
+    let em_strength = max(emission.r, max(emission.g, emission.b));
+    if em_strength > 0.0 {
+        // Blend emission with lit color rather than hard max, producing
+        // a more natural glow that respects the lightmap.
+        let em_factor = clamp(em_strength, 0.0, 1.0);
+        color = vec4<f32>(mix(color.rgb, emission, em_factor * 0.8), color.a);
+    }
+
+    // ------------------------------------------------------------------ //
+    // 7. Partial-fill alpha softening
+    //    For cells with low fill (< 30%), fade alpha so thin fluid films
+    //    blend smoothly instead of showing hard quad edges.
+    // ------------------------------------------------------------------ //
+    if fill < 0.3 {
+        let fade = smoothstep(0.0, 0.3, fill);
+        color = vec4<f32>(color.rgb, color.a * fade);
+    }
 
     // ------------------------------------------------------------------ //
     // DEBUG: chunk boundary visualizer
-    // Shows alternating tints based on chunk_x / chunk_y parity.
-    // chunk_size=32, tile_size=8 → 256 world units per chunk.
     // ------------------------------------------------------------------ //
     if DEBUG_CHUNK_BOUNDARIES {
-        let chunk_world: f32 = 256.0; // 32 * 8
+        let chunk_world: f32 = 256.0;
         let cx = floor(in.world_pos.x / chunk_world);
         let cy = floor(in.world_pos.y / chunk_world);
         let parity = (i32(cx) + i32(cy)) % 2;
         if parity == 0 {
-            return vec4<f32>(0.2, 0.4, 1.0, 1.0); // blue
+            return vec4<f32>(0.2, 0.4, 1.0, 1.0);
         } else {
-            return vec4<f32>(1.0, 0.3, 0.2, 1.0); // red
+            return vec4<f32>(1.0, 0.3, 0.2, 1.0);
         }
     }
 

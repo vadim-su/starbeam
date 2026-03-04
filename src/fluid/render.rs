@@ -35,61 +35,62 @@ pub const ATTRIBUTE_WAVE_PARAMS: MeshVertexAttribute =
 pub const ATTRIBUTE_EDGE_FLAGS: MeshVertexAttribute =
     MeshVertexAttribute::new("EdgeFlags", 982301570, VertexFormat::Float32);
 
-/// Determine whether a liquid cell is at the surface (exposed to air above).
+/// Determine whether a liquid cell is at the surface (exposed to air/gas above).
 ///
 /// A liquid cell at `(local_x, local_y)` is "surface" when the cell directly
-/// above `(local_x, local_y + 1)` is empty, out-of-bounds, or a different fluid.
+/// above `(local_x, local_y + 1)` is empty, out-of-bounds, or a gas. A different
+/// **liquid** above means this cell is submerged, not a surface (prevents wave
+/// displacement and surface effects at internal lava-water boundaries).
 fn is_liquid_surface(
     fluids: &[FluidCell],
     local_x: u32,
     local_y: u32,
     chunk_size: u32,
-    fluid_id: super::cell::FluidId,
+    _fluid_id: super::cell::FluidId,
     neighbor_above_row: Option<&[FluidCell]>,
+    fluid_registry: &FluidRegistry,
 ) -> bool {
     let above_y = local_y + 1;
     if above_y >= chunk_size {
-        // At chunk boundary: check neighbor chunk's bottom row if available.
         return match neighbor_above_row {
             Some(row) => {
                 let above = &row[local_x as usize];
-                above.is_empty() || above.fluid_id != fluid_id
+                above.is_empty() || fluid_registry.get(above.fluid_id).is_gas
             }
-            // No neighbor chunk loaded above → treat as open sky → is a surface.
             None => true,
         };
     }
     let above_idx = (above_y * chunk_size + local_x) as usize;
     let above = &fluids[above_idx];
-    above.is_empty() || above.fluid_id != fluid_id
+    above.is_empty() || fluid_registry.get(above.fluid_id).is_gas
 }
 
-/// Determine whether a gas cell is at the surface (exposed to air below).
+/// Determine whether a gas cell is at the surface (exposed to air/liquid below).
 ///
 /// A gas cell at `(local_x, local_y)` is "surface" when the cell directly
-/// below `(local_x, local_y - 1)` is empty, out-of-bounds, or a different fluid.
+/// below `(local_x, local_y - 1)` is empty, out-of-bounds, or a liquid. A different
+/// **gas** below means this cell is interior, not a surface.
 fn is_gas_surface(
     fluids: &[FluidCell],
     local_x: u32,
     local_y: u32,
     chunk_size: u32,
-    fluid_id: super::cell::FluidId,
+    _fluid_id: super::cell::FluidId,
     neighbor_below_row: Option<&[FluidCell]>,
+    fluid_registry: &FluidRegistry,
 ) -> bool {
     if local_y == 0 {
-        // At chunk boundary: check neighbor chunk's top row if available.
         return match neighbor_below_row {
             Some(row) => {
                 let below = &row[local_x as usize];
-                below.is_empty() || below.fluid_id != fluid_id
+                below.is_empty() || !fluid_registry.get(below.fluid_id).is_gas
             }
-            // No neighbor chunk loaded below → treat as open space → is a surface.
             None => true,
         };
     }
     let below_idx = ((local_y - 1) * chunk_size + local_x) as usize;
     let below = &fluids[below_idx];
-    below.is_empty() || below.fluid_id != fluid_id
+    below.is_empty() || !fluid_registry.get(below.fluid_id).is_gas
 }
 
 /// Compute depth_in_fluid: normalized 0..1 (0 = surface, 1 = deepest).
@@ -311,24 +312,27 @@ fn compute_edge_flags(
     flags as f32
 }
 
-/// Compute absolute liquid surface height (in local tile units) for each column.
+/// Compute absolute surface height and surface fluid ID for each column.
 ///
-/// For each column X, scan from top to bottom to find the highest cell with
-/// liquid. The surface height = `row + fill`. Returns `None` for empty columns
-/// or columns with only gas.
+/// For liquids: scan top-down to find the highest liquid cell.
+///   Surface height = `row + fill`. Returns `None` for empty/gas-only columns.
 ///
-/// For gas: scans bottom-up, surface height = `row + (1.0 - fill)` (top-down fill).
-fn compute_column_surface_heights(
+/// For gas: scan bottom-up to find the lowest gas cell.
+///   Surface height = `row + (1.0 - fill)`.
+///
+/// The fluid ID is returned alongside the height so that surface smoothing
+/// can skip interpolation between columns with different surface fluids
+/// (e.g. water column next to lava column).
+fn compute_column_surface_data(
     fluids: &[FluidCell],
     chunk_size: u32,
     fluid_registry: &FluidRegistry,
     is_gas_query: bool,
-) -> Vec<Option<f32>> {
-    let mut heights = vec![None; chunk_size as usize];
+) -> Vec<Option<(f32, FluidId)>> {
+    let mut data = vec![None; chunk_size as usize];
 
     for local_x in 0..chunk_size {
         if is_gas_query {
-            // Gas: scan bottom-up for lowest gas cell
             for local_y in 0..chunk_size {
                 let idx = (local_y * chunk_size + local_x) as usize;
                 let cell = &fluids[idx];
@@ -336,13 +340,13 @@ fn compute_column_surface_heights(
                     let def = fluid_registry.get(cell.fluid_id);
                     if def.is_gas {
                         let fill = cell.mass.min(1.0);
-                        heights[local_x as usize] = Some(local_y as f32 + (1.0 - fill));
+                        data[local_x as usize] =
+                            Some((local_y as f32 + (1.0 - fill), cell.fluid_id));
                         break;
                     }
                 }
             }
         } else {
-            // Liquid: scan top-down for highest liquid cell
             for local_y in (0..chunk_size).rev() {
                 let idx = (local_y * chunk_size + local_x) as usize;
                 let cell = &fluids[idx];
@@ -350,7 +354,7 @@ fn compute_column_surface_heights(
                     let def = fluid_registry.get(cell.fluid_id);
                     if !def.is_gas {
                         let fill = cell.mass.min(1.0);
-                        heights[local_x as usize] = Some(local_y as f32 + fill);
+                        data[local_x as usize] = Some((local_y as f32 + fill, cell.fluid_id));
                         break;
                     }
                 }
@@ -358,7 +362,7 @@ fn compute_column_surface_heights(
         }
     }
 
-    heights
+    data
 }
 
 /// Build a Bevy `Mesh` for the fluid layer of a single chunk.
@@ -423,9 +427,9 @@ pub fn build_fluid_mesh(
     let base_y = chunk_y * chunk_size as i32;
     let chunk_base_y = base_y; // absolute Y of local_y=0 in world tiles
 
-    // Pre-compute per-column surface heights for smooth interpolation.
-    let liquid_heights = compute_column_surface_heights(fluids, chunk_size, fluid_registry, false);
-    let gas_heights = compute_column_surface_heights(fluids, chunk_size, fluid_registry, true);
+    // Pre-compute per-column surface data (height + fluid ID) for smooth interpolation.
+    let liquid_surface = compute_column_surface_data(fluids, chunk_size, fluid_registry, false);
+    let gas_surface = compute_column_surface_data(fluids, chunk_size, fluid_registry, true);
 
     // Pre-compute per-cell emission coverage: a cell is "covered" when there
     // is a contiguous column of fluid above it that contains a different fluid
@@ -543,6 +547,7 @@ pub fn build_fluid_mesh(
                     chunk_size,
                     cell.fluid_id,
                     neighbor_below_row,
+                    fluid_registry,
                 )
             } else {
                 is_liquid_surface(
@@ -552,6 +557,7 @@ pub fn build_fluid_mesh(
                     chunk_size,
                     cell.fluid_id,
                     neighbor_above_row,
+                    fluid_registry,
                 )
             };
 
@@ -574,30 +580,35 @@ pub fn build_fluid_mesh(
             };
 
             // Smooth surface vertices by interpolating absolute surface heights
-            // between adjacent columns. This eliminates the staircase pattern
-            // even when neighbors are on different Y rows.
+            // between adjacent columns. Only smooth when the adjacent column has
+            // the same fluid type at the surface (prevents interpolating between
+            // e.g. water and lava surfaces which are at different heights).
             let (y0_left, y0_right, y1_left, y1_right) = if is_surface {
-                let heights = if def.is_gas {
-                    &gas_heights
+                let surface_data = if def.is_gas {
+                    &gas_surface
                 } else {
-                    &liquid_heights
+                    &liquid_surface
                 };
-                let this_h = heights[local_x as usize].unwrap_or(0.0);
-                let left_h = if local_x > 0 {
-                    heights[(local_x - 1) as usize]
+                let (this_h, this_fid) = surface_data[local_x as usize]
+                    .unwrap_or((0.0, cell.fluid_id));
+
+                // Helper: extract neighbor height only if same fluid type
+                let left_h: Option<f32> = if local_x > 0 {
+                    surface_data[(local_x - 1) as usize]
+                        .filter(|(_, fid)| *fid == this_fid)
+                        .map(|(h, _)| h)
                 } else {
-                    // Left chunk-boundary: use the neighbour's edge surface height
-                    // so that surface-vertex smoothing crosses the chunk seam.
                     if def.is_gas {
                         left_edge_gas_h
                     } else {
                         left_edge_liquid_h
                     }
                 };
-                let right_h = if local_x + 1 < chunk_size {
-                    heights[(local_x + 1) as usize]
+                let right_h: Option<f32> = if local_x + 1 < chunk_size {
+                    surface_data[(local_x + 1) as usize]
+                        .filter(|(_, fid)| *fid == this_fid)
+                        .map(|(h, _)| h)
                 } else {
-                    // Right chunk-boundary: use the neighbour's edge surface height.
                     if def.is_gas {
                         right_edge_gas_h
                     } else {
@@ -986,104 +997,120 @@ mod tests {
 
     #[test]
     fn liquid_surface_detected_when_above_empty() {
-        // 2×2 chunk layout (y increases upward):
-        //   row 1: empty, empty
-        //   row 0: water, empty
+        let reg = test_fluid_registry();
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(1), 1.0); // (0,0) water
 
         assert!(
-            is_liquid_surface(&fluids, 0, 0, 2, FluidId(1), None),
+            is_liquid_surface(&fluids, 0, 0, 2, FluidId(1), None, &reg),
             "cell (0,0) should be surface: above (0,1) is empty"
         );
     }
 
     #[test]
     fn liquid_not_surface_when_same_fluid_above() {
-        // 2×2 chunk:
-        //   row 1: water, empty
-        //   row 0: water, empty
+        let reg = test_fluid_registry();
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(1), 1.0); // (0,0)
         fluids[2] = FluidCell::new(FluidId(1), 1.0); // (0,1)
 
         assert!(
-            !is_liquid_surface(&fluids, 0, 0, 2, FluidId(1), None),
+            !is_liquid_surface(&fluids, 0, 0, 2, FluidId(1), None, &reg),
             "cell (0,0) should NOT be surface: same fluid above"
         );
     }
 
     #[test]
+    fn liquid_not_surface_when_different_liquid_above() {
+        let reg = test_fluid_registry();
+        // Lava (FluidId(3)) below water (FluidId(1))
+        let mut fluids = vec![FluidCell::EMPTY; 4];
+        fluids[0] = FluidCell::new(FluidId(3), 1.0); // (0,0) lava
+        fluids[2] = FluidCell::new(FluidId(1), 1.0); // (0,1) water
+
+        assert!(
+            !is_liquid_surface(&fluids, 0, 0, 2, FluidId(3), None, &reg),
+            "lava below water should NOT be surface (submerged)"
+        );
+    }
+
+    #[test]
+    fn liquid_surface_when_gas_above() {
+        let reg = test_fluid_registry();
+        // Water below steam: water IS surface (gas doesn't submerge liquid)
+        let mut fluids = vec![FluidCell::EMPTY; 4];
+        fluids[0] = FluidCell::new(FluidId(1), 1.0); // (0,0) water
+        fluids[2] = FluidCell::new(FluidId(2), 1.0); // (0,1) steam
+
+        assert!(
+            is_liquid_surface(&fluids, 0, 0, 2, FluidId(1), None, &reg),
+            "water below gas should be surface"
+        );
+    }
+
+    #[test]
     fn liquid_not_surface_at_top_edge() {
-        // 2×2 chunk: water at (0,1) — top row, no neighbor chunk above.
-        // With no neighbor data (None), we treat it as open sky → IS a surface.
+        let reg = test_fluid_registry();
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[2] = FluidCell::new(FluidId(1), 1.0); // (0,1)
 
         assert!(
-            is_liquid_surface(&fluids, 0, 1, 2, FluidId(1), None),
+            is_liquid_surface(&fluids, 0, 1, 2, FluidId(1), None, &reg),
             "top-edge cell with no neighbor should be surface (open sky assumed)"
         );
 
-        // But if neighbor above has the SAME fluid at the boundary → not a surface.
         let neighbor_row: Vec<FluidCell> = vec![
             FluidCell::new(FluidId(1), 1.0),
             FluidCell::new(FluidId(1), 1.0),
         ];
         assert!(
-            !is_liquid_surface(&fluids, 0, 1, 2, FluidId(1), Some(&neighbor_row)),
+            !is_liquid_surface(&fluids, 0, 1, 2, FluidId(1), Some(&neighbor_row), &reg),
             "top-edge with fluid-filled neighbor should NOT be surface"
         );
     }
 
     #[test]
     fn gas_surface_detected_when_below_empty() {
-        // 2×2 chunk:
-        //   row 1: steam, empty
-        //   row 0: empty, empty
+        let reg = test_fluid_registry();
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[2] = FluidCell::new(FluidId(2), 1.0); // (0,1) steam
 
         assert!(
-            is_gas_surface(&fluids, 0, 1, 2, FluidId(2), None),
+            is_gas_surface(&fluids, 0, 1, 2, FluidId(2), None, &reg),
             "gas cell (0,1) should be surface: below (0,0) is empty"
         );
     }
 
     #[test]
     fn gas_not_surface_when_same_fluid_below() {
-        // 2×2 chunk:
-        //   row 1: steam, empty
-        //   row 0: steam, empty
+        let reg = test_fluid_registry();
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(2), 1.0); // (0,0)
         fluids[2] = FluidCell::new(FluidId(2), 1.0); // (0,1)
 
         assert!(
-            !is_gas_surface(&fluids, 0, 1, 2, FluidId(2), None),
+            !is_gas_surface(&fluids, 0, 1, 2, FluidId(2), None, &reg),
             "gas cell (0,1) should NOT be surface: same fluid below"
         );
     }
 
     #[test]
     fn gas_not_surface_at_bottom_edge() {
-        // 2×2 chunk: steam at (0,0) — bottom row, no neighbor chunk below.
-        // With no neighbor data (None), we treat it as open space → IS a surface.
+        let reg = test_fluid_registry();
         let mut fluids = vec![FluidCell::EMPTY; 4];
         fluids[0] = FluidCell::new(FluidId(2), 1.0); // (0,0)
 
         assert!(
-            is_gas_surface(&fluids, 0, 0, 2, FluidId(2), None),
+            is_gas_surface(&fluids, 0, 0, 2, FluidId(2), None, &reg),
             "bottom-edge gas cell with no neighbor should be surface (open space assumed)"
         );
 
-        // But if neighbor below has the SAME fluid → not a surface.
         let neighbor_row: Vec<FluidCell> = vec![
             FluidCell::new(FluidId(2), 1.0),
             FluidCell::new(FluidId(2), 1.0),
         ];
         assert!(
-            !is_gas_surface(&fluids, 0, 0, 2, FluidId(2), Some(&neighbor_row)),
+            !is_gas_surface(&fluids, 0, 0, 2, FluidId(2), Some(&neighbor_row), &reg),
             "bottom-edge gas with fluid-filled neighbor should NOT be surface"
         );
     }
