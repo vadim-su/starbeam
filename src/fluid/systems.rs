@@ -169,9 +169,8 @@ pub fn sph_fluid_simulation(
 
     let dt = 1.0 / 60.0;
 
-    sph_step(&mut particles, &sph_config, dt);
-
-    // Tile collisions
+    // Build boundary function that handles tile collisions + world bounds.
+    // This is passed INTO sph_step so PBF predicted positions respect walls.
     let tile_size = active_world.tile_size;
     let chunk_size = active_world.chunk_size;
     let width_chunks = active_world.width_chunks();
@@ -197,20 +196,13 @@ pub fn sph_fluid_simulation(
             })
     };
 
-    let particles = &mut *particles;
-    let (positions, velocities) = (&mut particles.positions, &mut particles.velocities);
-    for i in 0..positions.len() {
-        clamp_velocity(&mut velocities[i]);
-        resolve_tile_collision(&mut positions[i], &mut velocities[i], tile_size, &is_solid, 0.05);
-        enforce_world_bounds(
-            &mut positions[i],
-            &mut velocities[i],
-            0.0,
-            world_width,
-            0.0,
-            world_height,
-        );
-    }
+    let boundary = |pos: &mut Vec2, vel: &mut Vec2| {
+        clamp_velocity(vel);
+        resolve_tile_collision(pos, vel, tile_size, &is_solid, 0.05);
+        enforce_world_bounds(pos, vel, 0.0, world_width, 0.0, world_height);
+    };
+
+    sph_step(&mut particles, &sph_config, dt, &boundary);
 
     // SPH particle reactions (only every N frames to avoid redundant spatial hash builds)
     *reaction_frame_counter = reaction_frame_counter.wrapping_add(1);

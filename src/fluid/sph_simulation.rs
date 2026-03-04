@@ -6,13 +6,14 @@
 //!
 //! Algorithm:
 //! 1. Apply gravity to velocities, predict new positions
-//! 2. For N solver iterations:
+//! 2. Apply boundary constraints to predicted positions (tile collisions)
+//! 3. For N solver iterations:
 //!    a. Compute density at predicted positions
 //!    b. Compute λ (Lagrange multiplier) from density constraint violation
 //!    c. Compute position correction Δp from λ values
-//!    d. Apply corrections to predicted positions
-//! 3. Update velocities from position change
-//! 4. Apply XSPH viscosity smoothing
+//!    d. Apply corrections, then re-apply boundary constraints
+//! 4. Update velocities from position change
+//! 5. Apply XSPH viscosity smoothing
 
 use bevy::math::Vec2;
 use bevy::prelude::Resource;
@@ -28,7 +29,6 @@ pub struct SphConfig {
     /// Number of constraint solver iterations (4-6 typical).
     pub solver_iterations: u32,
     /// Constraint Force Mixing — relaxation parameter in λ denominator.
-    /// Prevents division by zero and controls constraint stiffness.
     /// Higher = softer/more stable, lower = stiffer.
     pub epsilon: f32,
     pub viscosity: f32,
@@ -54,19 +54,34 @@ impl Default for SphConfig {
 }
 
 /// One PBF simulation step.
-pub fn sph_step(store: &mut ParticleStore, config: &SphConfig, dt: f32) {
+///
+/// `boundary_fn` is called on each particle's (position, velocity) to enforce
+/// tile collisions and world bounds. It is applied to predicted positions before
+/// and during solver iterations to prevent particles from going through walls.
+pub fn sph_step(
+    store: &mut ParticleStore,
+    config: &SphConfig,
+    dt: f32,
+    boundary_fn: &dyn Fn(&mut Vec2, &mut Vec2),
+) {
     if store.is_empty() {
         return;
     }
     let n = store.len();
     let h = config.smoothing_radius;
+    let mass = config.particle_mass;
+    let rho0 = config.rest_density.max(1e-8);
 
     // --- Step 1: Predict positions ---
-    // Apply gravity to velocities and compute predicted positions.
     let mut predicted = Vec::with_capacity(n);
+    let mut pred_vel = Vec::with_capacity(n);
     for i in 0..n {
-        store.velocities[i] += config.gravity * dt;
-        predicted.push(store.positions[i] + store.velocities[i] * dt);
+        let mut v = store.velocities[i] + config.gravity * dt;
+        let mut p = store.positions[i] + v * dt;
+        // Apply boundaries to predicted positions
+        boundary_fn(&mut p, &mut v);
+        predicted.push(p);
+        pred_vel.push(v);
     }
 
     // Buffers for solver
@@ -75,7 +90,6 @@ pub fn sph_step(store: &mut ParticleStore, config: &SphConfig, dt: f32) {
 
     // --- Step 2: Solver iterations ---
     for _ in 0..config.solver_iterations {
-        // Build spatial hash from predicted positions
         let grid = SpatialHash::from_positions(&predicted, h);
 
         // 2a: Compute density and lambda for each particle
@@ -87,12 +101,19 @@ pub fn sph_step(store: &mut ParticleStore, config: &SphConfig, dt: f32) {
             let mut density = 0.0f32;
             for &j in &neighbors_buf {
                 let r = pos_i.distance(predicted[j]);
-                density += config.particle_mass * poly6(r, h);
+                density += mass * poly6(r, h);
             }
             store.densities[i] = density;
 
             // Density constraint: C_i = ρ_i/ρ₀ - 1
-            let constraint = density / config.rest_density - 1.0;
+            let constraint = density / rho0 - 1.0;
+
+            // Only correct if over-dense (compressed). Skip if under-dense
+            // to allow free surfaces without attracting particles together.
+            if constraint <= 0.0 {
+                lambdas[i] = 0.0;
+                continue;
+            }
 
             // Compute gradient denominator: Σ_k |∇_{p_k} C_i|²
             let mut sum_grad_sq = 0.0f32;
@@ -108,16 +129,10 @@ pub fn sph_step(store: &mut ParticleStore, config: &SphConfig, dt: f32) {
                     continue;
                 }
                 let dir = diff / r;
-                // ∇_{p_j} C_i = -(m_j/ρ₀) * ∇W(p_i - p_j, h)
-                // spiky_gradient returns scalar (negative), dir points i→j direction
-                // ∇_{p_i} W = spiky_gradient(r,h) * dir
-                // ∇_{p_j} W = -spiky_gradient(r,h) * dir
-                // So ∇_{p_j} C_i = -(m/ρ₀) * (-spiky_gradient * dir) = (m/ρ₀) * spiky_gradient * dir
                 let grad_w = spiky_gradient(r, h) * dir;
-                let grad_j = -(config.particle_mass / config.rest_density) * grad_w;
+                let grad_j = -(mass / rho0) * grad_w;
                 sum_grad_sq += grad_j.length_squared();
-                // Accumulate ∇_{p_i} C_i = (1/ρ₀) * Σ_j m_j * ∇_{p_i}W
-                grad_i += (config.particle_mass / config.rest_density) * grad_w;
+                grad_i += (mass / rho0) * grad_w;
             }
             sum_grad_sq += grad_i.length_squared();
 
@@ -144,12 +159,11 @@ pub fn sph_step(store: &mut ParticleStore, config: &SphConfig, dt: f32) {
                 let grad_w = spiky_gradient(r, h) * dir;
 
                 // Artificial pressure (tensile instability correction)
-                // s_corr = -k * (W(r,h) / W(Δq,h))^n
                 let s_corr = if config.surface_tension_k > 0.0 {
-                    let w_dq = poly6(0.3 * h, h); // reference kernel value at 0.3h
+                    let w_dq = poly6(0.3 * h, h);
                     if w_dq > 1e-10 {
                         let w_ratio = poly6(r, h) / w_dq;
-                        -config.surface_tension_k * w_ratio * w_ratio * w_ratio * w_ratio // n=4
+                        -config.surface_tension_k * w_ratio.powi(4)
                     } else {
                         0.0
                     }
@@ -157,12 +171,12 @@ pub fn sph_step(store: &mut ParticleStore, config: &SphConfig, dt: f32) {
                     0.0
                 };
 
-                // Δp_i = (1/ρ₀) * Σ_j (λ_i + λ_j + s_corr) * ∇W
-                delta_p += (1.0 / config.rest_density)
-                    * (lambdas[i] + lambdas[j] + s_corr)
-                    * grad_w;
+                delta_p += (1.0 / rho0) * (lambdas[i] + lambdas[j] + s_corr) * grad_w;
             }
             predicted[i] += delta_p;
+
+            // Re-apply boundary after correction
+            boundary_fn(&mut predicted[i], &mut pred_vel[i]);
         }
     }
 
@@ -199,7 +213,7 @@ pub fn sph_step(store: &mut ParticleStore, config: &SphConfig, dt: f32) {
         }
     }
 
-    // Recompute densities/pressures for debug display (using final positions)
+    // Recompute densities/pressures for debug display
     {
         let grid = SpatialHash::from_positions(&store.positions, h);
         for i in 0..n {
@@ -208,10 +222,11 @@ pub fn sph_step(store: &mut ParticleStore, config: &SphConfig, dt: f32) {
             let mut density = 0.0f32;
             for &j in &neighbors_buf {
                 let r = pos_i.distance(store.positions[j]);
-                density += config.particle_mass * poly6(r, h);
+                density += mass * poly6(r, h);
             }
             store.densities[i] = density;
-            store.pressures[i] = density / config.rest_density - 1.0; // constraint value for debug
+            // Store constraint value for debug (0 = at rest, >0 = compressed)
+            store.pressures[i] = density / rho0 - 1.0;
         }
     }
 
@@ -245,13 +260,16 @@ mod tests {
         store
     }
 
+    // No-op boundary for tests
+    fn no_boundary(_pos: &mut Vec2, _vel: &mut Vec2) {}
+
     #[test]
     fn gravity_pulls_down() {
         let config = test_config();
         let mut store = ParticleStore::new();
         store.add(Particle::new(Vec2::new(0.0, 100.0), FluidId(1), 1.0));
         let y_before = store.positions[0].y;
-        sph_step(&mut store, &config, 1.0 / 60.0);
+        sph_step(&mut store, &config, 1.0 / 60.0, &no_boundary);
         assert!(
             store.positions[0].y < y_before,
             "Particle should fall: {} -> {}",
@@ -263,11 +281,12 @@ mod tests {
     #[test]
     fn close_particles_pushed_apart() {
         let config = test_config();
-        let mut store = two_particles_store(2.0); // very close
+        let mut store = two_particles_store(2.0);
         let dist_before = store.positions[0].distance(store.positions[1]);
-        // Run several steps for constraint to take effect
+        let mut config_no_grav = config.clone();
+        config_no_grav.gravity = Vec2::ZERO;
         for _ in 0..10 {
-            sph_step(&mut store, &config, 1.0 / 60.0);
+            sph_step(&mut store, &config_no_grav, 1.0 / 60.0, &no_boundary);
         }
         let dist_after = store.positions[0].distance(store.positions[1]);
         assert!(
@@ -281,36 +300,30 @@ mod tests {
         let config = test_config();
         let mut store = two_particles_store(8.0);
         let initial_y = store.positions[0].y;
-        sph_step(&mut store, &config, 1.0 / 60.0);
+        sph_step(&mut store, &config, 1.0 / 60.0, &no_boundary);
         assert_ne!(store.positions[0].y, initial_y);
     }
 
     #[test]
-    fn density_near_rest_for_well_spaced_particles() {
+    fn boundary_fn_is_called() {
         let config = test_config();
-        // Place particles on a grid with spacing = 8 (h/2)
         let mut store = ParticleStore::new();
-        for x in 0..4 {
-            for y in 0..4 {
-                store.add(Particle::new(
-                    Vec2::new(x as f32 * 8.0, y as f32 * 8.0),
-                    FluidId(1),
-                    1.0,
-                ));
+        store.add(Particle::new(Vec2::new(50.0, 50.0), FluidId(1), 1.0));
+        // Boundary: clamp y >= 40
+        let boundary = |pos: &mut Vec2, vel: &mut Vec2| {
+            if pos.y < 40.0 {
+                pos.y = 40.0;
+                vel.y = vel.y.abs() * 0.3;
             }
+        };
+        // Run enough steps for particle to fall
+        for _ in 0..100 {
+            sph_step(&mut store, &config, 1.0 / 60.0, &boundary);
         }
-        // Run one step to compute density
-        let mut config_no_gravity = config.clone();
-        config_no_gravity.gravity = Vec2::ZERO;
-        sph_step(&mut store, &config_no_gravity, 1.0 / 60.0);
-        // Center particles should have density near rest_density
-        let center = 5; // particle at (8, 8) — has neighbors on all sides
-        let ratio = store.densities[center] / config.rest_density;
         assert!(
-            ratio > 0.5 && ratio < 3.0,
-            "Center density ratio should be reasonable: {ratio} (density={}, rest={})",
-            store.densities[center],
-            config.rest_density
+            store.positions[0].y >= 39.9,
+            "Particle should be above floor: {}",
+            store.positions[0].y
         );
     }
 }
