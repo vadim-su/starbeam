@@ -132,146 +132,117 @@ pub const MAX_REACTIONS_PER_CHUNK: u32 = 8;
 // Global density displacement using FluidWorld
 // ---------------------------------------------------------------------------
 
+/// Maximum vertical swaps per column per tick.
+/// Limits how fast heavy fluids sink through light ones (1 = one cell/tick).
+const MAX_VERTICAL_SWAPS_PER_COLUMN: u32 = 1;
+
+/// Maximum horizontal displacement operations per row per tick.
+/// Limits sideways spreading to prevent chain-reaction displacement spikes.
+const MAX_HORIZONTAL_DISPLACE_PER_ROW: u32 = 2;
+
 /// Resolve density displacement between immiscible fluids using global addressing.
 ///
-/// Phase 1 — **Vertical**: multi-pass bubble-sort so heavier fluids sink
-/// completely through lighter ones.
+/// Phase 1 — **Vertical**: single bottom-up pass; heavy fluids sink through
+/// lighter ones at most `MAX_VERTICAL_SWAPS_PER_COLUMN` cells per column per tick.
 ///
-/// Phase 2 — **Horizontal spreading**: heavy fluid undercuts lighter fluid
-/// via 3-cell rotation. Two sweeps (L→R then R→L) ensure symmetric spread.
+/// Phase 2 — **Horizontal**: heavy fluid swaps with adjacent lighter fluid
+/// (simple same-level exchange, no upward push). The vertical pass on the
+/// *next* tick will naturally raise the lighter fluid. Rate-limited per row
+/// to avoid displacement cascades.
 pub fn resolve_density_displacement_global(world: &mut FluidWorld, active_chunks: &[(i32, i32)]) {
     let cs = world.chunk_size as i32;
 
-    // Phase 1: Vertical bubble sort — limited to 1 pass per tick
-    // for smooth settling instead of instant teleportation.
-    // Heavy fluids sink ~1 cell/tick; at 60 ticks/sec that's 60 cells/sec.
-    for _pass in 0..1 {
-        let mut any_swap = false;
-        for &(cx, cy) in active_chunks {
-            let base_gx = cx * cs;
-            let base_gy = cy * cs;
-            for ly in 0..cs {
-                let gy = base_gy + ly;
-                for lx in 0..cs {
-                    let gx = base_gx + lx;
-                    let below = world.read_current(gx, gy);
-                    let above = world.read_current(gx, gy + 1);
-                    if below.is_empty() || above.is_empty() {
-                        continue;
-                    }
-                    if below.fluid_id == above.fluid_id {
-                        continue;
-                    }
-                    let d_below = world.fluid_registry.get(below.fluid_id).density;
-                    let d_above = world.fluid_registry.get(above.fluid_id).density;
-                    if d_above > d_below {
-                        world.swap_fluids((gx, gy), (gx, gy + 1));
-                        any_swap = true;
-                    }
-                }
-            }
-        }
-        if !any_swap {
-            break;
-        }
-    }
-
-    // Phase 2: Horizontal spreading (L→R then R→L)
+    // Phase 1: Vertical — heavy sinks, light rises, one swap per column per tick.
     for &(cx, cy) in active_chunks {
         let base_gx = cx * cs;
         let base_gy = cy * cs;
-        // Left-to-right sweep
-        for ly in 0..cs {
-            let gy = base_gy + ly;
-            for lx in 0..(cs - 1) {
-                let gx = base_gx + lx;
-                horizontal_displace_global(world, gx, gx + 1, gy);
+        for lx in 0..cs {
+            let gx = base_gx + lx;
+            let mut swaps = 0u32;
+            for ly in 0..cs {
+                if swaps >= MAX_VERTICAL_SWAPS_PER_COLUMN {
+                    break;
+                }
+                let gy = base_gy + ly;
+                let below = world.read_current(gx, gy);
+                let above = world.read_current(gx, gy + 1);
+                if below.is_empty() || above.is_empty() {
+                    continue;
+                }
+                if below.fluid_id == above.fluid_id {
+                    continue;
+                }
+                let d_below = world.fluid_registry.get(below.fluid_id).density;
+                let d_above = world.fluid_registry.get(above.fluid_id).density;
+                if d_above > d_below {
+                    world.swap_fluids((gx, gy), (gx, gy + 1));
+                    swaps += 1;
+                }
             }
         }
-        // Right-to-left sweep
+    }
+
+    // Phase 2: Horizontal — simple same-level swap between heavy and light fluid.
+    // No upward push; the vertical pass on the next tick handles rising.
+    // Single alternating sweep direction (even chunks L→R, odd R→L) to reduce bias.
+    for &(cx, cy) in active_chunks {
+        let base_gx = cx * cs;
+        let base_gy = cy * cs;
         for ly in 0..cs {
             let gy = base_gy + ly;
-            for lx in (1..cs).rev() {
-                let gx = base_gx + lx;
-                horizontal_displace_global(world, gx, gx - 1, gy);
+            let mut displace_count = 0u32;
+            // Alternate sweep direction per row for symmetry
+            if ly % 2 == 0 {
+                for lx in 0..(cs - 1) {
+                    if displace_count >= MAX_HORIZONTAL_DISPLACE_PER_ROW {
+                        break;
+                    }
+                    let gx = base_gx + lx;
+                    if horizontal_swap_global(world, gx, gx + 1, gy) {
+                        displace_count += 1;
+                    }
+                }
+            } else {
+                for lx in (1..cs).rev() {
+                    if displace_count >= MAX_HORIZONTAL_DISPLACE_PER_ROW {
+                        break;
+                    }
+                    let gx = base_gx + lx;
+                    if horizontal_swap_global(world, gx, gx - 1, gy) {
+                        displace_count += 1;
+                    }
+                }
             }
         }
     }
 }
 
-/// Fraction of light-fluid mass displaced upward per tick.
-/// Lower values produce smoother, more gradual displacement (less "jumping").
-const DISPLACE_FRACTION: f32 = 0.25;
-
-/// Try a single horizontal displacement between cells at (src_gx, gy) and (dst_gx, gy)
-/// using global coordinates.
+/// Try a horizontal swap between two adjacent cells at the same Y level.
 ///
-/// If src is heavier than dst, gradually move a fraction of the light fluid
-/// upward and allow the heavy fluid to seep in from the side. This prevents
-/// the instant "teleport" that caused water to jump when lava was poured.
-fn horizontal_displace_global(world: &mut FluidWorld, src_gx: i32, dst_gx: i32, gy: i32) {
+/// If src is heavier than dst, they simply exchange positions. No upward
+/// push — the vertical phase on the next tick will naturally sort them.
+/// Returns true if a swap was performed.
+fn horizontal_swap_global(world: &mut FluidWorld, src_gx: i32, dst_gx: i32, gy: i32) -> bool {
     let src = world.read_current(src_gx, gy);
     let dst = world.read_current(dst_gx, gy);
 
     if src.is_empty() || dst.is_empty() {
-        return;
+        return false;
     }
     if src.fluid_id == dst.fluid_id {
-        return;
+        return false;
     }
 
     let d_src = world.fluid_registry.get(src.fluid_id).density;
     let d_dst = world.fluid_registry.get(dst.fluid_id).density;
 
-    // Only the heavier fluid displaces the lighter one
     if d_src <= d_dst {
-        return;
+        return false;
     }
 
-    // Need a cell above the destination for the displaced light fluid
-    if world.is_solid(dst_gx, gy + 1) {
-        return;
-    }
-
-    let above = world.read_current(dst_gx, gy + 1);
-
-    // How much light-fluid mass to push up this tick
-    let moved_mass = (dst.mass * DISPLACE_FRACTION).max(0.001);
-
-    if above.is_empty() || above.fluid_id == dst.fluid_id {
-        // Push a fraction of the light fluid upward
-        let above_mass = if above.is_empty() { 0.0 } else { above.mass };
-        world.write(
-            dst_gx,
-            gy + 1,
-            FluidCell::new(dst.fluid_id, above_mass + moved_mass),
-        );
-
-        // Light fluid loses mass; heavy fluid seeps in proportionally
-        let seep = moved_mass.min(src.mass);
-        let mut new_dst = dst;
-        new_dst.mass -= moved_mass;
-        if new_dst.mass < 0.001 {
-            // Fully displaced — heavy fluid takes over
-            new_dst = FluidCell::new(src.fluid_id, seep);
-        } else {
-            // Still mixed — keep light fluid with reduced mass
-            // (heavy fluid cannot occupy the same cell, so it stays at src)
-        }
-        world.write(dst_gx, gy, new_dst);
-
-        // Reduce source heavy-fluid mass by the amount that seeped over
-        if new_dst.fluid_id == src.fluid_id {
-            // Heavy fluid moved from src to dst
-            let mut new_src = src;
-            new_src.mass -= seep;
-            if new_src.mass < 0.001 {
-                world.write(src_gx, gy, FluidCell::EMPTY);
-            } else {
-                world.write(src_gx, gy, new_src);
-            }
-        }
-    }
+    // Simple swap — heavy and light fluid exchange places at the same level
+    world.swap_fluids((src_gx, gy), (dst_gx, gy));
+    true
 }
 
 // ---------------------------------------------------------------------------
