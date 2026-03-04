@@ -17,7 +17,8 @@ use crate::fluid::sph_collision::{enforce_world_bounds, resolve_tile_collision};
 use crate::fluid::sph_particle::ParticleStore;
 use crate::fluid::sph_simulation::{sph_step, SphConfig};
 use crate::fluid::reactions::{
-    execute_fluid_reactions_global, resolve_density_displacement_global, FluidReactionRegistry,
+    execute_fluid_reactions_global, execute_sph_particle_reactions,
+    resolve_density_displacement_global, FluidReactionRegistry,
 };
 use crate::fluid::registry::FluidRegistry;
 use crate::fluid::render::{
@@ -656,6 +657,8 @@ pub fn sph_fluid_simulation(
     mut particles: ResMut<ParticleStore>,
     world_map: Res<WorldMap>,
     active_world: Res<ActiveWorld>,
+    reaction_registry: Option<Res<FluidReactionRegistry>>,
+    mut reaction_events: MessageWriter<FluidReactionEvent>,
 ) {
     if particles.is_empty() {
         return;
@@ -703,5 +706,18 @@ pub fn sph_fluid_simulation(
             0.0,
             world_height,
         );
+    }
+
+    // SPH particle reactions
+    if let Some(rr) = reaction_registry {
+        let (events, to_remove) =
+            execute_sph_particle_reactions(&particles, sph_config.smoothing_radius, &rr);
+        for evt in events {
+            reaction_events.write(evt);
+        }
+        // Remove consumed particles in descending index order
+        for idx in to_remove {
+            particles.remove_swap(idx);
+        }
     }
 }

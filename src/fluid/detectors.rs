@@ -2,10 +2,30 @@ use bevy::prelude::*;
 
 use crate::fluid::cell::FluidId;
 use crate::fluid::events::{ImpactKind, WaterImpactEvent};
+use crate::fluid::sph_particle::ParticleStore;
+use crate::fluid::sph_simulation::SphConfig;
 use crate::particles::pool::ParticlePool;
 use crate::physics::Velocity;
 use crate::registry::world::ActiveWorld;
 use crate::world::chunk::WorldMap;
+
+/// Check if any SPH particle is near the given world position.
+/// Returns the FluidId of the nearest particle, or FluidId::NONE.
+fn sph_fluid_at(pos: Vec2, particles: &ParticleStore, radius: f32) -> FluidId {
+    if particles.is_empty() {
+        return FluidId::NONE;
+    }
+    let mut best_dist = f32::MAX;
+    let mut best_fluid = FluidId::NONE;
+    for i in 0..particles.len() {
+        let dist = pos.distance(particles.positions[i]);
+        if dist < radius && dist < best_dist {
+            best_dist = dist;
+            best_fluid = particles.fluid_ids[i];
+        }
+    }
+    best_fluid
+}
 
 /// Marker component for projectile entities.
 /// Attach this to any entity that should leave bubble trails when flying through fluid.
@@ -35,6 +55,8 @@ pub fn detect_entity_water_entry(
     mut query: Query<(&Transform, &Velocity, &mut FluidContactState)>,
     world_map: Res<WorldMap>,
     active_world: Res<ActiveWorld>,
+    particles: Res<ParticleStore>,
+    sph_config: Res<SphConfig>,
 ) {
     let tile_size = active_world.tile_size;
     let chunk_size = active_world.chunk_size;
@@ -69,6 +91,14 @@ pub fn detect_entity_water_entry(
                 }
             })
             .unwrap_or(FluidId::NONE);
+
+        // SPH fallback: if CA found no fluid, check SPH particles
+        let sph_fluid = sph_fluid_at(pos, &particles, sph_config.smoothing_radius);
+        let current_fluid = if current_fluid != FluidId::NONE {
+            current_fluid // CA found fluid
+        } else {
+            sph_fluid // fallback to SPH
+        };
 
         let was_in_fluid = contact.last_fluid != FluidId::NONE;
         let now_in_fluid = current_fluid != FluidId::NONE;
@@ -107,6 +137,8 @@ pub fn detect_entity_swimming(
     active_world: Res<ActiveWorld>,
     time: Res<Time>,
     mut throttle: ResMut<SwimThrottle>,
+    particles: Res<ParticleStore>,
+    sph_config: Res<SphConfig>,
 ) {
     // Throttle: run every ~0.05 seconds (frequent, small impulses = smooth waves).
     throttle.0 += time.delta_secs();
@@ -161,6 +193,13 @@ pub fn detect_entity_swimming(
             })
             .unwrap_or(false);
 
+        // SPH fallback: if CA says not near surface, check SPH particles
+        let near_surface = if near_surface {
+            true
+        } else {
+            sph_fluid_at(pos, &particles, sph_config.smoothing_radius) != FluidId::NONE
+        };
+
         if !near_surface {
             continue;
         }
@@ -186,6 +225,8 @@ pub fn detect_projectile_in_fluid(
     mut pool: ResMut<ParticlePool>,
     time: Res<Time>,
     mut throttle: Local<f32>,
+    particles: Res<ParticleStore>,
+    sph_config: Res<SphConfig>,
 ) {
     *throttle += time.delta_secs();
     if *throttle < 0.05 {
@@ -215,6 +256,13 @@ pub fn detect_projectile_in_fluid(
                 idx < chunk.fluids.len() && !chunk.fluids[idx].is_empty()
             })
             .unwrap_or(false);
+
+        // SPH fallback: if CA says no fluid, check SPH particles
+        let in_fluid = if in_fluid {
+            true
+        } else {
+            sph_fluid_at(pos, &particles, sph_config.smoothing_radius) != FluidId::NONE
+        };
 
         if !in_fluid {
             continue;

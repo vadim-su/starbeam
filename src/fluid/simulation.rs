@@ -6,9 +6,12 @@ use crate::fluid::fluid_world::FluidWorld;
 /// Normal full-cell mass.
 pub const MAX_MASS: f32 = 1.0;
 /// Cells with less mass than this are considered empty.
-pub const MIN_MASS: f32 = 0.001;
+/// Must be >= RENDER_MIN_MASS to prevent ghost cells that exist but don't render.
+pub const MIN_MASS: f32 = 0.03;
 /// Flows smaller than this are damped.
 pub const MIN_FLOW: f32 = 0.005;
+/// Minimum flow required to create a NEW cell (prevents micro-mass staircase artifacts).
+pub const MIN_DRAW: f32 = 0.05;
 /// Maximum flow per iteration (before viscosity scaling).
 pub const MAX_SPEED: f32 = 1.0;
 
@@ -269,11 +272,19 @@ fn flow_vertical(
     let flow = if is_primary {
         get_stable_state(total, max_compress) - neighbor_mass
     } else {
-        // Decompression: only compressed fluid flows in this direction
-        if remaining <= MAX_MASS {
+        // Decompression: only significantly compressed fluid flows in this direction.
+        // Don't create new cells and require meaningful compression to prevent
+        // spike/dome artifacts during pouring.
+        if remaining <= MAX_MASS + max_compress {
             return remaining;
         }
-        remaining - get_stable_state(total, max_compress)
+        if neighbor_mass <= 0.0 {
+            return remaining;
+        }
+        // Only equalize — don't push more than what would balance the two cells.
+        let excess = remaining - get_stable_state(total, max_compress);
+        // Heavy dampening: decompression should be slow to prevent spikes.
+        excess * 0.2
     };
 
     if flow <= 0.0 {
@@ -281,12 +292,24 @@ fn flow_vertical(
     }
 
     let mut flow = flow;
+    // Don't create new cells with micro-mass (prevents staircase/spike artifacts).
+    if neighbor_mass <= 0.0 && flow < MIN_DRAW {
+        return remaining;
+    }
     // Smooth small flows
     if flow > min_flow {
         flow *= 0.5;
     }
-    // Clamp: don't exceed available capacity in neighbor
-    let capacity = (1.0 - current_neighbor.total_mass()).max(0.0);
+    // Capacity: only cap when introducing a NEW fluid type into a cell.
+    // If neighbor already has this fluid, let equalization work freely —
+    // displacement will handle total > 1.0.
+    let other_fluid_mass = current_neighbor.total_mass() - neighbor_mass;
+    let capacity = if other_fluid_mass > MIN_MASS && neighbor_mass <= MIN_MASS {
+        // New fluid entering a cell with a different fluid: cap at 1.0
+        (1.0 - current_neighbor.total_mass()).max(0.0)
+    } else {
+        f32::MAX
+    };
     flow = flow.min(max_speed).min(remaining).min(capacity).max(0.0);
 
     if flow <= 0.0 {
@@ -374,15 +397,26 @@ fn flow_side(
         .slot_for(fluid_id)
         .map(|s| s.mass)
         .unwrap_or(0.0);
-    let mut flow = (original_mass - neighbor_slot_mass) / 4.0;
+    let mut flow = (original_mass - neighbor_slot_mass) / 3.0;
     if flow <= 0.0 {
         return remaining;
     }
-    if flow > min_flow {
-        flow *= 0.5;
+    // Don't create new cells with micro-mass (prevents staircase/spike artifacts).
+    if neighbor_slot_mass <= 0.0 && flow < MIN_DRAW {
+        return remaining;
     }
-    // Clamp: don't exceed available capacity in neighbor
-    let capacity = (1.0 - current_neighbor.total_mass()).max(0.0);
+    if flow > min_flow {
+        flow *= 0.65;
+    }
+    // Capacity: only cap when introducing a NEW fluid type into a cell.
+    // If neighbor already has this fluid, let equalization work freely.
+    let current_neighbor_slot_mass = current_neighbor.slot_for(fluid_id).map(|s| s.mass).unwrap_or(0.0);
+    let other_fluid_mass = current_neighbor.total_mass() - current_neighbor_slot_mass;
+    let capacity = if other_fluid_mass > MIN_MASS && current_neighbor_slot_mass <= MIN_MASS {
+        (1.0 - current_neighbor.total_mass()).max(0.0)
+    } else {
+        f32::MAX
+    };
     flow = flow.min(max_speed).min(remaining).min(capacity).max(0.0);
 
     if flow <= 0.0 {

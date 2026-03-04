@@ -453,6 +453,89 @@ pub fn execute_fluid_reactions_global(
     events
 }
 
+// ---------------------------------------------------------------------------
+// SPH particle-proximity reactions
+// ---------------------------------------------------------------------------
+
+use crate::fluid::spatial_hash::SpatialHash;
+use crate::fluid::sph_particle::ParticleStore;
+
+/// Check SPH particles for reactions based on proximity within `radius`.
+/// When two particles of different fluid types are within `radius` and match
+/// a reaction, both particles are removed and an event is emitted.
+/// Returns reaction events and indices of consumed particles (sorted descending for safe removal).
+pub fn execute_sph_particle_reactions(
+    particles: &ParticleStore,
+    radius: f32,
+    reaction_registry: &FluidReactionRegistry,
+) -> (Vec<FluidReactionEvent>, Vec<usize>) {
+    if particles.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+
+    let grid = SpatialHash::from_positions(&particles.positions, radius);
+    let mut events = Vec::new();
+    let mut consumed: Vec<bool> = vec![false; particles.len()];
+
+    for i in 0..particles.len() {
+        if consumed[i] {
+            continue;
+        }
+        let fid_i = particles.fluid_ids[i];
+        if fid_i == FluidId::NONE {
+            continue;
+        }
+        let pos_i = particles.positions[i];
+
+        for &j in &grid.query(pos_i) {
+            if j <= i || consumed[j] {
+                continue;
+            }
+            let fid_j = particles.fluid_ids[j];
+            if fid_j == FluidId::NONE || fid_j == fid_i {
+                continue;
+            }
+            let dist = pos_i.distance(particles.positions[j]);
+            if dist > radius {
+                continue;
+            }
+
+            // Check reaction registry (adjacency = Any for particles)
+            let Some(_reaction) =
+                reaction_registry.find_reaction(fid_i, fid_j, &Adjacency::Any)
+            else {
+                continue;
+            };
+
+            // Mark both particles as consumed
+            consumed[i] = true;
+            consumed[j] = true;
+
+            // Emit event at midpoint
+            let midpoint = (pos_i + particles.positions[j]) * 0.5;
+            events.push(FluidReactionEvent {
+                position: midpoint,
+                fluid_a: fid_i,
+                fluid_b: fid_j,
+                result_tile: _reaction.result_tile,
+                result_fluid: _reaction.result_fluid,
+            });
+
+            break; // one reaction per particle per tick
+        }
+    }
+
+    // Collect consumed indices in descending order for safe swap-removal
+    let mut to_remove: Vec<usize> = consumed
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &c)| if c { Some(i) } else { None })
+        .collect();
+    to_remove.sort_unstable_by(|a, b| b.cmp(a));
+
+    (events, to_remove)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -951,5 +1034,59 @@ mod tests {
             "reaction should not fire when mass below minimum"
         );
         assert_eq!(world.tile_at(0, 0), TileId::AIR, "no tile should be placed");
+    }
+
+    // --- SPH particle reaction tests ---
+
+    use crate::fluid::sph_particle::{Particle, ParticleStore};
+    use bevy::math::Vec2;
+
+    #[test]
+    fn sph_reaction_fires_for_close_particles() {
+        let fr = test_fluid_registry();
+        let registry = simple_water_lava_registry();
+        let water_id = fr.by_name("water");
+        let lava_id = fr.by_name("lava");
+
+        let mut store = ParticleStore::new();
+        store.add(Particle::new(Vec2::new(10.0, 10.0), water_id, 1.0));
+        store.add(Particle::new(Vec2::new(14.0, 10.0), lava_id, 1.0));
+
+        let (events, to_remove) = execute_sph_particle_reactions(&store, 16.0, &registry);
+        assert_eq!(events.len(), 1, "should fire one reaction");
+        assert_eq!(to_remove.len(), 2, "both particles consumed");
+        assert_eq!(events[0].fluid_a, water_id);
+        assert_eq!(events[0].fluid_b, lava_id);
+    }
+
+    #[test]
+    fn sph_no_reaction_for_distant_particles() {
+        let fr = test_fluid_registry();
+        let registry = simple_water_lava_registry();
+        let water_id = fr.by_name("water");
+        let lava_id = fr.by_name("lava");
+
+        let mut store = ParticleStore::new();
+        store.add(Particle::new(Vec2::new(0.0, 0.0), water_id, 1.0));
+        store.add(Particle::new(Vec2::new(100.0, 100.0), lava_id, 1.0));
+
+        let (events, to_remove) = execute_sph_particle_reactions(&store, 16.0, &registry);
+        assert!(events.is_empty(), "no reaction for distant particles");
+        assert!(to_remove.is_empty());
+    }
+
+    #[test]
+    fn sph_no_reaction_for_same_fluid() {
+        let fr = test_fluid_registry();
+        let registry = simple_water_lava_registry();
+        let water_id = fr.by_name("water");
+
+        let mut store = ParticleStore::new();
+        store.add(Particle::new(Vec2::new(10.0, 10.0), water_id, 1.0));
+        store.add(Particle::new(Vec2::new(14.0, 10.0), water_id, 1.0));
+
+        let (events, to_remove) = execute_sph_particle_reactions(&store, 16.0, &registry);
+        assert!(events.is_empty(), "same fluid type should not react");
+        assert!(to_remove.is_empty());
     }
 }

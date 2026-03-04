@@ -121,12 +121,13 @@ impl<'a> FluidWorld<'a> {
         let idx = (ly * self.chunk_size + lx) as usize;
         let cell = &mut chunk.fluids[idx];
 
-        // Check if there's a different fluid in the cell (dual-fluid scenario)
+        // Only cap when introducing a NEW fluid type into a cell.
+        // If cell already has this fluid, allow flow — displacement handles total > 1.0.
+        let has_slot = cell.has_fluid(fluid_id);
         let has_other_fluid = (!cell.primary.is_empty() && cell.primary.fluid_id != fluid_id)
             || (!cell.secondary.is_empty() && cell.secondary.fluid_id != fluid_id);
 
-        // When mixing fluids, cap total mass at 1.0. Same-fluid allows compression.
-        let actual = if has_other_fluid {
+        let actual = if has_other_fluid && !has_slot {
             let available = (1.0 - cell.total_mass()).max(0.0);
             amount.min(available)
         } else {

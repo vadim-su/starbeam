@@ -5,6 +5,8 @@ use bevy_egui::{egui, EguiContexts};
 use crate::fluid::cell::FluidId;
 use crate::fluid::registry::FluidRegistry;
 use crate::fluid::simulation::FluidSimConfig;
+use crate::fluid::sph_particle::ParticleStore;
+use crate::fluid::sph_simulation::SphConfig;
 use crate::fluid::systems::ActiveFluidChunks;
 use crate::fluid::wave::WaveState;
 use crate::registry::world::ActiveWorld;
@@ -72,13 +74,27 @@ impl Default for FluidDebugState {
     }
 }
 
-/// Toggle fluid debug overlay on F8.
+/// Toggle fluid debug overlay on F8. Adjust sim speed with +/-.
 pub fn toggle_fluid_debug(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut state: ResMut<FluidDebugState>,
+    mut sim_config: ResMut<FluidSimConfig>,
 ) {
     if keyboard.just_pressed(KeyCode::F8) {
         state.visible = !state.visible;
+    }
+    // +/= speed up, - slow down, 0 reset to default
+    if keyboard.just_pressed(KeyCode::Equal) || keyboard.just_pressed(KeyCode::NumpadAdd) {
+        sim_config.tick_rate = (sim_config.tick_rate * 2.0).min(240.0);
+        info!("Fluid tick rate: {} Hz", sim_config.tick_rate);
+    }
+    if keyboard.just_pressed(KeyCode::Minus) || keyboard.just_pressed(KeyCode::NumpadSubtract) {
+        sim_config.tick_rate = (sim_config.tick_rate / 2.0).max(1.0);
+        info!("Fluid tick rate: {} Hz", sim_config.tick_rate);
+    }
+    if keyboard.just_pressed(KeyCode::Digit0) {
+        sim_config.tick_rate = 60.0;
+        info!("Fluid tick rate reset: {} Hz", sim_config.tick_rate);
     }
 }
 
@@ -95,6 +111,8 @@ pub fn draw_fluid_debug_panel(
     active_fluids: Res<ActiveFluidChunks>,
     sim_config: Res<FluidSimConfig>,
     wave_state: Res<WaveState>,
+    particles: Res<ParticleStore>,
+    sph_config: Res<SphConfig>,
 ) -> Result {
     if !state.visible {
         return Ok(());
@@ -134,7 +152,10 @@ pub fn draw_fluid_debug_panel(
                         .spacing([20.0, 4.0])
                         .show(ui, |ui| {
                             ui.label("Tick rate:");
-                            ui.monospace(format!("{} Hz", sim_config.tick_rate));
+                            ui.colored_label(
+                                if sim_config.tick_rate != 60.0 { egui::Color32::YELLOW } else { egui::Color32::LIGHT_GREEN },
+                                format!("{} Hz (+/-/0)", sim_config.tick_rate),
+                            );
                             ui.end_row();
 
                             ui.label("Active chunks:");
@@ -146,6 +167,17 @@ pub fn draw_fluid_debug_panel(
 
                             ui.label("Wave buffers:");
                             ui.monospace(format!("{}", wave_state.buffers.len()));
+                            ui.end_row();
+
+                            ui.label("SPH particles:");
+                            ui.colored_label(
+                                egui::Color32::LIGHT_BLUE,
+                                format!("{}", particles.len()),
+                            );
+                            ui.end_row();
+
+                            ui.label("SPH smoothing r:");
+                            ui.monospace(format!("{:.1}", sph_config.smoothing_radius));
                             ui.end_row();
                         });
                 });
@@ -417,6 +449,35 @@ pub fn draw_fluid_debug_panel(
                             );
                         }
                     }
+
+                    ui.separator();
+                    ui.label(egui::RichText::new("SPH Particles").strong());
+                    egui::Grid::new("sph_grid")
+                        .num_columns(2)
+                        .spacing([20.0, 4.0])
+                        .show(ui, |ui| {
+                            ui.label("Count:");
+                            ui.monospace(format!("{}", particles.len()));
+                            ui.end_row();
+
+                            if !particles.is_empty() {
+                                let avg_density: f32 = particles.densities.iter().sum::<f32>() / particles.len() as f32;
+                                let avg_pressure: f32 = particles.pressures.iter().sum::<f32>() / particles.len() as f32;
+                                let avg_speed: f32 = particles.velocities.iter().map(|v| v.length()).sum::<f32>() / particles.len() as f32;
+
+                                ui.label("Avg density:");
+                                ui.monospace(format!("{avg_density:.4}"));
+                                ui.end_row();
+
+                                ui.label("Avg pressure:");
+                                ui.monospace(format!("{avg_pressure:.2}"));
+                                ui.end_row();
+
+                                ui.label("Avg speed:");
+                                ui.monospace(format!("{avg_speed:.1} px/s"));
+                                ui.end_row();
+                            }
+                        });
                 });
         });
 

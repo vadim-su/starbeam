@@ -3,6 +3,7 @@ use bevy::window::PrimaryWindow;
 
 use crate::fluid::cell::{FluidCell, FluidId};
 use crate::fluid::registry::FluidRegistry;
+use crate::fluid::sph_particle::{Particle, ParticleStore};
 use crate::fluid::systems::ActiveFluidChunks;
 use crate::registry::world::ActiveWorld;
 use crate::world::chunk::{tile_to_chunk, world_to_tile, WorldMap};
@@ -20,6 +21,7 @@ pub fn debug_place_fluid(
     active_world: Res<ActiveWorld>,
     fluid_registry: Res<FluidRegistry>,
     mut active_fluids: ResMut<ActiveFluidChunks>,
+    mut sph_particles: ResMut<ParticleStore>,
 ) {
     let f5 = input.just_pressed(KeyCode::F5);
     let f6 = input.just_pressed(KeyCode::F6);
@@ -88,6 +90,29 @@ pub fn debug_place_fluid(
                 if idx < chunk.fluids.len() && chunk.fluids[idx].is_empty() {
                     chunk.fluids[idx] = FluidCell::new(fluid_id, 1.0);
                     active_fluids.chunks.insert((fcx, fcy));
+                }
+            }
+        }
+    }
+
+    // Also spawn SPH particles for liquid fluids
+    let fluid_def = fluid_registry.get(fluid_id);
+    if !fluid_def.is_gas {
+        let center = Vec2::new(
+            wrapped_x as f32 * tile_size + tile_size * 0.5,
+            tile_y as f32 * tile_size + tile_size * 0.5,
+        );
+        // Spawn a cluster of SPH particles in the 3x3 area
+        for dy in -1..=1_i32 {
+            for dx in -1..=1_i32 {
+                let base = center + Vec2::new(dx as f32 * tile_size, dy as f32 * tile_size);
+                // 4 particles per tile for decent density
+                for j in 0..4 {
+                    let offset = Vec2::new(
+                        (j % 2) as f32 * tile_size * 0.4 - tile_size * 0.2,
+                        (j / 2) as f32 * tile_size * 0.4 - tile_size * 0.2,
+                    );
+                    sph_particles.add(Particle::new(base + offset, fluid_id, 1.0));
                 }
             }
         }

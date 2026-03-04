@@ -632,13 +632,18 @@ pub fn build_fluid_mesh(
                 continue;
             }
 
+            // Skip cells with negligible total mass to avoid visual artifacts
+            // (micro-cells from flow spreading that are essentially invisible).
+            const RENDER_MIN_MASS: f32 = 0.03;
+
             let world_x = (base_x + local_x as i32) as f32 * tile_size;
             let world_y = (base_y + local_y as i32) as f32 * tile_size;
 
-            let has_secondary = !cell.secondary.is_empty();
+            let has_secondary = !cell.secondary.is_empty()
+                && cell.secondary.mass >= RENDER_MIN_MASS;
 
             // --- Primary slot ---
-            if !cell.primary.is_empty() {
+            if !cell.primary.is_empty() && cell.primary.mass >= RENDER_MIN_MASS {
                 let primary_def = fluid_registry.get(cell.primary.fluid_id);
                 let primary_fill = cell.primary.mass.min(1.0);
 
