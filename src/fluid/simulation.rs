@@ -161,11 +161,14 @@ fn run_tick(
         let mut new_fluids = fluids.clone();
         let mut chunk_dirty = false;
 
-        // Process bottom-to-top for liquids (gravity settles faster)
+        // Process bottom-to-top for liquids (gravity settles faster).
+        // IMPORTANT: All flow decisions read from `fluids` (snapshot).
+        // All writes go to `new_fluids` as deltas. This prevents cascading
+        // where mass received from a neighbor in this tick immediately flows onward.
         for local_y in 0..chunk_size {
             for local_x in 0..chunk_size {
                 let idx = (local_y * chunk_size + local_x) as usize;
-                let cell = fluids[idx];
+                let cell = fluids[idx]; // Always read from SNAPSHOT
 
                 if cell.is_empty() {
                     continue;
@@ -185,13 +188,14 @@ fn run_tick(
                 let world_x = base_x + local_x as i32;
                 let world_y = base_y + local_y as i32;
 
-                let mut remaining = new_fluids[idx].mass;
+                // Track total outflow from this cell (applied as delta at the end)
+                let mut outflow = 0.0f32;
 
                 // === Primary direction: down for liquids, up for gases ===
                 let primary_dy: i32 = if def.is_gas { 1 } else { -1 };
                 let target_y = world_y + primary_dy;
 
-                if remaining > config.min_mass
+                if cell.mass > config.min_mass
                     && target_y >= 0
                     && target_y < active_world.height_tiles
                 {
@@ -208,14 +212,16 @@ fn run_tick(
                     };
 
                     if !dst_solid {
+                        // Read destination from SNAPSHOT
                         let dst = if same_chunk {
-                            new_fluids[tidx]
+                            fluids[tidx]
                         } else {
                             read_fluid(world_map, wrapped_x, target_y, chunk_size)
                         };
 
                         if dst.is_empty() || dst.fluid_id == cell.fluid_id {
                             // For primary direction (gravity/buoyancy), move aggressively
+                            let remaining = cell.mass;
                             let flow = (remaining - dst.mass)
                                 .max(0.0)
                                 .min(remaining)
@@ -223,7 +229,7 @@ fn run_tick(
                                 * flow_rate;
 
                             if flow > config.min_mass {
-                                remaining -= flow;
+                                outflow += flow;
                                 chunk_dirty = true;
 
                                 if same_chunk {
@@ -244,8 +250,9 @@ fn run_tick(
                 }
 
                 // === Horizontal equalization ===
+                let remaining_for_horiz = cell.mass - outflow;
                 for dx in [-1i32, 1] {
-                    if remaining <= config.min_mass {
+                    if remaining_for_horiz <= config.min_mass {
                         break;
                     }
 
@@ -267,8 +274,9 @@ fn run_tick(
                         continue;
                     }
 
+                    // Read destination from SNAPSHOT
                     let dst = if same_chunk {
-                        new_fluids[nidx]
+                        fluids[nidx]
                     } else {
                         read_fluid(world_map, nx, ny, chunk_size)
                     };
@@ -277,10 +285,11 @@ fn run_tick(
                         continue;
                     }
 
-                    let flow = transfer_mass(remaining, dst.mass, flow_rate * 0.5, max_mass);
+                    let flow =
+                        transfer_mass(remaining_for_horiz, dst.mass, flow_rate * 0.5, max_mass);
 
                     if flow > config.min_mass {
-                        remaining -= flow;
+                        outflow += flow;
                         chunk_dirty = true;
 
                         if same_chunk {
@@ -299,7 +308,8 @@ fn run_tick(
                 }
 
                 // === Pressure: push upward for liquids if overfull ===
-                if !def.is_gas && remaining > 1.0 {
+                let remaining_after_all = cell.mass - outflow;
+                if !def.is_gas && remaining_after_all > 1.0 {
                     let up_y = world_y + 1;
                     if up_y < active_world.height_tiles {
                         let wrapped_x = active_world.wrap_tile_x(world_x);
@@ -315,19 +325,20 @@ fn run_tick(
                         };
 
                         if !dst_solid {
+                            // Read destination from SNAPSHOT
                             let dst = if same_chunk {
-                                new_fluids[uidx]
+                                fluids[uidx]
                             } else {
                                 read_fluid(world_map, wrapped_x, up_y, chunk_size)
                             };
 
                             if dst.is_empty() || dst.fluid_id == cell.fluid_id {
-                                let excess = remaining - 1.0;
+                                let excess = remaining_after_all - 1.0;
                                 let space = (max_mass - dst.mass).max(0.0);
                                 let flow = excess.min(space) * flow_rate;
 
                                 if flow > config.min_mass {
-                                    remaining -= flow;
+                                    outflow += flow;
                                     chunk_dirty = true;
 
                                     if same_chunk {
@@ -348,10 +359,12 @@ fn run_tick(
                     }
                 }
 
-                // Update source cell
-                new_fluids[idx].mass = remaining;
-                if remaining <= config.min_mass {
+                // Apply total outflow as delta to source cell
+                new_fluids[idx].mass -= outflow;
+                if new_fluids[idx].mass <= config.min_mass {
                     new_fluids[idx] = FluidCell::EMPTY;
+                    chunk_dirty = true;
+                } else if outflow > 0.0 {
                     chunk_dirty = true;
                 }
             }
