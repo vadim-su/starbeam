@@ -59,6 +59,12 @@ pub struct FluidDebugState {
     pub mode: FluidDebugMode,
     /// Show grid lines between cells in debug mode.
     pub show_grid: bool,
+    /// Override particle visual radius. 0.0 means auto (smoothing_radius * 0.5).
+    pub particle_visual_radius: f32,
+    /// Whether caustics are enabled in the shader.
+    pub enable_caustics: bool,
+    /// Whether shimmer is enabled in the shader.
+    pub enable_shimmer: bool,
 }
 
 impl Default for FluidDebugState {
@@ -67,6 +73,9 @@ impl Default for FluidDebugState {
             visible: false,
             mode: FluidDebugMode::Mass,
             show_grid: true,
+            particle_visual_radius: 0.0,
+            enable_caustics: true,
+            enable_shimmer: true,
         }
     }
 }
@@ -92,7 +101,7 @@ pub fn draw_fluid_debug_panel(
     active_world: Res<ActiveWorld>,
     fluid_registry: Res<FluidRegistry>,
     particles: Res<ParticleStore>,
-    sph_config: Res<SphConfig>,
+    mut sph_config: ResMut<SphConfig>,
 ) -> Result {
     if !state.visible {
         return Ok(());
@@ -267,6 +276,49 @@ pub fn draw_fluid_debug_panel(
                     } else {
                         ui.label("-- (cursor outside)");
                     }
+                });
+
+            // --- SPH Settings ---
+            egui::CollapsingHeader::new(egui::RichText::new("SPH Settings").strong())
+                .default_open(false)
+                .show(ui, |ui| {
+                    ui.label(egui::RichText::new("Rendering").underline());
+                    ui.add(
+                        egui::Slider::new(&mut state.particle_visual_radius, 0.0..=32.0)
+                            .text("Particle visual radius")
+                            .custom_formatter(|v, _| {
+                                if v == 0.0 {
+                                    "auto".to_string()
+                                } else {
+                                    format!("{v:.1}")
+                                }
+                            }),
+                    );
+                    ui.checkbox(&mut state.enable_caustics, "Enable caustics");
+                    ui.checkbox(&mut state.enable_shimmer, "Enable shimmer");
+
+                    ui.separator();
+                    ui.label(egui::RichText::new("Simulation").underline());
+                    ui.add(
+                        egui::Slider::new(&mut sph_config.smoothing_radius, 4.0..=64.0)
+                            .text("Smoothing radius"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut sph_config.stiffness, 1.0..=500.0)
+                            .text("Stiffness"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut sph_config.viscosity, 0.0..=5.0)
+                            .text("Viscosity"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut sph_config.gravity.y, -500.0..=0.0)
+                            .text("Gravity Y"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut sph_config.particle_mass, 0.1..=10.0)
+                            .text("Particle mass"),
+                    );
                 });
         });
 

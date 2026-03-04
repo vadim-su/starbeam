@@ -20,6 +20,8 @@ struct FluidUniforms {
     time: f32,
     debug_mode: u32,
     show_grid: u32,
+    enable_caustics: u32,
+    enable_shimmer: u32,
 }
 
 @group(2) @binding(0) var lightmap_texture: texture_2d<f32>;
@@ -87,15 +89,19 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     var color = in.color;
 
     // 1. Caustics
-    let tile_pixels: f32 = 32.0;
-    let PIXEL_DENSITY: f32 = 8.0;
-    let pix_uv = floor(in.world_pos / tile_pixels * PIXEL_DENSITY) / PIXEL_DENSITY;
-    let c = caustic(pix_uv, uniforms.time);
-    color = vec4<f32>(color.rgb + c * 0.15 * vec3<f32>(0.6, 0.8, 1.0), color.a);
+    if uniforms.enable_caustics != 0u {
+        let tile_pixels: f32 = 32.0;
+        let PIXEL_DENSITY: f32 = 8.0;
+        let pix_uv = floor(in.world_pos / tile_pixels * PIXEL_DENSITY) / PIXEL_DENSITY;
+        let c = caustic(pix_uv, uniforms.time);
+        color = vec4<f32>(color.rgb + c * 0.15 * vec3<f32>(0.6, 0.8, 1.0), color.a);
+    }
 
     // 2. Shimmer
-    let shimmer = 1.0 + 0.05 * sin(in.world_pos.x * 0.5 + uniforms.time * 0.8);
-    color = vec4<f32>(color.rgb * shimmer, color.a);
+    if uniforms.enable_shimmer != 0u {
+        let shimmer = 1.0 + 0.05 * sin(in.world_pos.x * 0.5 + uniforms.time * 0.8);
+        color = vec4<f32>(color.rgb * shimmer, color.a);
+    }
 
     // 3. Lightmap
     let lm_scale  = uniforms.lightmap_uv_rect.xy;

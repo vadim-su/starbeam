@@ -46,6 +46,12 @@ pub struct FluidMaterial {
     /// Whether to show grid lines between cells in debug mode.
     #[uniform(2)]
     pub show_grid: u32,
+    /// Whether caustics are enabled (0 = off, 1 = on).
+    #[uniform(2)]
+    pub enable_caustics: u32,
+    /// Whether shimmer is enabled (0 = off, 1 = on).
+    #[uniform(2)]
+    pub enable_shimmer: u32,
 }
 
 impl Material2d for FluidMaterial {
@@ -112,6 +118,8 @@ pub fn init_fluid_material(
             time: 0.0,
             debug_mode: 0,
             show_grid: 0,
+            enable_caustics: 1,
+            enable_shimmer: 1,
         }),
     });
 }
@@ -133,6 +141,8 @@ pub fn update_fluid_time(
                 mat.debug_mode = 0;
                 mat.show_grid = 0;
             }
+            mat.enable_caustics = if dbg.enable_caustics { 1 } else { 0 };
+            mat.enable_shimmer = if dbg.enable_shimmer { 1 } else { 0 };
         }
     }
 }
@@ -226,6 +236,7 @@ pub fn fluid_rebuild_meshes(
     existing_fluid_meshes: Query<(Entity, &ChunkCoord), With<FluidMeshEntity>>,
     particles: Res<ParticleStore>,
     sph_config: Res<SphConfig>,
+    debug_state: Option<Res<crate::fluid::debug_overlay::FluidDebugState>>,
 ) {
     if particles.is_empty() {
         // Remove all existing fluid mesh entities when no particles
@@ -237,7 +248,16 @@ pub fn fluid_rebuild_meshes(
 
     let chunk_size = active_world.chunk_size;
     let tile_size = active_world.tile_size;
-    let particle_radius = sph_config.smoothing_radius * 0.5;
+    let particle_radius = debug_state
+        .as_ref()
+        .and_then(|ds| {
+            if ds.particle_visual_radius > 0.0 {
+                Some(ds.particle_visual_radius)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(sph_config.smoothing_radius * 0.5);
 
     // Track which display chunks get meshes this frame
     let mut chunks_with_mesh: HashSet<(i32, i32)> = HashSet::new();
