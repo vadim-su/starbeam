@@ -76,6 +76,15 @@ pub fn build_fluid_mesh(
             let py = (base_y + local_y as i32) as f32 * tile_size;
             let height = fill * tile_size;
 
+            // Check if the cell above has fluid (submerged → no surface wave)
+            let is_surface = if local_y + 1 < chunk_size {
+                let above_idx = ((local_y + 1) * chunk_size + local_x) as usize;
+                fluids[above_idx].is_empty()
+            } else {
+                // Top row of chunk — conservatively treat as surface
+                true
+            };
+
             let vi = buffers.positions.len() as u32;
 
             // Quad: bottom-left, bottom-right, top-right, top-left
@@ -88,12 +97,16 @@ pub fn build_fluid_mesh(
             ]);
 
             // UV: (0,0) = bottom-left, (1,1) = top-right
-            // Used by shader for surface wave clipping
+            // Used by shader for surface wave clipping.
+            // For submerged cells (not surface), set uv.y = 0.0 everywhere
+            // so the shader's wave check (near_top = 1.0 - uv.y) stays > surface_band
+            // and the wave effect is skipped.
+            let top_v = if is_surface { 1.0 } else { 0.0 };
             buffers.uvs.extend_from_slice(&[
                 [0.0, 0.0],
                 [1.0, 0.0],
-                [1.0, 1.0],
-                [0.0, 1.0],
+                [1.0, top_v],
+                [0.0, top_v],
             ]);
 
             buffers.colors.extend_from_slice(&[color, color, color, color]);
