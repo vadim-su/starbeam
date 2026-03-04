@@ -945,7 +945,7 @@ fn update_tile_lightmap(
     if let Some(shared_fluid) = shared_fluid_material {
         if let Some(mat) = fluid_materials.get_mut(&shared_fluid.handle) {
             mat.lightmap = gpu_images.lightmap.clone();
-            mat.lightmap_uv_rect = lm_params;
+            mat.uniforms.lightmap_uv_rect = lm_params;
         }
     }
 }

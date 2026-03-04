@@ -19,9 +19,8 @@ pub use detectors::{FluidContactState, Projectile};
 pub use events::{FluidReactionEvent, ImpactKind, WaterImpactEvent};
 pub use reactions::{FluidReactionDef, FluidReactionRegistry};
 pub use registry::{FluidDef, FluidRegistry};
-pub use render::build_fluid_mesh;
 pub use simulation::FluidSimConfig;
-pub use systems::{ActiveFluidChunks, FluidMaterial, FluidTickAccumulator};
+pub use systems::{ActiveFluidChunks, ChunkFluidMaterials, FluidMaterial, FluidTickAccumulator};
 
 use crate::registry::AppState;
 use crate::sets::GameSet;
@@ -35,9 +34,11 @@ impl Plugin for FluidPlugin {
             .add_plugins(Material2dPlugin::<FluidMaterial>::default())
             .init_resource::<FluidSimConfig>()
             .init_resource::<systems::FluidTickAccumulator>()
+            .init_resource::<debug::FluidPlacementMode>()
             .init_resource::<systems::ActiveFluidChunks>()
             .init_resource::<wave::WaveConfig>()
             .init_resource::<wave::WaveState>()
+            .init_resource::<systems::ChunkFluidMaterials>()
             .init_resource::<splash::SplashConfig>()
             .init_resource::<detectors::SwimThrottle>()
             .add_systems(Startup, systems::init_fluid_material)

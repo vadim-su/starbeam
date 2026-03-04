@@ -1,30 +1,68 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
-use crate::fluid::cell::{FluidCell, FluidId};
+use crate::fluid::cell::FluidCell;
 use crate::fluid::registry::FluidRegistry;
 use crate::fluid::systems::ActiveFluidChunks;
 use crate::registry::world::ActiveWorld;
 use crate::world::chunk::{tile_to_chunk, world_to_tile, WorldMap};
 
-/// Debug system: press F5 to place water, F6 to place steam, F7 to place lava at cursor.
-///
-/// Places a full cell (mass=1.0) of the selected fluid at the tile under the
-/// cursor and registers the chunk as active for the fluid simulation.
+/// Names of fluids available for debug placement, cycled with F6.
+const FLUID_NAMES: &[&str] = &["water", "steam", "lava"];
+
+/// Persistent state for the debug fluid placement tool.
+#[derive(Resource)]
+pub struct FluidPlacementMode {
+    /// Whether placement mode is active (toggled with F5).
+    pub enabled: bool,
+    /// Index into [`FLUID_NAMES`] (cycled with F6).
+    pub fluid_index: usize,
+}
+
+impl Default for FluidPlacementMode {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            fluid_index: 0,
+        }
+    }
+}
+
+/// Debug system: F5 toggles fluid placement mode, F6 cycles fluid type.
+/// While placement mode is active, holding a mouse button places fluid at the
+/// cursor position (3x3 area).
 #[allow(clippy::too_many_arguments)]
 pub fn debug_place_fluid(
     input: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     camera: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
     mut world_map: ResMut<WorldMap>,
     active_world: Res<ActiveWorld>,
     fluid_registry: Res<FluidRegistry>,
     mut active_fluids: ResMut<ActiveFluidChunks>,
+    mut mode: ResMut<FluidPlacementMode>,
 ) {
-    let f5 = input.just_pressed(KeyCode::F5);
-    let f6 = input.just_pressed(KeyCode::F6);
-    let f7 = input.just_pressed(KeyCode::F7);
-    if !f5 && !f6 && !f7 {
+    // F5: toggle placement mode
+    if input.just_pressed(KeyCode::F5) {
+        mode.enabled = !mode.enabled;
+        let name = FLUID_NAMES[mode.fluid_index];
+        if mode.enabled {
+            info!("Fluid placement ON  [{}]", name);
+        } else {
+            info!("Fluid placement OFF");
+        }
+    }
+
+    // F6: cycle fluid type
+    if input.just_pressed(KeyCode::F6) {
+        mode.fluid_index = (mode.fluid_index + 1) % FLUID_NAMES.len();
+        let name = FLUID_NAMES[mode.fluid_index];
+        info!("Fluid type: {}", name);
+    }
+
+    // Place fluid while mode is active and mouse button is held
+    if !mode.enabled || !mouse.pressed(MouseButton::Left) {
         return;
     }
 
@@ -50,22 +88,11 @@ pub fn debug_place_fluid(
     let wrapped_x = active_world.wrap_tile_x(tile_x);
     let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, chunk_size);
 
-    // Determine which fluid to place
-    let (fluid_id, fluid_name) = if f5 {
-        (
-            fluid_registry.try_by_name("water").unwrap_or(FluidId(1)),
-            "water",
-        )
-    } else if f7 {
-        (
-            fluid_registry.try_by_name("lava").unwrap_or(FluidId(2)),
-            "lava",
-        )
-    } else {
-        (
-            fluid_registry.try_by_name("steam").unwrap_or(FluidId(3)),
-            "steam",
-        )
+    // Resolve fluid id from registry
+    let fluid_name = FLUID_NAMES[mode.fluid_index];
+    let Some(fluid_id) = fluid_registry.try_by_name(fluid_name) else {
+        warn!("Unknown fluid '{}' in registry", fluid_name);
+        return;
     };
 
     // Place fluid in a 3x3 area for more visible effect
@@ -95,9 +122,4 @@ pub fn debug_place_fluid(
 
     // Also ensure the center chunk is active
     active_fluids.chunks.insert((cx, cy));
-
-    info!(
-        "Debug: placed {} at tile ({}, {}), chunk ({}, {})",
-        fluid_name, wrapped_x, tile_y, cx, cy
-    );
 }

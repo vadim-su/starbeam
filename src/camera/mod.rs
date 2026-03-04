@@ -4,6 +4,7 @@ pub mod snap;
 use bevy::ecs::message::MessageReader;
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
+use bevy_egui::{EguiGlobalSettings, PrimaryEguiContext};
 
 use crate::player::respawn_player_on_warp;
 use crate::registry::AppState;
@@ -19,7 +20,8 @@ pub struct CameraPlugin;
 
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(AppState::Loading), spawn_camera)
+        app.add_systems(PreStartup, disable_egui_auto_camera)
+            .add_systems(OnEnter(AppState::Loading), spawn_camera)
             .add_systems(
                 OnEnter(AppState::InGame),
                 snap::snap_camera_to_player.after(respawn_player_on_warp),
@@ -36,9 +38,16 @@ impl Plugin for CameraPlugin {
     }
 }
 
+/// Disable bevy_egui auto-binding to the first camera.
+/// Must run before any camera is spawned (menu camera spawns on initial state enter).
+fn disable_egui_auto_camera(mut settings: ResMut<EguiGlobalSettings>) {
+    settings.auto_create_primary_context = false;
+}
+
 fn spawn_camera(mut commands: Commands) {
     commands.spawn((
         Camera2d,
+        PrimaryEguiContext,
         Projection::Orthographic(OrthographicProjection {
             scale: CAMERA_SCALE,
             ..OrthographicProjection::default_2d()

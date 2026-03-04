@@ -5,7 +5,7 @@ use bevy::ecs::message::{MessageReader, MessageWriter};
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::prelude::*;
 use bevy::render::render_resource::{
-    AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError,
+    AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
 };
 use bevy::shader::ShaderRef;
 use bevy::sprite_render::{AlphaMode2d, Material2d, Material2dKey, MeshMaterial2d};
@@ -17,10 +17,7 @@ use crate::fluid::reactions::{
     execute_fluid_reactions_global, resolve_density_displacement_global, FluidReactionRegistry,
 };
 use crate::fluid::registry::FluidRegistry;
-use crate::fluid::render::{
-    build_fluid_mesh, column_gas_surface_h, column_liquid_surface_h, ATTRIBUTE_EDGE_FLAGS,
-    ATTRIBUTE_FLUID_DATA, ATTRIBUTE_WAVE_HEIGHT, ATTRIBUTE_WAVE_PARAMS,
-};
+use crate::fluid::render::{build_chunk_quad, build_fluid_textures, make_r8_texture};
 use crate::fluid::simulation::{simulate_tick, FluidSimConfig};
 use crate::fluid::wave::{reconcile_wave_boundaries, WaveBuffer, WaveConfig, WaveState};
 use crate::registry::tile::TileRegistry;
@@ -33,20 +30,82 @@ pub struct FluidTickAccumulator {
     pub accumulator: f32,
 }
 
-/// Custom Material2d for fluid rendering with lightmap, wave animation, and emission.
+/// GPU-side uniform data for the metaball fluid shader.
+///
+/// Field order MUST match the `FluidUniforms` struct in `fluid.wgsl` exactly.
+/// The `ShaderType` derive handles alignment automatically.
+#[derive(Clone, ShaderType)]
+pub struct FluidUniformData {
+    pub lightmap_uv_rect: Vec4,
+    pub time: f32,
+    pub tile_size: f32,
+    pub chunk_size: f32,
+    pub threshold: f32,
+    pub radius_min: f32,
+    pub radius_max: f32,
+    pub _pad0: f32,
+    pub _pad1: f32,
+    pub fluid_color_0: Vec4,
+    pub fluid_color_1: Vec4,
+    pub fluid_color_2: Vec4,
+    pub fluid_color_3: Vec4,
+    pub fluid_color_4: Vec4,
+    pub fluid_color_5: Vec4,
+    pub fluid_color_6: Vec4,
+    pub fluid_color_7: Vec4,
+    pub fluid_emission_0: Vec4,
+    pub fluid_emission_1: Vec4,
+}
+
+impl Default for FluidUniformData {
+    fn default() -> Self {
+        Self {
+            lightmap_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
+            time: 0.0,
+            tile_size: 8.0,
+            chunk_size: 32.0,
+            threshold: 0.5,
+            radius_min: 0.4,
+            radius_max: 0.8,
+            _pad0: 0.0,
+            _pad1: 0.0,
+            fluid_color_0: Vec4::ZERO,
+            fluid_color_1: Vec4::ZERO,
+            fluid_color_2: Vec4::ZERO,
+            fluid_color_3: Vec4::ZERO,
+            fluid_color_4: Vec4::ZERO,
+            fluid_color_5: Vec4::ZERO,
+            fluid_color_6: Vec4::ZERO,
+            fluid_color_7: Vec4::ZERO,
+            fluid_emission_0: Vec4::ZERO,
+            fluid_emission_1: Vec4::ZERO,
+        }
+    }
+}
+
+/// Custom Material2d for metaball fluid rendering.
+///
+/// Each chunk gets its own material instance with unique density/fluid_id textures.
+/// Shared uniforms (time, colors, lightmap) are synced from `SharedFluidMaterial`.
 ///
 /// Bindings (all in @group(2)):
-///   - texture(0) / sampler(1): lightmap
-///   - uniform(2): FluidUniforms { lightmap_uv_rect, time }
+///   - texture(0) / sampler(1): density_texture (R8Unorm, nearest)
+///   - texture(2) / sampler(3): fluid_id_texture (R8Unorm, nearest)
+///   - texture(4) / sampler(5): lightmap
+///   - uniform(6): FluidUniformData
 #[derive(Asset, AsBindGroup, Clone, TypePath)]
 pub struct FluidMaterial {
-    #[texture(0)]
-    #[sampler(1)]
+    #[texture(0, sample_type = "float", dimension = "2d")]
+    #[sampler(1, sampler_type = "non_filtering")]
+    pub density_texture: Handle<Image>,
+    #[texture(2, sample_type = "float", dimension = "2d")]
+    #[sampler(3, sampler_type = "non_filtering")]
+    pub fluid_id_texture: Handle<Image>,
+    #[texture(4)]
+    #[sampler(5)]
     pub lightmap: Handle<Image>,
-    #[uniform(2)]
-    pub lightmap_uv_rect: Vec4,
-    #[uniform(2)]
-    pub time: f32,
+    #[uniform(6)]
+    pub uniforms: FluidUniformData,
 }
 
 impl Material2d for FluidMaterial {
@@ -69,12 +128,7 @@ impl Material2d for FluidMaterial {
     ) -> Result<(), SpecializedMeshPipelineError> {
         let vertex_layout = layout.0.get_layout(&[
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
-            Mesh::ATTRIBUTE_COLOR.at_shader_location(1),
-            Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
-            ATTRIBUTE_FLUID_DATA.at_shader_location(3),
-            ATTRIBUTE_WAVE_HEIGHT.at_shader_location(4),
-            ATTRIBUTE_WAVE_PARAMS.at_shader_location(5),
-            ATTRIBUTE_EDGE_FLAGS.at_shader_location(6),
+            Mesh::ATTRIBUTE_UV_0.at_shader_location(1),
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         Ok(())
@@ -105,18 +159,28 @@ pub struct ActiveFluidChunks {
 pub struct FluidMeshEntity;
 
 /// Shared material handle for fluid mesh overlays.
+/// Used as a template for uniforms (time, lightmap, colors) that get
+/// synced to all per-chunk materials by `update_fluid_time`.
 #[derive(Resource)]
 pub struct SharedFluidMaterial {
     pub handle: Handle<FluidMaterial>,
 }
 
-/// Create the shared FluidMaterial with a fallback 1×1 white lightmap.
+/// Tracks per-chunk material handles for the metaball fluid system.
+#[derive(Resource, Default)]
+pub struct ChunkFluidMaterials {
+    pub materials: HashMap<(i32, i32), Handle<FluidMaterial>>,
+}
+
+/// Create the shared FluidMaterial with fallback 1×1 placeholder textures.
 pub fn init_fluid_material(
     mut commands: Commands,
     mut fluid_materials: ResMut<Assets<FluidMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+
+    // 1×1 white lightmap (Rgba16Float)
     let white_lightmap = images.add(Image::new_fill(
         Extent3d {
             width: 1,
@@ -129,23 +193,106 @@ pub fn init_fluid_material(
         TextureFormat::Rgba16Float,
         RenderAssetUsages::RENDER_WORLD,
     ));
+
+    // 1×1 placeholder density texture (R8Unorm, value 0)
+    let placeholder_density = images.add(make_r8_texture(vec![0u8], 1, 1));
+    // 1×1 placeholder fluid_id texture (R8Unorm, value 0)
+    let placeholder_fluid_id = images.add(make_r8_texture(vec![0u8], 1, 1));
+
     commands.insert_resource(SharedFluidMaterial {
         handle: fluid_materials.add(FluidMaterial {
+            density_texture: placeholder_density,
+            fluid_id_texture: placeholder_fluid_id,
             lightmap: white_lightmap,
-            lightmap_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
-            time: 0.0,
+            uniforms: FluidUniformData::default(),
         }),
     });
 }
 
-/// Update the time uniform on the shared FluidMaterial each frame.
+/// Update the time, tile_size, chunk_size, and fluid colors/emission uniforms
+/// on the shared FluidMaterial and all per-chunk materials each frame.
 pub fn update_fluid_time(
     time: Res<Time>,
     shared: Res<SharedFluidMaterial>,
     mut materials: ResMut<Assets<FluidMaterial>>,
+    active_world: Option<Res<ActiveWorld>>,
+    fluid_registry: Option<Res<FluidRegistry>>,
+    chunk_materials: Option<Res<ChunkFluidMaterials>>,
 ) {
+    let t = time.elapsed_secs();
+    let ts = active_world.as_ref().map(|aw| aw.tile_size).unwrap_or(8.0);
+    let cs = active_world
+        .as_ref()
+        .map(|aw| aw.chunk_size as f32)
+        .unwrap_or(32.0);
+
+    // Build fluid colors/emission from registry
+    let mut colors = [Vec4::ZERO; 8];
+    let mut emission_0 = Vec4::ZERO;
+    let mut emission_1 = Vec4::ZERO;
+    if let Some(ref reg) = fluid_registry {
+        for i in 0..reg.len().min(7) {
+            let def = &reg.defs[i];
+            let fid = i + 1; // FluidId starts at 1
+            if fid < 8 {
+                colors[fid] = Vec4::new(
+                    def.color[0] as f32 / 255.0,
+                    def.color[1] as f32 / 255.0,
+                    def.color[2] as f32 / 255.0,
+                    def.color[3] as f32 / 255.0,
+                );
+                let em = (def.light_emission[0] as f32
+                    + def.light_emission[1] as f32
+                    + def.light_emission[2] as f32)
+                    / (255.0 * 3.0);
+                if fid < 4 {
+                    emission_0[fid] = em;
+                } else {
+                    emission_1[fid - 4] = em;
+                }
+            }
+        }
+    }
+
+    // Helper closure to apply uniform updates to a material
+    let apply_uniforms = |mat: &mut FluidMaterial| {
+        mat.uniforms.time = t;
+        mat.uniforms.tile_size = ts;
+        mat.uniforms.chunk_size = cs;
+        mat.uniforms.fluid_color_0 = colors[0];
+        mat.uniforms.fluid_color_1 = colors[1];
+        mat.uniforms.fluid_color_2 = colors[2];
+        mat.uniforms.fluid_color_3 = colors[3];
+        mat.uniforms.fluid_color_4 = colors[4];
+        mat.uniforms.fluid_color_5 = colors[5];
+        mat.uniforms.fluid_color_6 = colors[6];
+        mat.uniforms.fluid_color_7 = colors[7];
+        mat.uniforms.fluid_emission_0 = emission_0;
+        mat.uniforms.fluid_emission_1 = emission_1;
+    };
+
+    // Update shared material
     if let Some(mat) = materials.get_mut(&shared.handle) {
-        mat.time = time.elapsed_secs();
+        apply_uniforms(mat);
+    }
+
+    // Read lightmap handle and uv_rect from shared material to propagate
+    let shared_lightmap = materials
+        .get(&shared.handle)
+        .map(|m| (m.lightmap.clone(), m.uniforms.lightmap_uv_rect));
+
+    // Sync time, colors, lightmap to all per-chunk materials
+    if let Some(ref cm) = chunk_materials {
+        for handle in cm.materials.values() {
+            if let Some(mat) = materials.get_mut(handle) {
+                apply_uniforms(mat);
+                // Propagate lightmap from shared material (updated by rc_lighting)
+                if let Some((ref lm, lm_rect)) = shared_lightmap {
+                    mat.lightmap = lm.clone();
+                    mat.uniforms.lightmap_uv_rect = lm_rect;
+                }
+            }
+        }
     }
 }
 
@@ -351,48 +498,57 @@ fn run_one_tick(
     }
 }
 
-/// Rebuild fluid mesh overlays for active fluid chunks.
+/// Rebuild fluid mesh overlays for active fluid chunks using density-texture approach.
 ///
-/// For each loaded chunk that has active fluids, we either create or update
-/// a separate fluid mesh entity. Chunks without fluid get their overlay removed.
+/// For each loaded chunk that has active fluids, creates density and fluid_id
+/// textures with 1-cell padding from neighbors, then renders a single quad
+/// per chunk with a metaball fragment shader.
 #[allow(clippy::too_many_arguments)]
 pub fn fluid_rebuild_meshes(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut images: ResMut<Assets<Image>>,
+    mut fluid_materials: ResMut<Assets<FluidMaterial>>,
     world_map: Res<WorldMap>,
     active_world: Res<ActiveWorld>,
     active_fluids: Res<ActiveFluidChunks>,
-    fluid_registry: Res<FluidRegistry>,
-    tile_registry: Res<TileRegistry>,
     loaded_chunks: Res<LoadedChunks>,
-    fluid_material: Res<SharedFluidMaterial>,
+    shared_material: Res<SharedFluidMaterial>,
+    mut chunk_materials: ResMut<ChunkFluidMaterials>,
     existing_fluid_meshes: Query<(Entity, &ChunkCoord), With<FluidMeshEntity>>,
-    wave_state: Res<WaveState>,
 ) {
-    // Uses MeshMaterial2d<FluidMaterial> for custom shader rendering.
     let chunk_size = active_world.chunk_size;
     let tile_size = active_world.tile_size;
+    let width_chunks = active_world.width_chunks();
 
-    // Build a set of display chunk coords that need fluid meshes.
-    // Map data chunk coords -> display chunk coords via loaded_chunks.
+    // Get template uniforms from shared material
+    let template_uniforms = fluid_materials
+        .get(&shared_material.handle)
+        .map(|m| m.uniforms.clone())
+        .unwrap_or_default();
+    let template_lightmap = fluid_materials
+        .get(&shared_material.handle)
+        .map(|m| m.lightmap.clone())
+        .unwrap_or_default();
+
+    // Build set of display chunks that need fluid meshes
     let mut display_chunks_with_fluid: HashSet<(i32, i32)> = HashSet::new();
     for &(display_cx, cy) in loaded_chunks.map.keys() {
         let data_cx = active_world.wrap_chunk_x(display_cx);
-        for &(fx, fy) in &active_fluids.chunks {
-            if fx == data_cx && fy == cy && loaded_chunks.map.contains_key(&(display_cx, cy)) {
-                display_chunks_with_fluid.insert((display_cx, cy));
-            }
+        if active_fluids.chunks.contains(&(data_cx, cy)) {
+            display_chunks_with_fluid.insert((display_cx, cy));
         }
     }
 
-    // Remove fluid mesh entities for chunks no longer needing them
+    // Remove entities for chunks no longer needing fluid
     for (entity, coord) in &existing_fluid_meshes {
         if !display_chunks_with_fluid.contains(&(coord.x, coord.y)) {
             commands.entity(entity).despawn();
+            let data_cx = active_world.wrap_chunk_x(coord.x);
+            chunk_materials.materials.remove(&(data_cx, coord.y));
         }
     }
 
-    // Create/update fluid meshes for active chunks
     let existing_set: HashSet<(i32, i32)> = existing_fluid_meshes
         .iter()
         .map(|(_, c)| (c.x, c.y))
@@ -404,102 +560,70 @@ pub fn fluid_rebuild_meshes(
             continue;
         };
 
-        // Extract neighbor boundary rows for cross-chunk surface detection.
-        // Above: bottom row (local_y=0) of chunk at (data_cx, cy+1)
-        let neighbor_above_row: Option<Vec<FluidCell>> =
-            world_map.chunks.get(&(data_cx, cy + 1)).map(|c| {
-                (0..chunk_size)
-                    .map(|x| c.fluids[(0 * chunk_size + x) as usize])
-                    .collect()
-            });
-        // Below: top row (local_y=chunk_size-1) of chunk at (data_cx, cy-1)
-        let neighbor_below_row: Option<Vec<FluidCell>> = if cy > 0 {
-            world_map.chunks.get(&(data_cx, cy - 1)).map(|c| {
-                (0..chunk_size)
-                    .map(|x| c.fluids[((chunk_size - 1) * chunk_size + x) as usize])
-                    .collect()
-            })
+        // Get neighbor fluids for padding
+        let left_cx = (data_cx - 1).rem_euclid(width_chunks);
+        let right_cx = (data_cx + 1).rem_euclid(width_chunks);
+        let neighbor_left = world_map
+            .chunks
+            .get(&(left_cx, cy))
+            .map(|c| c.fluids.as_slice());
+        let neighbor_right = world_map
+            .chunks
+            .get(&(right_cx, cy))
+            .map(|c| c.fluids.as_slice());
+        let neighbor_above = world_map
+            .chunks
+            .get(&(data_cx, cy + 1))
+            .map(|c| c.fluids.as_slice());
+        let neighbor_below = if cy > 0 {
+            world_map
+                .chunks
+                .get(&(data_cx, cy - 1))
+                .map(|c| c.fluids.as_slice())
         } else {
             None
         };
 
-        let wave_heights = wave_state
-            .buffers
-            .get(&(data_cx, cy))
-            .map(|buf| buf.height.as_slice());
-
-        // ── Cross-chunk surface smoothing data ──────────────────────────
-        // Extract the liquid/gas surface height of the left neighbour's
-        // rightmost column and the right neighbour's leftmost column.
-        // These are used by build_fluid_mesh to smooth the surface vertex
-        // heights at the horizontal chunk boundary so the seam disappears.
-        let width_chunks = active_world.width_chunks();
-        let left_data_cx = (data_cx - 1).rem_euclid(width_chunks);
-        let right_data_cx = (data_cx + 1).rem_euclid(width_chunks);
-
-        let left_edge_liquid_h = world_map.chunks.get(&(left_data_cx, cy)).and_then(|c| {
-            column_liquid_surface_h(&c.fluids, chunk_size - 1, chunk_size, &fluid_registry)
-        });
-        let right_edge_liquid_h = world_map
-            .chunks
-            .get(&(right_data_cx, cy))
-            .and_then(|c| column_liquid_surface_h(&c.fluids, 0, chunk_size, &fluid_registry));
-
-        let left_edge_gas_h = world_map.chunks.get(&(left_data_cx, cy)).and_then(|c| {
-            column_gas_surface_h(&c.fluids, chunk_size - 1, chunk_size, &fluid_registry)
-        });
-        let right_edge_gas_h = world_map
-            .chunks
-            .get(&(right_data_cx, cy))
-            .and_then(|c| column_gas_surface_h(&c.fluids, 0, chunk_size, &fluid_registry));
-
-        // Per-column absolute world-tile Y of the liquid surface in the chunk above.
-        // Used by compute_depth to compute accurate depth for cells whose upward scan
-        // reaches the top chunk boundary, preventing the brightness seam at the seam.
-        let above_surface_world_ys: Option<Vec<Option<f32>>> =
-            world_map.chunks.get(&(data_cx, cy + 1)).map(|c| {
-                (0..chunk_size)
-                    .map(|col| {
-                        column_liquid_surface_h(&c.fluids, col, chunk_size, &fluid_registry)
-                            .map(|local_h| (cy + 1) as f32 * chunk_size as f32 + local_h)
-                    })
-                    .collect()
-            });
-
-        let Some(mesh) = build_fluid_mesh(
+        let Some((density_data, fluid_id_data, tex_size)) = build_fluid_textures(
             &chunk.fluids,
-            chunk.fg.tiles.as_slice(),
-            display_cx,
-            cy,
             chunk_size,
-            tile_size,
-            &fluid_registry,
-            &tile_registry,
-            neighbor_above_row.as_deref(),
-            neighbor_below_row.as_deref(),
-            wave_heights,
-            left_edge_liquid_h,
-            right_edge_liquid_h,
-            left_edge_gas_h,
-            right_edge_gas_h,
-            above_surface_world_ys.as_deref(),
-            None,
+            neighbor_left,
+            neighbor_right,
+            neighbor_above,
+            neighbor_below,
         ) else {
             continue;
         };
 
-        let mesh_handle = meshes.add(mesh);
+        // Create texture images
+        let density_img = images.add(make_r8_texture(density_data, tex_size, tex_size));
+        let fluid_id_img = images.add(make_r8_texture(fluid_id_data, tex_size, tex_size));
+
+        // Create per-chunk material
+        let mat_handle = fluid_materials.add(FluidMaterial {
+            density_texture: density_img,
+            fluid_id_texture: fluid_id_img,
+            lightmap: template_lightmap.clone(),
+            uniforms: template_uniforms.clone(),
+        });
+        chunk_materials
+            .materials
+            .insert((data_cx, cy), mat_handle.clone());
 
         if existing_set.contains(&(display_cx, cy)) {
-            // Update existing entity's mesh
+            // Update existing entity's material (textures changed)
             for (entity, coord) in &existing_fluid_meshes {
                 if coord.x == display_cx && coord.y == cy {
-                    commands.entity(entity).insert(Mesh2d(mesh_handle.clone()));
+                    commands
+                        .entity(entity)
+                        .insert(MeshMaterial2d(mat_handle.clone()));
                     break;
                 }
             }
         } else {
-            // Spawn new fluid mesh entity
+            // Spawn new entity with static quad
+            let quad = build_chunk_quad(display_cx, cy, chunk_size, tile_size);
+            let mesh_handle = meshes.add(quad);
             commands.spawn((
                 ChunkCoord {
                     x: display_cx,
@@ -507,9 +631,8 @@ pub fn fluid_rebuild_meshes(
                 },
                 FluidMeshEntity,
                 Mesh2d(mesh_handle),
-                MeshMaterial2d(fluid_material.handle.clone()),
-                // Fluid z = 0.5, between fg tiles (z=0) and entities
-                Transform::from_translation(bevy::math::Vec3::new(0.0, 0.0, 0.5)),
+                MeshMaterial2d(mat_handle),
+                Transform::from_translation(Vec3::new(0.0, 0.0, 0.5)),
                 Visibility::default(),
             ));
         }
