@@ -26,9 +26,7 @@ pub use detectors::{FluidContactState, Projectile};
 pub use events::{FluidReactionEvent, ImpactKind, WaterImpactEvent};
 pub use reactions::{FluidReactionDef, FluidReactionRegistry};
 pub use registry::{FluidDef, FluidRegistry};
-pub use render::build_fluid_mesh;
-pub use simulation::FluidSimConfig;
-pub use systems::{ActiveFluidChunks, FluidMaterial, FluidTickAccumulator};
+pub use systems::{FluidMaterial, FluidTickAccumulator};
 
 use crate::registry::AppState;
 use crate::sets::GameSet;
@@ -40,12 +38,7 @@ impl Plugin for FluidPlugin {
         app.add_message::<events::WaterImpactEvent>()
             .add_message::<events::FluidReactionEvent>()
             .add_plugins(Material2dPlugin::<FluidMaterial>::default())
-            .init_resource::<FluidSimConfig>()
             .init_resource::<systems::FluidTickAccumulator>()
-            .init_resource::<systems::ActiveFluidChunks>()
-            .init_resource::<wave::WaveConfig>()
-            .init_resource::<wave::WaveState>()
-            .init_resource::<splash::SplashConfig>()
             .init_resource::<detectors::SwimThrottle>()
             .init_resource::<debug_overlay::FluidDebugState>()
             .init_resource::<sph_particle::ParticleStore>()
@@ -57,12 +50,7 @@ impl Plugin for FluidPlugin {
                     detectors::detect_entity_water_entry,
                     detectors::detect_entity_swimming,
                     detectors::detect_projectile_in_fluid,
-                    systems::fluid_simulation,
                     systems::sph_fluid_simulation,
-                    systems::wave_consume_events,
-                    systems::wave_simulation,
-                    splash::spawn_splash_particles,
-                    splash::reabsorb_particles,
                     systems::fluid_rebuild_meshes,
                 )
                     .chain()

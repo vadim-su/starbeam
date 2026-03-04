@@ -7,7 +7,6 @@ use crate::fluid::sph_simulation::SphConfig;
 use crate::particles::pool::ParticlePool;
 use crate::physics::Velocity;
 use crate::registry::world::ActiveWorld;
-use crate::world::chunk::WorldMap;
 
 /// Check if any SPH particle is near the given world position.
 /// Returns the FluidId of the nearest particle, or FluidId::NONE.
@@ -47,68 +46,30 @@ pub struct SwimThrottle(pub f32);
 
 /// Detect when an entity crosses a fluid surface (enters or exits fluid).
 ///
-/// Compares the entity's current tile fluid with `FluidContactState::last_fluid`.
+/// Uses SPH particle proximity to determine if the entity is in fluid.
 /// Emits a `WaterImpactEvent` with `ImpactKind::Splash` on transitions between
 /// air and fluid (in either direction).
 pub fn detect_entity_water_entry(
     mut events: MessageWriter<WaterImpactEvent>,
     mut query: Query<(&Transform, &Velocity, &mut FluidContactState)>,
-    world_map: Res<WorldMap>,
-    active_world: Res<ActiveWorld>,
     particles: Res<ParticleStore>,
     sph_config: Res<SphConfig>,
 ) {
-    let tile_size = active_world.tile_size;
-    let chunk_size = active_world.chunk_size;
-
     for (transform, velocity, mut contact) in &mut query {
         let pos = transform.translation.truncate();
 
-        // Convert world position to tile coordinates
-        let tile_x = (pos.x / tile_size).floor() as i32;
-        let tile_y = (pos.y / tile_size).floor() as i32;
-
-        // Convert to data chunk coordinates (wrapping X for cylindrical worlds).
-        // cy is not wrapped — chunks outside world bounds simply won't exist in
-        // the map, and unwrap_or(FluidId::NONE) handles that gracefully.
-        let data_cx = active_world.wrap_chunk_x(tile_x.div_euclid(chunk_size as i32));
-        let cy = tile_y.div_euclid(chunk_size as i32);
-
-        // Local coordinates within the chunk
-        let local_x = tile_x.rem_euclid(chunk_size as i32) as u32;
-        let local_y = tile_y.rem_euclid(chunk_size as i32) as u32;
-
-        // Look up current fluid at entity position
-        let current_fluid = world_map
-            .chunks
-            .get(&(data_cx, cy))
-            .map(|chunk| {
-                let idx = (local_y * chunk_size + local_x) as usize;
-                if idx < chunk.fluids.len() && !chunk.fluids[idx].is_empty() {
-                    chunk.fluids[idx].fluid_id()
-                } else {
-                    FluidId::NONE
-                }
-            })
-            .unwrap_or(FluidId::NONE);
-
-        // SPH fallback: if CA found no fluid, check SPH particles
-        let sph_fluid = sph_fluid_at(pos, &particles, sph_config.smoothing_radius);
-        let current_fluid = if current_fluid != FluidId::NONE {
-            current_fluid // CA found fluid
-        } else {
-            sph_fluid // fallback to SPH
-        };
+        // Look up current fluid at entity position via SPH particles
+        let current_fluid = sph_fluid_at(pos, &particles, sph_config.smoothing_radius);
 
         let was_in_fluid = contact.last_fluid != FluidId::NONE;
         let now_in_fluid = current_fluid != FluidId::NONE;
 
-        // Emit splash on air→fluid or fluid→air transitions
+        // Emit splash on air->fluid or fluid->air transitions
         if was_in_fluid != now_in_fluid {
             let impact_fluid = if now_in_fluid {
                 current_fluid
             } else {
-                // On exit, current_fluid is NONE — preserve the fluid we just left
+                // On exit, current_fluid is NONE -- preserve the fluid we just left
                 contact.last_fluid
             };
 
@@ -133,8 +94,6 @@ pub fn detect_entity_water_entry(
 pub fn detect_entity_swimming(
     mut events: MessageWriter<WaterImpactEvent>,
     query: Query<(&Transform, &Velocity, &FluidContactState)>,
-    world_map: Res<WorldMap>,
-    active_world: Res<ActiveWorld>,
     time: Res<Time>,
     mut throttle: ResMut<SwimThrottle>,
     particles: Res<ParticleStore>,
@@ -146,9 +105,6 @@ pub fn detect_entity_swimming(
         return;
     }
     throttle.0 = 0.0;
-
-    let tile_size = active_world.tile_size;
-    let chunk_size = active_world.chunk_size;
 
     for (transform, velocity, contact) in &query {
         // Only emit for entities currently in fluid
@@ -164,41 +120,9 @@ pub fn detect_entity_swimming(
 
         let pos = transform.translation.truncate();
 
-        // Only emit wake if entity is near the surface (within 2 tiles).
-        // Deep underwater movement should not create surface waves.
-        let tile_y = (pos.y / tile_size).floor() as i32;
-        let tile_x = (pos.x / tile_size).floor() as i32;
-        let data_cx = active_world.wrap_chunk_x(tile_x.div_euclid(chunk_size as i32));
-        let cy = tile_y.div_euclid(chunk_size as i32);
-        let local_x = tile_x.rem_euclid(chunk_size as i32) as u32;
-        let local_y = tile_y.rem_euclid(chunk_size as i32) as u32;
-
-        let near_surface = world_map
-            .chunks
-            .get(&(data_cx, cy))
-            .map(|chunk| {
-                // Check if the cell above (or 2 above) is empty — meaning we're near surface
-                for dy in 1..=2u32 {
-                    let check_y = local_y + dy;
-                    if check_y >= chunk_size {
-                        // At top of chunk — could be near surface
-                        return true;
-                    }
-                    let idx = (check_y * chunk_size + local_x) as usize;
-                    if idx < chunk.fluids.len() && chunk.fluids[idx].is_empty() {
-                        return true;
-                    }
-                }
-                false
-            })
-            .unwrap_or(false);
-
-        // SPH fallback: if CA says not near surface, check SPH particles
-        let near_surface = if near_surface {
-            true
-        } else {
-            sph_fluid_at(pos, &particles, sph_config.smoothing_radius) != FluidId::NONE
-        };
+        // Check if entity is near SPH particles (near surface)
+        let near_surface =
+            sph_fluid_at(pos, &particles, sph_config.smoothing_radius) != FluidId::NONE;
 
         if !near_surface {
             continue;
@@ -220,13 +144,12 @@ pub fn detect_entity_swimming(
 /// Bubbles float upward (negative gravity_scale) and fade out.
 pub fn detect_projectile_in_fluid(
     query: Query<(&Transform, &Velocity), With<Projectile>>,
-    world_map: Res<WorldMap>,
-    active_world: Res<ActiveWorld>,
     mut pool: ResMut<ParticlePool>,
     time: Res<Time>,
     mut throttle: Local<f32>,
     particles: Res<ParticleStore>,
     sph_config: Res<SphConfig>,
+    active_world: Res<ActiveWorld>,
 ) {
     *throttle += time.delta_secs();
     if *throttle < 0.05 {
@@ -235,46 +158,25 @@ pub fn detect_projectile_in_fluid(
     *throttle = 0.0;
 
     let tile_size = active_world.tile_size;
-    let chunk_size = active_world.chunk_size;
 
     for (transform, _velocity) in &query {
         let pos = transform.translation.truncate();
 
-        let tile_x = (pos.x / tile_size).floor() as i32;
-        let tile_y = (pos.y / tile_size).floor() as i32;
-        let data_cx = active_world.wrap_chunk_x(tile_x.div_euclid(chunk_size as i32));
-        let cy = tile_y.div_euclid(chunk_size as i32);
-        let local_x = tile_x.rem_euclid(chunk_size as i32) as u32;
-        let local_y = tile_y.rem_euclid(chunk_size as i32) as u32;
-
-        // Check if projectile is inside a fluid cell
-        let in_fluid = world_map
-            .chunks
-            .get(&(data_cx, cy))
-            .map(|chunk| {
-                let idx = (local_y * chunk_size + local_x) as usize;
-                idx < chunk.fluids.len() && !chunk.fluids[idx].is_empty()
-            })
-            .unwrap_or(false);
-
-        // SPH fallback: if CA says no fluid, check SPH particles
-        let in_fluid = if in_fluid {
-            true
-        } else {
-            sph_fluid_at(pos, &particles, sph_config.smoothing_radius) != FluidId::NONE
-        };
+        // Check if projectile is near SPH particles
+        let in_fluid =
+            sph_fluid_at(pos, &particles, sph_config.smoothing_radius) != FluidId::NONE;
 
         if !in_fluid {
             continue;
         }
 
-        // Spawn 1–2 bubble particles floating upward
+        // Spawn 1-2 bubble particles floating upward
         for _ in 0..2 {
             let jitter_x = (rand_jitter() - 0.5) * tile_size * 0.5;
             pool.spawn(
                 Vec2::new(pos.x + jitter_x, pos.y),
                 Vec2::new(0.0, 30.0), // drift upward
-                0.0,                  // no CA mass
+                0.0,                  // no mass
                 FluidId::NONE,
                 0.6,                  // short lifetime
                 2.5,                  // small bubble
@@ -342,13 +244,13 @@ mod tests {
 
     #[test]
     fn no_event_when_fluid_state_unchanged() {
-        // No transition: both in fluid → no splash
+        // No transition: both in fluid -> no splash
         let last = FluidId(1);
         let current = FluidId(1);
         let transition = (last != FluidId::NONE) != (current != FluidId::NONE);
         assert!(!transition, "same fluid state should not trigger splash");
 
-        // No transition: both air → no splash
+        // No transition: both air -> no splash
         let last = FluidId::NONE;
         let current = FluidId::NONE;
         let transition = (last != FluidId::NONE) != (current != FluidId::NONE);
