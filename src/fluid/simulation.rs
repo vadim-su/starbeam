@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::fluid::cell::{FluidCell, FluidId};
+use crate::fluid::cell::{FluidCell, FluidId, FluidSlot};
 use crate::fluid::fluid_world::FluidWorld;
 
 /// Normal full-cell mass.
@@ -87,102 +87,138 @@ pub fn simulate_tick(
 
             for lx in x_iter {
                 let gx = base_gx + lx;
-                let cell = world.read(gx, gy);
-                if cell.is_empty() {
+                let snap = world.read(gx, gy);
+                if snap.is_empty() {
                     continue;
                 }
 
-                let def = world.fluid_registry.get(cell.fluid_id);
-                let max_speed = config.max_speed * (1.0 - def.viscosity).max(0.1);
-                let remaining = world.read_current(gx, gy).mass;
+                // Process each non-empty slot independently
+                let slots: [(FluidId, f32); 2] = [
+                    (snap.primary.fluid_id, snap.primary.mass),
+                    (snap.secondary.fluid_id, snap.secondary.mass),
+                ];
 
-                if def.is_gas {
-                    // Gas: flow UP first (primary), then horizontal, then DOWN (decompression)
-                    let remaining = flow_vertical(
-                        world,
-                        gx,
-                        gy,
-                        1,
-                        true,
-                        remaining,
-                        cell.fluid_id,
-                        def.max_compress,
-                        max_speed,
-                        config.min_flow,
-                    );
-                    let remaining = flow_horizontal(
-                        world,
-                        gx,
-                        gy,
-                        remaining,
-                        cell.fluid_id,
-                        cell.mass,
-                        max_speed,
-                        config.min_flow,
-                    );
-                    flow_vertical(
-                        world,
-                        gx,
-                        gy,
-                        -1,
-                        false,
-                        remaining,
-                        cell.fluid_id,
-                        def.max_compress,
-                        max_speed,
-                        config.min_flow,
-                    );
-                } else {
-                    // Liquid: flow DOWN first (primary), then horizontal, then UP (decompression)
-                    let remaining = flow_vertical(
-                        world,
-                        gx,
-                        gy,
-                        -1,
-                        true,
-                        remaining,
-                        cell.fluid_id,
-                        def.max_compress,
-                        max_speed,
-                        config.min_flow,
-                    );
-                    let remaining = flow_horizontal(
-                        world,
-                        gx,
-                        gy,
-                        remaining,
-                        cell.fluid_id,
-                        cell.mass,
-                        max_speed,
-                        config.min_flow,
-                    );
-                    flow_vertical(
-                        world,
-                        gx,
-                        gy,
-                        1,
-                        false,
-                        remaining,
-                        cell.fluid_id,
-                        def.max_compress,
-                        max_speed,
-                        config.min_flow,
-                    );
+                for &(fid, snap_mass) in &slots {
+                    if fid == FluidId::NONE || snap_mass <= 0.0 {
+                        continue;
+                    }
+
+                    let def = world.fluid_registry.get(fid);
+                    let max_speed = config.max_speed * (1.0 - def.viscosity).max(0.1);
+                    // Read remaining from current (live) state for this slot
+                    let current_cell = world.read_current(gx, gy);
+                    let remaining = current_cell
+                        .slot_for(fid)
+                        .map(|s| s.mass)
+                        .unwrap_or(0.0);
+
+                    if def.is_gas {
+                        // Gas: flow UP first (primary), then horizontal, then DOWN (decompression)
+                        let remaining = flow_vertical(
+                            world,
+                            gx,
+                            gy,
+                            1,
+                            true,
+                            remaining,
+                            fid,
+                            def.max_compress,
+                            max_speed,
+                            config.min_flow,
+                        );
+                        let remaining = flow_horizontal(
+                            world,
+                            gx,
+                            gy,
+                            remaining,
+                            fid,
+                            snap_mass,
+                            max_speed,
+                            config.min_flow,
+                        );
+                        flow_vertical(
+                            world,
+                            gx,
+                            gy,
+                            -1,
+                            false,
+                            remaining,
+                            fid,
+                            def.max_compress,
+                            max_speed,
+                            config.min_flow,
+                        );
+                    } else {
+                        // Liquid: flow DOWN first (primary), then horizontal, then UP (decompression)
+                        let remaining = flow_vertical(
+                            world,
+                            gx,
+                            gy,
+                            -1,
+                            true,
+                            remaining,
+                            fid,
+                            def.max_compress,
+                            max_speed,
+                            config.min_flow,
+                        );
+                        let remaining = flow_horizontal(
+                            world,
+                            gx,
+                            gy,
+                            remaining,
+                            fid,
+                            snap_mass,
+                            max_speed,
+                            config.min_flow,
+                        );
+                        flow_vertical(
+                            world,
+                            gx,
+                            gy,
+                            1,
+                            false,
+                            remaining,
+                            fid,
+                            def.max_compress,
+                            max_speed,
+                            config.min_flow,
+                        );
+                    }
                 }
             }
         }
     }
 
-    // Cleanup: remove cells with negligible mass
+    // Cleanup: remove slots with negligible mass and normalize
     for &(cx, cy) in active_chunks {
         if let Some(chunk) = world.world_map.chunks.get_mut(&(cx, cy)) {
             for cell in chunk.fluids.iter_mut() {
-                if cell.mass > 0.0 && cell.mass < config.min_mass {
-                    *cell = FluidCell::EMPTY;
+                if cell.primary.mass > 0.0 && cell.primary.mass < config.min_mass {
+                    cell.primary = FluidSlot::EMPTY;
                 }
+                if cell.secondary.mass > 0.0 && cell.secondary.mass < config.min_mass {
+                    cell.secondary = FluidSlot::EMPTY;
+                }
+                cell.normalize();
             }
         }
     }
+}
+
+/// Check whether a cell can accept fluid of the given type.
+/// Returns true if the cell is empty, already contains this fluid, or has a free secondary slot.
+fn can_accept_fluid(cell: &FluidCell, fluid_id: FluidId) -> bool {
+    if cell.is_empty() {
+        return true;
+    }
+    if cell.has_fluid(fluid_id) {
+        return true;
+    }
+    if cell.secondary.is_empty() {
+        return true;
+    }
+    false
 }
 
 /// Try to flow vertically using global coordinates.
@@ -212,19 +248,22 @@ fn flow_vertical(
         return remaining;
     }
 
-    // Snapshot check: can't mix different fluid types
+    // Snapshot check: can the neighbor accept this fluid?
     let neighbor = world.read(gx, ny);
-    if !neighbor.is_empty() && neighbor.fluid_id != fluid_id {
+    if !can_accept_fluid(&neighbor, fluid_id) {
         return remaining;
     }
 
-    // Live-state check: another cell may have already claimed this target
+    // Live-state check: can the neighbor still accept this fluid?
     let current_neighbor = world.read_current(gx, ny);
-    if current_neighbor.fluid_id != FluidId::NONE && current_neighbor.fluid_id != fluid_id {
+    if !can_accept_fluid(&current_neighbor, fluid_id) {
         return remaining;
     }
 
-    let neighbor_mass = current_neighbor.mass;
+    let neighbor_mass = current_neighbor
+        .slot_for(fluid_id)
+        .map(|s| s.mass)
+        .unwrap_or(0.0);
     let total = remaining + neighbor_mass;
 
     let flow = if is_primary {
@@ -246,13 +285,15 @@ fn flow_vertical(
     if flow > min_flow {
         flow *= 0.5;
     }
-    flow = flow.min(max_speed).min(remaining).max(0.0);
+    // Clamp: don't exceed available capacity in neighbor (total_mass must stay <= 1.0 for non-compressed)
+    let capacity = (1.0 - current_neighbor.total_mass() + neighbor_mass).max(0.0);
+    flow = flow.min(max_speed).min(remaining).min(capacity).max(0.0);
 
     if flow <= 0.0 {
         return remaining;
     }
 
-    world.sub_mass(gx, gy, flow);
+    world.sub_mass(gx, gy, fluid_id, flow);
     world.add_mass(gx, ny, fluid_id, flow);
     remaining - flow
 }
@@ -317,30 +358,38 @@ fn flow_side(
         return remaining;
     }
 
+    // Snapshot check: can the neighbor accept this fluid?
     let neighbor = world.read(ngx, gy);
-    if !neighbor.is_empty() && neighbor.fluid_id != fluid_id {
+    if !can_accept_fluid(&neighbor, fluid_id) {
         return remaining;
     }
 
+    // Live-state check
     let current_neighbor = world.read_current(ngx, gy);
-    if current_neighbor.fluid_id != FluidId::NONE && current_neighbor.fluid_id != fluid_id {
+    if !can_accept_fluid(&current_neighbor, fluid_id) {
         return remaining;
     }
 
-    let mut flow = (original_mass - world.read(ngx, gy).mass) / 4.0;
+    let neighbor_slot_mass = neighbor
+        .slot_for(fluid_id)
+        .map(|s| s.mass)
+        .unwrap_or(0.0);
+    let mut flow = (original_mass - neighbor_slot_mass) / 4.0;
     if flow <= 0.0 {
         return remaining;
     }
     if flow > min_flow {
         flow *= 0.5;
     }
-    flow = flow.min(max_speed).min(remaining).max(0.0);
+    // Clamp: don't exceed available capacity in neighbor
+    let capacity = (1.0 - current_neighbor.total_mass() + current_neighbor.slot_for(fluid_id).map(|s| s.mass).unwrap_or(0.0)).max(0.0);
+    flow = flow.min(max_speed).min(remaining).min(capacity).max(0.0);
 
     if flow <= 0.0 {
         return remaining;
     }
 
-    world.sub_mass(gx, gy, flow);
+    world.sub_mass(gx, gy, fluid_id, flow);
     world.add_mass(ngx, gy, fluid_id, flow);
     remaining - flow
 }
@@ -480,11 +529,11 @@ mod tests {
 
         // Water should have moved down (y=2 -> y=1)
         assert!(
-            new_fluids[idx(1, 1, w)].mass > 0.0,
+            new_fluids[idx(1, 1, w)].mass() > 0.0,
             "Water should flow to cell below"
         );
         assert!(
-            new_fluids[idx(1, 2, w)].mass < 1.0,
+            new_fluids[idx(1, 2, w)].mass() < 1.0,
             "Source cell should have less water"
         );
     }
@@ -515,9 +564,9 @@ mod tests {
         }
 
         // Water should have spread left and right
-        assert!(current[idx(1, 1, w)].mass > 0.0, "Water should spread left");
+        assert!(current[idx(1, 1, w)].mass() > 0.0, "Water should spread left");
         assert!(
-            current[idx(3, 1, w)].mass > 0.0,
+            current[idx(3, 1, w)].mass() > 0.0,
             "Water should spread right"
         );
     }
@@ -543,7 +592,7 @@ mod tests {
 
         // Water should NOT be in the solid cell
         assert!(
-            new_fluids[idx(1, 1, w)].mass <= 0.0,
+            new_fluids[idx(1, 1, w)].mass() <= 0.0,
             "Water should not enter solid cell"
         );
     }
@@ -574,9 +623,9 @@ mod tests {
 
         // Bottom cell should be compressed (mass > 1.0)
         assert!(
-            current[idx(0, 0, w)].mass > 1.0,
+            current[idx(0, 0, w)].mass() > 1.0,
             "Bottom cell should be compressed, got {}",
-            current[idx(0, 0, w)].mass
+            current[idx(0, 0, w)].mass()
         );
     }
 
@@ -598,11 +647,11 @@ mod tests {
 
         // Gas should have moved up
         assert!(
-            new_fluids[idx(1, 1, w)].mass > 0.0,
+            new_fluids[idx(1, 1, w)].mass() > 0.0,
             "Gas should flow upward"
         );
         assert!(
-            new_fluids[idx(1, 0, w)].mass < 1.0,
+            new_fluids[idx(1, 0, w)].mass() < 1.0,
             "Source cell should have less gas"
         );
     }
@@ -626,7 +675,7 @@ mod tests {
         fluids[idx(2, 3, w)] = FluidCell::new(water_id, 1.0);
         fluids[idx(2, 2, w)] = FluidCell::new(water_id, 0.7);
 
-        let initial_mass: f32 = fluids.iter().map(|c| c.mass).sum();
+        let initial_mass: f32 = fluids.iter().map(|c| c.total_mass()).sum();
 
         let mut current = fluids;
         for _ in 0..50 {
@@ -635,7 +684,7 @@ mod tests {
             current = new;
         }
 
-        let final_mass: f32 = current.iter().map(|c| c.mass).sum();
+        let final_mass: f32 = current.iter().map(|c| c.total_mass()).sum();
         assert!(
             (initial_mass - final_mass).abs() < 0.01,
             "Mass should be conserved: initial={initial_mass}, final={final_mass}"
@@ -701,12 +750,12 @@ mod tests {
         // Water should have flowed to the left edge of chunk B (local_x = 0, local_y = 1)
         let chunk_b = world_map.chunks.get(&(1, 0)).unwrap();
         assert!(
-            chunk_b.fluids[idx(0, 1, cs)].mass > 0.0,
+            chunk_b.fluids[idx(0, 1, cs)].mass() > 0.0,
             "Water should flow from right edge of chunk A to left edge of chunk B, got mass={}",
-            chunk_b.fluids[idx(0, 1, cs)].mass,
+            chunk_b.fluids[idx(0, 1, cs)].mass(),
         );
         assert_eq!(
-            chunk_b.fluids[idx(0, 1, cs)].fluid_id,
+            chunk_b.fluids[idx(0, 1, cs)].fluid_id(),
             water_id,
             "Transferred fluid should be water"
         );
@@ -742,9 +791,9 @@ mod tests {
         // Water should have fallen to top edge of bottom chunk (local_y = chunk_size-1, local_x = 2)
         let chunk_bottom = world_map.chunks.get(&(0, 0)).unwrap();
         assert!(
-            chunk_bottom.fluids[idx(2, cs - 1, cs)].mass > 0.0,
+            chunk_bottom.fluids[idx(2, cs - 1, cs)].mass() > 0.0,
             "Water should fall from bottom of top chunk to top of bottom chunk, got mass={}",
-            chunk_bottom.fluids[idx(2, cs - 1, cs)].mass,
+            chunk_bottom.fluids[idx(2, cs - 1, cs)].mass(),
         );
     }
 
@@ -777,9 +826,9 @@ mod tests {
         // Gas should have risen to bottom edge of top chunk (local_y = 0, local_x = 2)
         let chunk_top = world_map.chunks.get(&(0, 1)).unwrap();
         assert!(
-            chunk_top.fluids[idx(2, 0, cs)].mass > 0.0,
+            chunk_top.fluids[idx(2, 0, cs)].mass() > 0.0,
             "Gas should rise from top of bottom chunk to bottom of top chunk, got mass={}",
-            chunk_top.fluids[idx(2, 0, cs)].mass,
+            chunk_top.fluids[idx(2, 0, cs)].mass(),
         );
     }
 
@@ -816,7 +865,7 @@ mod tests {
             .chunks
             .values()
             .flat_map(|c| c.fluids.iter())
-            .map(|c| c.mass)
+            .map(|c| c.total_mass())
             .sum();
 
         assert!(
@@ -862,7 +911,7 @@ mod tests {
         // Original water should remain
         let chunk_a = world_map.chunks.get(&(0, 0)).unwrap();
         assert!(
-            chunk_a.fluids[idx(cs - 1, 1, cs)].mass > 0.9,
+            chunk_a.fluids[idx(cs - 1, 1, cs)].mass() > 0.9,
             "Water should remain at source since it's blocked"
         );
     }
@@ -906,9 +955,9 @@ mod tests {
         // Water should have wrapped around to left edge of chunk 0
         let chunk_first = world_map.chunks.get(&(0, 0)).unwrap();
         assert!(
-            chunk_first.fluids[idx(0, 1, cs)].mass > 0.0,
+            chunk_first.fluids[idx(0, 1, cs)].mass() > 0.0,
             "Water should wrap from right edge of last chunk to left edge of first chunk, got mass={}",
-            chunk_first.fluids[idx(0, 1, cs)].mass,
+            chunk_first.fluids[idx(0, 1, cs)].mass(),
         );
     }
 
@@ -943,9 +992,9 @@ mod tests {
         // Water should have flowed to right edge of chunk (0,0)
         let chunk_left = world_map.chunks.get(&(0, 0)).unwrap();
         assert!(
-            chunk_left.fluids[idx(cs - 1, 1, cs)].mass > 0.0,
+            chunk_left.fluids[idx(cs - 1, 1, cs)].mass() > 0.0,
             "Water on left edge should flow to right edge of left neighbor, got mass={}",
-            chunk_left.fluids[idx(cs - 1, 1, cs)].mass,
+            chunk_left.fluids[idx(cs - 1, 1, cs)].mass(),
         );
     }
 
@@ -980,9 +1029,9 @@ mod tests {
         // Water should have fallen to top edge of chunk (0,0)
         let chunk_below = world_map.chunks.get(&(0, 0)).unwrap();
         assert!(
-            chunk_below.fluids[idx(2, cs - 1, cs)].mass > 0.0,
+            chunk_below.fluids[idx(2, cs - 1, cs)].mass() > 0.0,
             "Water on bottom edge should fall to top edge of chunk below, got mass={}",
-            chunk_below.fluids[idx(2, cs - 1, cs)].mass,
+            chunk_below.fluids[idx(2, cs - 1, cs)].mass(),
         );
     }
 }

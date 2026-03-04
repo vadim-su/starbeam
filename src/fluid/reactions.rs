@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use serde::Deserialize;
 
-use crate::fluid::cell::{FluidCell, FluidId};
+use crate::fluid::cell::{FluidCell, FluidId, FluidSlot};
 use crate::fluid::events::FluidReactionEvent;
 use crate::fluid::fluid_world::FluidWorld;
 use crate::fluid::registry::FluidRegistry;
@@ -152,6 +152,21 @@ const MAX_HORIZONTAL_DISPLACE_PER_ROW: u32 = 2;
 pub fn resolve_density_displacement_global(world: &mut FluidWorld, active_chunks: &[(i32, i32)]) {
     let cs = world.chunk_size as i32;
 
+    // Phase 0: Intra-cell — enforce density order within each cell.
+    // Heavy fluid should be in primary slot (bottom), light in secondary (top).
+    {
+        let fluid_registry = world.fluid_registry;
+        for &(cx, cy) in active_chunks {
+            if let Some(chunk) = world.world_map.chunks.get_mut(&(cx, cy)) {
+                for cell in chunk.fluids.iter_mut() {
+                    if !cell.secondary.is_empty() {
+                        cell.enforce_density_order(|fid| fluid_registry.get(fid).density);
+                    }
+                }
+            }
+        }
+    }
+
     // Phase 1: Vertical — heavy sinks, light rises, one swap per column per tick.
     for &(cx, cy) in active_chunks {
         let base_gx = cx * cs;
@@ -169,11 +184,11 @@ pub fn resolve_density_displacement_global(world: &mut FluidWorld, active_chunks
                 if below.is_empty() || above.is_empty() {
                     continue;
                 }
-                if below.fluid_id == above.fluid_id {
+                if below.fluid_id() == above.fluid_id() {
                     continue;
                 }
-                let d_below = world.fluid_registry.get(below.fluid_id).density;
-                let d_above = world.fluid_registry.get(above.fluid_id).density;
+                let d_below = world.fluid_registry.get(below.fluid_id()).density;
+                let d_above = world.fluid_registry.get(above.fluid_id()).density;
                 if d_above > d_below {
                     world.swap_fluids((gx, gy), (gx, gy + 1));
                     swaps += 1;
@@ -229,12 +244,12 @@ fn horizontal_swap_global(world: &mut FluidWorld, src_gx: i32, dst_gx: i32, gy: 
     if src.is_empty() || dst.is_empty() {
         return false;
     }
-    if src.fluid_id == dst.fluid_id {
+    if src.fluid_id() == dst.fluid_id() {
         return false;
     }
 
-    let d_src = world.fluid_registry.get(src.fluid_id).density;
-    let d_dst = world.fluid_registry.get(dst.fluid_id).density;
+    let d_src = world.fluid_registry.get(src.fluid_id()).density;
+    let d_dst = world.fluid_registry.get(dst.fluid_id()).density;
 
     if d_src <= d_dst {
         return false;
@@ -292,18 +307,18 @@ pub fn execute_fluid_reactions_global(
                     let ngx = gx + dx;
                     let ngy = gy + dy;
                     let neighbor = world.read_current(ngx, ngy);
-                    if neighbor.is_empty() || neighbor.fluid_id == cell.fluid_id {
+                    if neighbor.is_empty() || neighbor.fluid_id() == cell.fluid_id() {
                         continue;
                     }
 
                     let Some(reaction) =
-                        reaction_registry.find_reaction(cell.fluid_id, neighbor.fluid_id, adj)
+                        reaction_registry.find_reaction(cell.fluid_id(), neighbor.fluid_id(), adj)
                     else {
                         continue;
                     };
 
                     // Determine which position is fluid_a vs fluid_b
-                    let (a_pos, b_pos) = if cell.fluid_id == reaction.fluid_a {
+                    let (a_pos, b_pos) = if cell.fluid_id() == reaction.fluid_a {
                         ((gx, gy), (ngx, ngy))
                     } else {
                         ((ngx, ngy), (gx, gy))
@@ -311,20 +326,22 @@ pub fn execute_fluid_reactions_global(
 
                     let cell_a = world.read_current(a_pos.0, a_pos.1);
                     let cell_b = world.read_current(b_pos.0, b_pos.1);
-                    if cell_a.mass < reaction.min_mass_a || cell_b.mass < reaction.min_mass_b {
+                    if cell_a.mass() < reaction.min_mass_a || cell_b.mass() < reaction.min_mass_b {
                         continue;
                     }
 
-                    // Consume mass
+                    // Consume mass from primary slots
                     let mut new_a = cell_a;
                     let mut new_b = cell_b;
-                    new_a.mass -= reaction.consume_a;
-                    new_b.mass -= reaction.consume_b;
-                    if new_a.mass < 0.001 {
-                        new_a = FluidCell::EMPTY;
+                    new_a.primary.mass -= reaction.consume_a;
+                    new_b.primary.mass -= reaction.consume_b;
+                    if new_a.primary.mass < 0.001 {
+                        new_a.primary = FluidSlot::EMPTY;
+                        new_a.normalize();
                     }
-                    if new_b.mass < 0.001 {
-                        new_b = FluidCell::EMPTY;
+                    if new_b.primary.mass < 0.001 {
+                        new_b.primary = FluidSlot::EMPTY;
+                        new_b.normalize();
                     }
 
                     // Place result tile at the primary cell (a_pos)
@@ -350,8 +367,8 @@ pub fn execute_fluid_reactions_global(
                     let world_y = gy as f32 * tile_size + tile_size * 0.5;
                     events.push(FluidReactionEvent {
                         position: Vec2::new(world_x, world_y),
-                        fluid_a: cell_a.fluid_id,
-                        fluid_b: cell_b.fluid_id,
+                        fluid_a: cell_a.fluid_id(),
+                        fluid_b: cell_b.fluid_id(),
                         result_tile: reaction.result_tile,
                         result_fluid: reaction.result_fluid,
                     });
@@ -368,7 +385,9 @@ pub fn execute_fluid_reactions_global(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fluid::fluid_world::FluidWorld;
     use crate::fluid::registry::FluidDef;
+    use crate::world::chunk::{ChunkData, TileLayer, WorldMap};
 
     fn test_tile_registry() -> TileRegistry {
         crate::test_helpers::fixtures::test_tile_registry()
@@ -452,16 +471,19 @@ mod tests {
         ]
     }
 
-    fn idx(x: u32, y: u32, width: u32) -> usize {
-        (y * width + x) as usize
+    fn make_chunk(cs: u32) -> ChunkData {
+        let len = (cs * cs) as usize;
+        ChunkData {
+            fg: TileLayer::new_air(len),
+            bg: TileLayer::new_air(len),
+            fluids: vec![FluidCell::EMPTY; len],
+            objects: Vec::new(),
+            occupancy: vec![None; len],
+            damage: vec![0; len],
+        }
     }
 
     // --- Density displacement tests ---
-
-    /// Helper: create all-air tiles array for displacement tests.
-    fn air_tiles(len: usize) -> Vec<TileId> {
-        vec![TileId::AIR; len]
-    }
 
     #[test]
     fn density_displacement_heavy_sinks() {
@@ -470,21 +492,23 @@ mod tests {
         let water_id = fr.by_name("water"); // density 1000
         let lava_id = fr.by_name("lava"); // density 3000
 
-        let w = 3;
-        let h = 3;
-        let len = (w * h) as usize;
-        let mut fluids = vec![FluidCell::EMPTY; len];
-        let tiles = air_tiles(len);
-
+        let cs = 4u32;
+        let mut world_map = WorldMap::default();
+        let mut chunk = make_chunk(cs);
         // Water below (y=0), lava above (y=1) — lava is heavier, should sink
-        fluids[idx(1, 0, w)] = FluidCell::new(water_id, 1.0);
-        fluids[idx(1, 1, w)] = FluidCell::new(lava_id, 1.0);
+        chunk.fluids[(0 * cs + 1) as usize] = FluidCell::new(water_id, 1.0); // (1, 0)
+        chunk.fluids[(1 * cs + 1) as usize] = FluidCell::new(lava_id, 1.0); // (1, 1)
+        world_map.chunks.insert((0, 0), chunk);
 
-        resolve_density_displacement(&mut fluids, &tiles, w, h, &fr, &tr);
+        let active = vec![(0, 0)];
+        let mut world = FluidWorld::new(&mut world_map, cs, 1, 1, &tr, &fr);
+        resolve_density_displacement_global(&mut world, &active);
 
         // After displacement: lava should be below, water above
-        assert_eq!(fluids[idx(1, 0, w)].fluid_id, lava_id);
-        assert_eq!(fluids[idx(1, 1, w)].fluid_id, water_id);
+        let below = world.read_current(1, 0);
+        let above = world.read_current(1, 1);
+        assert_eq!(below.fluid_id(), lava_id);
+        assert_eq!(above.fluid_id(), water_id);
     }
 
     #[test]
@@ -494,21 +518,20 @@ mod tests {
         let water_id = fr.by_name("water"); // density 1000
         let steam_id = fr.by_name("steam"); // density 0.6
 
-        let w = 3;
-        let h = 3;
-        let len = (w * h) as usize;
-        let mut fluids = vec![FluidCell::EMPTY; len];
-        let tiles = air_tiles(len);
+        let cs = 4u32;
+        let mut world_map = WorldMap::default();
+        let mut chunk = make_chunk(cs);
+        chunk.fluids[(0 * cs + 1) as usize] = FluidCell::new(water_id, 1.0); // (1, 0)
+        chunk.fluids[(1 * cs + 1) as usize] = FluidCell::new(steam_id, 0.8); // (1, 1)
+        world_map.chunks.insert((0, 0), chunk);
 
-        // Water below (y=0), steam above (y=1) — already correct order
-        fluids[idx(1, 0, w)] = FluidCell::new(water_id, 1.0);
-        fluids[idx(1, 1, w)] = FluidCell::new(steam_id, 0.8);
-
-        resolve_density_displacement(&mut fluids, &tiles, w, h, &fr, &tr);
+        let active = vec![(0, 0)];
+        let mut world = FluidWorld::new(&mut world_map, cs, 1, 1, &tr, &fr);
+        resolve_density_displacement_global(&mut world, &active);
 
         // No change — water is heavier and already below
-        assert_eq!(fluids[idx(1, 0, w)].fluid_id, water_id);
-        assert_eq!(fluids[idx(1, 1, w)].fluid_id, steam_id);
+        assert_eq!(world.read_current(1, 0).fluid_id(), water_id);
+        assert_eq!(world.read_current(1, 1).fluid_id(), steam_id);
     }
 
     #[test]
@@ -518,22 +541,24 @@ mod tests {
         let water_id = fr.by_name("water");
         let lava_id = fr.by_name("lava");
 
-        let w = 1;
-        let h = 2;
-        let len = (w * h) as usize;
-        let mut fluids = vec![FluidCell::EMPTY; len];
-        let tiles = air_tiles(len);
+        let cs = 4u32;
+        let mut world_map = WorldMap::default();
+        let mut chunk = make_chunk(cs);
+        chunk.fluids[(0 * cs + 0) as usize] = FluidCell::new(water_id, 0.7); // (0, 0)
+        chunk.fluids[(1 * cs + 0) as usize] = FluidCell::new(lava_id, 0.9); // (0, 1)
+        world_map.chunks.insert((0, 0), chunk);
 
-        fluids[idx(0, 0, w)] = FluidCell::new(water_id, 0.7);
-        fluids[idx(0, 1, w)] = FluidCell::new(lava_id, 0.9);
-
-        resolve_density_displacement(&mut fluids, &tiles, w, h, &fr, &tr);
+        let active = vec![(0, 0)];
+        let mut world = FluidWorld::new(&mut world_map, cs, 1, 1, &tr, &fr);
+        resolve_density_displacement_global(&mut world, &active);
 
         // Lava sinks, water rises — masses preserved
-        assert_eq!(fluids[idx(0, 0, w)].fluid_id, lava_id);
-        assert!((fluids[idx(0, 0, w)].mass - 0.9).abs() < f32::EPSILON);
-        assert_eq!(fluids[idx(0, 1, w)].fluid_id, water_id);
-        assert!((fluids[idx(0, 1, w)].mass - 0.7).abs() < f32::EPSILON);
+        let below = world.read_current(0, 0);
+        let above = world.read_current(0, 1);
+        assert_eq!(below.fluid_id(), lava_id);
+        assert!((below.mass() - 0.9).abs() < f32::EPSILON);
+        assert_eq!(above.fluid_id(), water_id);
+        assert!((above.mass() - 0.7).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -542,19 +567,18 @@ mod tests {
         let tr = test_tile_registry();
         let water_id = fr.by_name("water");
 
-        let w = 1;
-        let h = 2;
-        let len = (w * h) as usize;
-        let mut fluids = vec![FluidCell::EMPTY; len];
-        let tiles = air_tiles(len);
+        let cs = 4u32;
+        let mut world_map = WorldMap::default();
+        let mut chunk = make_chunk(cs);
+        chunk.fluids[(0 * cs + 0) as usize] = FluidCell::new(water_id, 1.0); // (0, 0)
+        world_map.chunks.insert((0, 0), chunk);
 
-        // Water below, empty above — should not swap
-        fluids[idx(0, 0, w)] = FluidCell::new(water_id, 1.0);
+        let active = vec![(0, 0)];
+        let mut world = FluidWorld::new(&mut world_map, cs, 1, 1, &tr, &fr);
+        resolve_density_displacement_global(&mut world, &active);
 
-        resolve_density_displacement(&mut fluids, &tiles, w, h, &fr, &tr);
-
-        assert_eq!(fluids[idx(0, 0, w)].fluid_id, water_id);
-        assert!(fluids[idx(0, 1, w)].is_empty());
+        assert_eq!(world.read_current(0, 0).fluid_id(), water_id);
+        assert!(world.read_current(0, 1).is_empty());
     }
 
     #[test]
@@ -563,21 +587,51 @@ mod tests {
         let tr = test_tile_registry();
         let water_id = fr.by_name("water");
 
-        let w = 1;
-        let h = 2;
-        let len = (w * h) as usize;
-        let mut fluids = vec![FluidCell::EMPTY; len];
-        let tiles = air_tiles(len);
+        let cs = 4u32;
+        let mut world_map = WorldMap::default();
+        let mut chunk = make_chunk(cs);
+        chunk.fluids[(0 * cs + 0) as usize] = FluidCell::new(water_id, 0.5); // (0, 0)
+        chunk.fluids[(1 * cs + 0) as usize] = FluidCell::new(water_id, 0.8); // (0, 1)
+        world_map.chunks.insert((0, 0), chunk);
 
-        // Same fluid in both cells — no swap needed
-        fluids[idx(0, 0, w)] = FluidCell::new(water_id, 0.5);
-        fluids[idx(0, 1, w)] = FluidCell::new(water_id, 0.8);
-
-        resolve_density_displacement(&mut fluids, &tiles, w, h, &fr, &tr);
+        let active = vec![(0, 0)];
+        let mut world = FluidWorld::new(&mut world_map, cs, 1, 1, &tr, &fr);
+        resolve_density_displacement_global(&mut world, &active);
 
         // Masses unchanged
-        assert!((fluids[idx(0, 0, w)].mass - 0.5).abs() < f32::EPSILON);
-        assert!((fluids[idx(0, 1, w)].mass - 0.8).abs() < f32::EPSILON);
+        assert!((world.read_current(0, 0).mass() - 0.5).abs() < f32::EPSILON);
+        assert!((world.read_current(0, 1).mass() - 0.8).abs() < f32::EPSILON);
+    }
+
+    // --- Phase 0: intra-cell density enforcement ---
+
+    #[test]
+    fn phase0_enforces_density_order_within_cell() {
+        let fr = test_fluid_registry();
+        let tr = test_tile_registry();
+        let water_id = fr.by_name("water"); // density 1000
+        let lava_id = fr.by_name("lava"); // density 3000
+
+        let cs = 4u32;
+        let mut world_map = WorldMap::default();
+        let mut chunk = make_chunk(cs);
+        // Light fluid in primary, heavy in secondary — wrong order
+        chunk.fluids[0] = FluidCell {
+            primary: FluidSlot::new(water_id, 0.5),
+            secondary: FluidSlot::new(lava_id, 0.3),
+        };
+        world_map.chunks.insert((0, 0), chunk);
+
+        let active = vec![(0, 0)];
+        let mut world = FluidWorld::new(&mut world_map, cs, 1, 1, &tr, &fr);
+        resolve_density_displacement_global(&mut world, &active);
+
+        // After Phase 0: heavy (lava) should be primary, light (water) secondary
+        let cell = world.read_current(0, 0);
+        assert_eq!(cell.primary.fluid_id, lava_id);
+        assert_eq!(cell.secondary.fluid_id, water_id);
+        assert!((cell.primary.mass - 0.3).abs() < f32::EPSILON);
+        assert!((cell.secondary.mass - 0.5).abs() < f32::EPSILON);
     }
 
     // --- Reaction registry tests ---
@@ -698,12 +752,12 @@ mod tests {
         assert_eq!(registry.reactions.len(), 2);
     }
 
-    // --- execute_fluid_reactions tests ---
+    // --- execute_fluid_reactions_global tests ---
 
     fn simple_water_lava_registry() -> FluidReactionRegistry {
         let fr = test_fluid_registry();
         let tr = test_tile_registry();
-        // Single reaction: water + lava (Any) → stone tile + steam byproduct
+        // Single reaction: water + lava (Any) -> stone tile + steam byproduct
         let defs = vec![FluidReactionDef {
             fluid_a: "water".to_string(),
             fluid_b: "lava".to_string(),
@@ -730,25 +784,27 @@ mod tests {
         let steam_id = fr.by_name("steam");
         let stone_id = tr.by_name("stone");
 
-        // 2×1 grid: water at (0,0), lava at (1,0)
-        let w = 2u32;
-        let h = 1u32;
-        let mut tiles = vec![TileId::AIR; (w * h) as usize];
-        let mut fluids = vec![FluidCell::EMPTY; (w * h) as usize];
-        fluids[0] = FluidCell::new(water_id, 1.0);
-        fluids[1] = FluidCell::new(lava_id, 1.0);
+        let cs = 4u32;
+        let mut world_map = WorldMap::default();
+        let mut chunk = make_chunk(cs);
+        // water at (0,0), lava at (1,0) — adjacent horizontally
+        chunk.fluids[(0 * cs + 0) as usize] = FluidCell::new(water_id, 1.0);
+        chunk.fluids[(0 * cs + 1) as usize] = FluidCell::new(lava_id, 1.0);
+        world_map.chunks.insert((0, 0), chunk);
 
-        let events = execute_fluid_reactions(&mut fluids, &mut tiles, w, h, &registry, 0, 0, 16.0);
+        let active = vec![(0, 0)];
+        let mut world = FluidWorld::new(&mut world_map, cs, 1, 1, &tr, &fr);
+        let events = execute_fluid_reactions_global(&mut world, &active, &registry, 16.0);
 
         // Reaction should have occurred
         assert!(!events.is_empty(), "expected at least one reaction event");
-        // Stone tile placed at water cell
-        assert_eq!(tiles[0], stone_id, "expected stone tile at water position");
-        // Steam byproduct placed (or cell consumed)
-        // Either steam is there or cell is empty (stone replaced it)
-        let water_cell = fluids[0];
+        // Stone tile placed at reaction site
+        let tile = world.tile_at(0, 0);
+        assert_eq!(tile, stone_id, "expected stone tile at water position");
+        // Water cell should have steam byproduct or be empty
+        let water_cell = world.read_current(0, 0);
         assert!(
-            water_cell.is_empty() || water_cell.fluid_id == steam_id,
+            water_cell.is_empty() || water_cell.fluid_id() == steam_id,
             "expected steam or empty at reacted cell"
         );
     }
@@ -756,23 +812,26 @@ mod tests {
     #[test]
     fn reaction_rate_limited() {
         let fr = test_fluid_registry();
+        let tr = test_tile_registry();
         let registry = simple_water_lava_registry();
         let water_id = fr.by_name("water");
         let lava_id = fr.by_name("lava");
 
-        // 4×5 grid with alternating water/lava pairs = many possible reactions
-        let w = 4u32;
-        let h = 5u32;
-        let mut tiles = vec![TileId::AIR; (w * h) as usize];
-        let mut fluids = vec![FluidCell::EMPTY; (w * h) as usize];
-        for y in 0..h {
-            for x in 0..w {
+        let cs = 4u32;
+        let mut world_map = WorldMap::default();
+        let mut chunk = make_chunk(cs);
+        // Fill chunk with alternating water/lava = many possible reactions
+        for y in 0..cs {
+            for x in 0..cs {
                 let id = if (x + y) % 2 == 0 { water_id } else { lava_id };
-                fluids[(y * w + x) as usize] = FluidCell::new(id, 1.0);
+                chunk.fluids[(y * cs + x) as usize] = FluidCell::new(id, 1.0);
             }
         }
+        world_map.chunks.insert((0, 0), chunk);
 
-        let events = execute_fluid_reactions(&mut fluids, &mut tiles, w, h, &registry, 0, 0, 16.0);
+        let active = vec![(0, 0)];
+        let mut world = FluidWorld::new(&mut world_map, cs, 1, 1, &tr, &fr);
+        let events = execute_fluid_reactions_global(&mut world, &active, &registry, 16.0);
 
         assert!(
             events.len() <= MAX_REACTIONS_PER_CHUNK as usize,
@@ -804,20 +863,22 @@ mod tests {
         }];
         let registry = FluidReactionRegistry::from_defs(&defs, &fr, &tr);
 
-        let w = 2u32;
-        let h = 1u32;
-        let mut tiles = vec![TileId::AIR; (w * h) as usize];
-        let mut fluids = vec![FluidCell::EMPTY; (w * h) as usize];
+        let cs = 4u32;
+        let mut world_map = WorldMap::default();
+        let mut chunk = make_chunk(cs);
         // Water mass is below min_mass_a
-        fluids[0] = FluidCell::new(water_id, 0.1);
-        fluids[1] = FluidCell::new(lava_id, 1.0);
+        chunk.fluids[(0 * cs + 0) as usize] = FluidCell::new(water_id, 0.1);
+        chunk.fluids[(0 * cs + 1) as usize] = FluidCell::new(lava_id, 1.0);
+        world_map.chunks.insert((0, 0), chunk);
 
-        let events = execute_fluid_reactions(&mut fluids, &mut tiles, w, h, &registry, 0, 0, 16.0);
+        let active = vec![(0, 0)];
+        let mut world = FluidWorld::new(&mut world_map, cs, 1, 1, &tr, &fr);
+        let events = execute_fluid_reactions_global(&mut world, &active, &registry, 16.0);
 
         assert!(
             events.is_empty(),
             "reaction should not fire when mass below minimum"
         );
-        assert_eq!(tiles[0], TileId::AIR, "no tile should be placed");
+        assert_eq!(world.tile_at(0, 0), TileId::AIR, "no tile should be placed");
     }
 }

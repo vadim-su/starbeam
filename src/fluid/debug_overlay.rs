@@ -233,47 +233,86 @@ pub fn draw_fluid_debug_panel(
                                         ui.colored_label(egui::Color32::GRAY, "(empty)");
                                         ui.end_row();
                                     } else {
-                                        let def = fluid_registry.get(cell.fluid_id);
-                                        ui.label("Fluid:");
-                                        ui.colored_label(
-                                            egui::Color32::from_rgb(def.color[0], def.color[1], def.color[2]),
-                                            &def.id,
-                                        );
-                                        ui.end_row();
+                                        let has_secondary = !cell.secondary.is_empty();
 
-                                        ui.label("FluidId:");
-                                        ui.monospace(format!("{}", cell.fluid_id.0));
-                                        ui.end_row();
+                                        // --- Primary slot ---
+                                        if !cell.primary.is_empty() {
+                                            let def = fluid_registry.get(cell.primary.fluid_id);
+                                            let label = if has_secondary { "Primary:" } else { "Fluid:" };
+                                            ui.label(label);
+                                            ui.colored_label(
+                                                egui::Color32::from_rgb(def.color[0], def.color[1], def.color[2]),
+                                                &def.id,
+                                            );
+                                            ui.end_row();
 
-                                        ui.label("Mass:");
-                                        let mass_color = if cell.mass > 1.0 {
-                                            egui::Color32::RED
-                                        } else if cell.mass > 0.9 {
-                                            egui::Color32::LIGHT_GREEN
-                                        } else if cell.mass > 0.1 {
-                                            egui::Color32::YELLOW
-                                        } else {
-                                            egui::Color32::LIGHT_RED
-                                        };
-                                        ui.colored_label(mass_color, format!("{:.4}", cell.mass));
-                                        ui.end_row();
+                                            ui.label("  FluidId:");
+                                            ui.monospace(format!("{}", cell.primary.fluid_id.0));
+                                            ui.end_row();
 
-                                        ui.label("Fill:");
-                                        let fill = cell.mass.min(1.0);
-                                        ui.add(egui::ProgressBar::new(fill).text(format!("{:.0}%", fill * 100.0)));
-                                        ui.end_row();
+                                            ui.label("  Mass:");
+                                            let mass_color = if cell.primary.mass > 1.0 {
+                                                egui::Color32::RED
+                                            } else if cell.primary.mass > 0.9 {
+                                                egui::Color32::LIGHT_GREEN
+                                            } else if cell.primary.mass > 0.1 {
+                                                egui::Color32::YELLOW
+                                            } else {
+                                                egui::Color32::LIGHT_RED
+                                            };
+                                            ui.colored_label(mass_color, format!("{:.4}", cell.primary.mass));
+                                            ui.end_row();
 
-                                        ui.label("Type:");
-                                        ui.label(if def.is_gas { "Gas" } else { "Liquid" });
-                                        ui.end_row();
+                                            ui.label("  Fill:");
+                                            let fill = cell.primary.mass.min(1.0);
+                                            ui.add(egui::ProgressBar::new(fill).text(format!("{:.0}%", fill * 100.0)));
+                                            ui.end_row();
 
-                                        ui.label("Density:");
-                                        ui.monospace(format!("{:.0}", def.density));
-                                        ui.end_row();
+                                            ui.label("  Density:");
+                                            ui.monospace(format!("{:.0}", def.density));
+                                            ui.end_row();
+                                        }
 
-                                        ui.label("Viscosity:");
-                                        ui.monospace(format!("{:.2}", def.viscosity));
-                                        ui.end_row();
+                                        // --- Secondary slot ---
+                                        if has_secondary {
+                                            let def2 = fluid_registry.get(cell.secondary.fluid_id);
+                                            ui.label("Secondary:");
+                                            ui.colored_label(
+                                                egui::Color32::from_rgb(def2.color[0], def2.color[1], def2.color[2]),
+                                                &def2.id,
+                                            );
+                                            ui.end_row();
+
+                                            ui.label("  FluidId:");
+                                            ui.monospace(format!("{}", cell.secondary.fluid_id.0));
+                                            ui.end_row();
+
+                                            ui.label("  Mass:");
+                                            let mass_color = if cell.secondary.mass > 1.0 {
+                                                egui::Color32::RED
+                                            } else if cell.secondary.mass > 0.9 {
+                                                egui::Color32::LIGHT_GREEN
+                                            } else if cell.secondary.mass > 0.1 {
+                                                egui::Color32::YELLOW
+                                            } else {
+                                                egui::Color32::LIGHT_RED
+                                            };
+                                            ui.colored_label(mass_color, format!("{:.4}", cell.secondary.mass));
+                                            ui.end_row();
+
+                                            ui.label("  Fill:");
+                                            let fill = cell.secondary.mass.min(1.0);
+                                            ui.add(egui::ProgressBar::new(fill).text(format!("{:.0}%", fill * 100.0)));
+                                            ui.end_row();
+
+                                            ui.label("  Density:");
+                                            ui.monospace(format!("{:.0}", def2.density));
+                                            ui.end_row();
+
+                                            ui.label("Total:");
+                                            ui.monospace(format!("{:.4}", cell.total_mass()));
+                                            ui.end_row();
+                                        }
                                     }
                                 } else {
                                     ui.label("Fluid:");
@@ -300,8 +339,16 @@ pub fn draw_fluid_debug_panel(
                                     let text = match ncell {
                                         Some(nc) if nc.is_empty() => format!("{name}: empty"),
                                         Some(nc) => {
-                                            let nd = fluid_registry.get(nc.fluid_id);
-                                            format!("{name}: {} m={:.3}", nd.id, nc.mass)
+                                            let mut parts = Vec::new();
+                                            if !nc.primary.is_empty() {
+                                                let nd = fluid_registry.get(nc.primary.fluid_id);
+                                                parts.push(format!("{} m={:.3}", nd.id, nc.primary.mass));
+                                            }
+                                            if !nc.secondary.is_empty() {
+                                                let nd = fluid_registry.get(nc.secondary.fluid_id);
+                                                parts.push(format!("{} m={:.3}", nd.id, nc.secondary.mass));
+                                            }
+                                            format!("{name}: {}", parts.join(" + "))
                                         }
                                         None => format!("{name}: (unloaded)"),
                                     };
@@ -327,10 +374,18 @@ pub fn draw_fluid_debug_panel(
                         if let Some(chunk) = world_map.chunk(cx, cy) {
                             for cell in &chunk.fluids {
                                 if !cell.is_empty() {
-                                    total_mass += cell.mass;
                                     total_cells += 1;
-                                    let entry = by_type.entry(cell.fluid_id).or_insert((0.0, 0));
-                                    entry.0 += cell.mass;
+                                }
+                                if !cell.primary.is_empty() {
+                                    total_mass += cell.primary.mass;
+                                    let entry = by_type.entry(cell.primary.fluid_id).or_insert((0.0, 0));
+                                    entry.0 += cell.primary.mass;
+                                    entry.1 += 1;
+                                }
+                                if !cell.secondary.is_empty() {
+                                    total_mass += cell.secondary.mass;
+                                    let entry = by_type.entry(cell.secondary.fluid_id).or_insert((0.0, 0));
+                                    entry.0 += cell.secondary.mass;
                                     entry.1 += 1;
                                 }
                             }
