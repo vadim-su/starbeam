@@ -1,6 +1,9 @@
 use bevy::prelude::*;
 use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 
+use crate::fluid::cell::FluidId;
+use crate::fluid::renderer::{FluidMaterial, SharedFluidMaterial};
+use crate::fluid::FluidRegistry;
 use crate::registry::tile::{TileId, TileRegistry};
 use crate::registry::world::WorldConfig;
 use crate::registry::AppState;
@@ -229,6 +232,7 @@ fn extract_lighting_data(
     ctx: WorldCtx,
     mut input: ResMut<RcInputData>,
     mut config: ResMut<RcLightingConfig>,
+    fluid_registry: Option<Res<FluidRegistry>>,
 ) {
     let world_config = &*ctx.config;
     let tile_registry = &*ctx.tile_registry;
@@ -413,6 +417,40 @@ fn extract_lighting_data(
             // Albedo
             let albedo = tile_registry.albedo(tile_id);
             input.albedo[idx] = [albedo[0], albedo[1], albedo[2], 255];
+
+            // Fluid contribution to density and emissive
+            if !tile_registry.is_solid(tile_id) {
+                if let Some(ref fr) = fluid_registry {
+                    let ctx_ref = ctx.as_ref();
+                    if let Some(fluid_cell) = world_map.get_fluid(tx, ty, &ctx_ref) {
+                        if fluid_cell.fluid_id != FluidId::NONE && fluid_cell.level > 0 {
+                            let fluid_def = fr.get(fluid_cell.fluid_id);
+
+                            // Fluid light opacity: partial density based on level
+                            if fluid_def.light_opacity > 0 {
+                                let opacity = fluid_def.light_opacity as u32
+                                    * fluid_cell.level as u32
+                                    / 255;
+                                // Add to existing density (don't exceed 255)
+                                let current = input.density[idx] as u32;
+                                input.density[idx] =
+                                    current.saturating_add(opacity).min(255) as u8;
+                            }
+
+                            // Fluid emissive (lava glow)
+                            let fe = fluid_def.light_emission;
+                            if fe != [0, 0, 0] {
+                                input.emissive[idx] = [
+                                    fe[0] as f32 / 255.0 * POINT_LIGHT_BOOST,
+                                    fe[1] as f32 / 255.0 * POINT_LIGHT_BOOST,
+                                    fe[2] as f32 / 255.0 * POINT_LIGHT_BOOST,
+                                    1.0,
+                                ];
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -429,7 +467,9 @@ fn update_tile_lightmap(
     gpu_images: Option<Res<rc_pipeline::RcGpuImages>>,
     config: Option<Res<RcLightingConfig>>,
     shared_material: Option<Res<SharedTileMaterial>>,
+    shared_fluid_material: Option<Res<SharedFluidMaterial>>,
     mut materials: ResMut<Assets<TileMaterial>>,
+    mut fluid_materials: ResMut<Assets<FluidMaterial>>,
 ) {
     let (Some(gpu_images), Some(config), Some(shared_material)) =
         (gpu_images, config, shared_material)
@@ -459,6 +499,14 @@ fn update_tile_lightmap(
 
     for handle in [&shared_material.fg, &shared_material.bg] {
         if let Some(mat) = materials.get_mut(handle) {
+            mat.lightmap = gpu_images.lightmap.clone();
+            mat.lightmap_uv_rect = lm_params;
+        }
+    }
+
+    // Update fluid material lightmap
+    if let Some(shared_fluid) = shared_fluid_material {
+        if let Some(mat) = fluid_materials.get_mut(&shared_fluid.handle) {
             mat.lightmap = gpu_images.lightmap.clone();
             mat.lightmap_uv_rect = lm_params;
         }

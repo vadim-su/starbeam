@@ -28,7 +28,11 @@ impl Plugin for WorldPlugin {
             .init_resource::<MeshBuildBuffers>()
             .add_systems(
                 Update,
-                (chunk::chunk_loading_system, chunk::rebuild_dirty_chunks)
+                (
+                    chunk::chunk_loading_system,
+                    chunk::rebuild_dirty_chunks,
+                    chunk::rebuild_dirty_fluid_chunks,
+                )
                     .chain()
                     .in_set(GameSet::WorldUpdate),
             );

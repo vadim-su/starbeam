@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use bevy::prelude::*;
 
 use crate::fluid::FluidCell;
+use crate::fluid::renderer::{build_fluid_mesh, SharedFluidMaterial};
 use crate::registry::tile::{TileId, TileRegistry};
 use crate::registry::world::WorldConfig;
 use crate::world::atlas::TileAtlas;
@@ -28,10 +29,15 @@ pub struct ChunkDirty;
 #[derive(Component)]
 pub struct ChunkLayer(pub Layer);
 
-/// Both entities for a loaded chunk.
+/// Marker component for chunks that need fluid mesh rebuild.
+#[derive(Component)]
+pub struct ChunkFluidDirty;
+
+/// All entities for a loaded chunk.
 pub struct ChunkEntities {
     pub fg: Entity,
     pub bg: Entity,
+    pub fluid: Entity,
 }
 
 /// Identifies which tile layer to operate on.
@@ -366,6 +372,7 @@ pub fn spawn_chunk(
     autotile_registry: &AutotileRegistry,
     atlas: &TileAtlas,
     material: &SharedTileMaterial,
+    fluid_material: &SharedFluidMaterial,
     buffers: &mut MeshBuildBuffers,
     display_chunk_x: i32,
     chunk_y: i32,
@@ -450,11 +457,36 @@ pub fn spawn_chunk(
         ))
         .id();
 
+    // Build fluid mesh (z=-0.5, between bg and fg)
+    let fluid_mesh = build_fluid_mesh(
+        &chunk_data.fluid,
+        display_chunk_x,
+        chunk_y,
+        ctx.config.chunk_size,
+        ctx.config.tile_size,
+        buffers,
+    );
+    let fluid_handle = meshes.add(fluid_mesh);
+
+    let fluid_entity = commands
+        .spawn((
+            ChunkCoord {
+                x: display_chunk_x,
+                y: chunk_y,
+            },
+            Mesh2d(fluid_handle),
+            MeshMaterial2d(fluid_material.handle.clone()),
+            Transform::from_translation(Vec3::new(0.0, 0.0, -0.5)),
+            Visibility::default(),
+        ))
+        .id();
+
     loaded_chunks.map.insert(
         (display_chunk_x, chunk_y),
         ChunkEntities {
             fg: fg_entity,
             bg: bg_entity,
+            fluid: fluid_entity,
         },
     );
 }
@@ -468,6 +500,7 @@ pub fn despawn_chunk(
     if let Some(entities) = loaded_chunks.map.remove(&(chunk_x, chunk_y)) {
         commands.entity(entities.fg).despawn();
         commands.entity(entities.bg).despawn();
+        commands.entity(entities.fluid).despawn();
     }
 }
 
@@ -482,6 +515,7 @@ pub fn chunk_loading_system(
     autotile_registry: Res<AutotileRegistry>,
     atlas: Res<TileAtlas>,
     material: Res<SharedTileMaterial>,
+    fluid_material: Res<SharedFluidMaterial>,
     mut buffers: ResMut<MeshBuildBuffers>,
 ) {
     let Ok(camera_transform) = camera_query.single() else {
@@ -528,6 +562,7 @@ pub fn chunk_loading_system(
                 &autotile_registry,
                 &atlas,
                 &material,
+                &fluid_material,
                 &mut buffers,
                 display_cx,
                 cy,
@@ -598,6 +633,38 @@ pub fn rebuild_dirty_chunks(
             .entity(entity)
             .insert(Mesh2d(mesh_handle))
             .remove::<ChunkDirty>();
+    }
+}
+
+/// Rebuild fluid meshes for chunks marked with ChunkFluidDirty.
+pub fn rebuild_dirty_fluid_chunks(
+    mut commands: Commands,
+    query: Query<(Entity, &ChunkCoord), With<ChunkFluidDirty>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    world_map: Res<WorldMap>,
+    wc: Res<WorldConfig>,
+    mut buffers: ResMut<MeshBuildBuffers>,
+) {
+    for (entity, coord) in &query {
+        let data_chunk_x = wc.wrap_chunk_x(coord.x);
+        let Some(chunk_data) = world_map.chunks.get(&(data_chunk_x, coord.y)) else {
+            continue;
+        };
+
+        let mesh = build_fluid_mesh(
+            &chunk_data.fluid,
+            coord.x,
+            coord.y,
+            wc.chunk_size,
+            wc.tile_size,
+            &mut buffers,
+        );
+
+        let mesh_handle = meshes.add(mesh);
+        commands
+            .entity(entity)
+            .insert(Mesh2d(mesh_handle))
+            .remove::<ChunkFluidDirty>();
     }
 }
 

@@ -19,6 +19,7 @@ use super::tile::TileRegistry;
 use super::world::WorldConfig;
 use super::{AppState, BiomeParallaxConfigs, RegistryHandles};
 
+use crate::fluid::renderer::{FluidMaterial, SharedFluidMaterial};
 use crate::fluid::{FluidRegistry, FluidRegistryAsset};
 use crate::parallax::config::ParallaxConfig;
 use crate::world::atlas::{build_combined_atlas, AtlasParams, TileAtlas};
@@ -402,6 +403,7 @@ pub(crate) fn check_autotile_loading(
     autotile_assets: Res<Assets<AutotileAsset>>,
     mut image_assets: ResMut<Assets<Image>>,
     mut tile_materials: ResMut<Assets<TileMaterial>>,
+    mut fluid_materials: ResMut<Assets<FluidMaterial>>,
     asset_server: Res<AssetServer>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
@@ -508,6 +510,27 @@ pub(crate) fn check_autotile_loading(
         fg: fg_material,
         bg: bg_material,
     });
+
+    // Create shared fluid material: water blue color, semi-transparent, lightmap-lit.
+    // Uses the same white fallback lightmap that RC will replace each frame.
+    let white_lm_fluid = image_assets.add(Image::new_fill(
+        Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[0x00u8, 0x3C, 0x00, 0x3C, 0x00, 0x3C, 0x00, 0x3C],
+        TextureFormat::Rgba16Float,
+        RenderAssetUsages::RENDER_WORLD,
+    ));
+    let fluid_mat = fluid_materials.add(FluidMaterial {
+        color: Vec4::new(64.0 / 255.0, 128.0 / 255.0, 1.0, 1.0),
+        alpha: 0.6,
+        lightmap: white_lm_fluid,
+        lightmap_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
+    });
+    commands.insert_resource(SharedFluidMaterial { handle: fluid_mat });
 
     commands.remove_resource::<LoadingAutotileAssets>();
     next_state.set(AppState::InGame);
