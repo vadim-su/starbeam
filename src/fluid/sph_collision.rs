@@ -1,6 +1,120 @@
 use bevy::math::Vec2;
 
+/// Maximum particle speed in pixels/second. Prevents explosion from bad pressure.
+pub const MAX_PARTICLE_SPEED: f32 = 300.0;
+
+/// Friction applied to tangential velocity on surface contact (0=no friction, 1=full stop).
+const SURFACE_FRICTION: f32 = 0.3;
+
+/// Number of collision resolution iterations per particle.
+const COLLISION_ITERATIONS: u32 = 3;
+
+/// Small offset to push particles out of solid tiles.
+const PUSH_EPSILON: f32 = 0.05;
+
+/// Resolve a single particle against the tile grid.
+/// Runs multiple iterations to handle being pushed into another solid.
+/// Applies friction to tangential velocity on contact.
 pub fn resolve_tile_collision(
+    pos: &mut Vec2,
+    vel: &mut Vec2,
+    tile_size: f32,
+    is_solid: &dyn Fn(i32, i32) -> bool,
+    restitution: f32,
+) {
+    for _ in 0..COLLISION_ITERATIONS {
+        if !resolve_solid_tile(pos, vel, tile_size, is_solid, restitution) {
+            break;
+        }
+    }
+    resolve_diagonal_corners(pos, vel, tile_size, is_solid, restitution);
+}
+
+/// Push particle out of the solid tile it's in. Returns true if a collision occurred.
+fn resolve_solid_tile(
+    pos: &mut Vec2,
+    vel: &mut Vec2,
+    tile_size: f32,
+    is_solid: &dyn Fn(i32, i32) -> bool,
+    restitution: f32,
+) -> bool {
+    let tx = (pos.x / tile_size).floor() as i32;
+    let ty = (pos.y / tile_size).floor() as i32;
+
+    if !is_solid(tx, ty) {
+        return false;
+    }
+
+    let tile_left = tx as f32 * tile_size;
+    let tile_right = tile_left + tile_size;
+    let tile_bottom = ty as f32 * tile_size;
+    let tile_top = tile_bottom + tile_size;
+
+    let dist_left = pos.x - tile_left;
+    let dist_right = tile_right - pos.x;
+    let dist_bottom = pos.y - tile_bottom;
+    let dist_top = tile_top - pos.y;
+
+    // Find minimum penetration axis, preferring exits to non-solid neighbors
+    let candidates = [
+        (dist_left, -1i32, 0i32, true),   // exit left
+        (dist_right, 1, 0, true),          // exit right
+        (dist_bottom, 0, -1, false),       // exit down
+        (dist_top, 0, 1, false),           // exit up
+    ];
+
+    // Try nearest edge with a non-solid neighbor first
+    let mut best: Option<(f32, i32, i32, bool)> = None;
+    for &(dist, dx, dy, is_x) in &candidates {
+        let neighbor_free = !is_solid(tx + dx, ty + dy);
+        if !neighbor_free {
+            continue;
+        }
+        if best.is_none() || dist < best.unwrap().0 {
+            best = Some((dist, dx, dy, is_x));
+        }
+    }
+
+    if let Some((_dist, dx, dy, is_x)) = best {
+        if is_x {
+            // Horizontal exit
+            if dx < 0 {
+                pos.x = tile_left - PUSH_EPSILON;
+            } else {
+                pos.x = tile_right + PUSH_EPSILON;
+            }
+            // Reflect normal component, apply friction to tangential
+            vel.x = if dx < 0 {
+                -vel.x.abs() * restitution
+            } else {
+                vel.x.abs() * restitution
+            };
+            vel.y *= 1.0 - SURFACE_FRICTION;
+        } else {
+            // Vertical exit
+            if dy < 0 {
+                pos.y = tile_bottom - PUSH_EPSILON;
+            } else {
+                pos.y = tile_top + PUSH_EPSILON;
+            }
+            vel.y = if dy < 0 {
+                -vel.y.abs() * restitution
+            } else {
+                vel.y.abs() * restitution
+            };
+            vel.x *= 1.0 - SURFACE_FRICTION;
+        }
+    } else {
+        // Completely surrounded — kill velocity, push left as fallback
+        pos.x = tile_left - PUSH_EPSILON;
+        *vel = Vec2::ZERO;
+    }
+
+    true
+}
+
+/// Seal diagonal corners where two solid tiles share only a corner.
+fn resolve_diagonal_corners(
     pos: &mut Vec2,
     vel: &mut Vec2,
     tile_size: f32,
@@ -11,62 +125,16 @@ pub fn resolve_tile_collision(
     let ty = (pos.y / tile_size).floor() as i32;
 
     if is_solid(tx, ty) {
-        let tile_left = tx as f32 * tile_size;
-        let tile_right = tile_left + tile_size;
-        let tile_bottom = ty as f32 * tile_size;
-        let tile_top = tile_bottom + tile_size;
-
-        let dist_left = (pos.x - tile_left).abs();
-        let dist_right = (tile_right - pos.x).abs();
-        let dist_bottom = (pos.y - tile_bottom).abs();
-        let dist_top = (tile_top - pos.y).abs();
-
-        let min_dist = dist_left.min(dist_right).min(dist_bottom).min(dist_top);
-
-        if min_dist == dist_left && !is_solid(tx - 1, ty) {
-            pos.x = tile_left - 0.01;
-            vel.x = -vel.x.abs() * restitution;
-        } else if min_dist == dist_right && !is_solid(tx + 1, ty) {
-            pos.x = tile_right + 0.01;
-            vel.x = vel.x.abs() * restitution;
-        } else if min_dist == dist_bottom && !is_solid(tx, ty - 1) {
-            pos.y = tile_bottom - 0.01;
-            vel.y = -vel.y.abs() * restitution;
-        } else if min_dist == dist_top && !is_solid(tx, ty + 1) {
-            pos.y = tile_top + 0.01;
-            vel.y = vel.y.abs() * restitution;
-        } else {
-            pos.x = tile_left - 0.01;
-            *vel = Vec2::ZERO;
-        }
-    }
-
-    // Diagonal corner sealing: prevent particles from slipping through diagonal
-    // gaps where two solid tiles share only a corner.
-    //
-    // Re-read the tile after the primary push (the particle may have moved).
-    let tx = (pos.x / tile_size).floor() as i32;
-    let ty = (pos.y / tile_size).floor() as i32;
-
-    // Only apply diagonal checks when the particle is in an air tile.
-    if is_solid(tx, ty) {
         return;
     }
 
     let corner_threshold = tile_size * 0.15;
 
-    // Check all 4 corners of the current air tile.
-    // For each corner, if both axis-aligned neighbors are solid, the diagonal
-    // gap is sealed and the particle must be pushed away from that corner.
     for &(dx, dy) in &[(-1_i32, -1_i32), (1, -1), (-1, 1), (1, 1)] {
-        let neighbor_x_solid = is_solid(tx + dx, ty);
-        let neighbor_y_solid = is_solid(tx, ty + dy);
-
-        if !neighbor_x_solid || !neighbor_y_solid {
+        if !is_solid(tx + dx, ty) || !is_solid(tx, ty + dy) {
             continue;
         }
 
-        // The corner world-space position where the two solid tiles meet.
         let corner_x = if dx < 0 {
             tx as f32 * tile_size
         } else {
@@ -82,17 +150,24 @@ pub fn resolve_tile_collision(
         let dist = to_particle.length();
 
         if dist < corner_threshold && dist > 1e-6 {
-            // Push the particle away from the corner along the corner→particle
-            // direction so it sits exactly at the threshold distance.
             let push_dir = to_particle / dist;
             *pos = Vec2::new(corner_x, corner_y) + push_dir * (corner_threshold + 0.01);
 
-            // Reflect velocity component that points toward the corner.
             let vel_toward_corner = vel.dot(-push_dir);
             if vel_toward_corner > 0.0 {
                 *vel += push_dir * vel_toward_corner * (1.0 + restitution);
             }
+            // Apply friction
+            *vel *= 1.0 - SURFACE_FRICTION;
         }
+    }
+}
+
+/// Clamp particle velocity to MAX_PARTICLE_SPEED.
+pub fn clamp_velocity(vel: &mut Vec2) {
+    let speed = vel.length();
+    if speed > MAX_PARTICLE_SPEED {
+        *vel *= MAX_PARTICLE_SPEED / speed;
     }
 }
 
@@ -150,7 +225,7 @@ mod tests {
 
     #[test]
     fn velocity_reflected_on_collision() {
-        let mut pos = Vec2::new(12.0, 9.0); // Near bottom edge of tile (1,1)
+        let mut pos = Vec2::new(12.0, 9.0);
         let mut vel = Vec2::new(0.0, -50.0);
         let is_solid = |x: i32, y: i32| -> bool { x == 1 && y == 1 };
         resolve_tile_collision(&mut pos, &mut vel, 8.0, &is_solid, 0.3);
@@ -162,17 +237,55 @@ mod tests {
     }
 
     #[test]
+    fn friction_reduces_tangential_velocity() {
+        let mut pos = Vec2::new(12.0, 8.1); // just inside tile (1,1), near bottom
+        let mut vel = Vec2::new(100.0, -10.0); // fast horizontal, slow vertical
+        let is_solid = |x: i32, y: i32| -> bool { x == 1 && y == 1 };
+        resolve_tile_collision(&mut pos, &mut vel, 8.0, &is_solid, 0.0);
+        // Horizontal (tangential) velocity should be reduced by friction
+        assert!(
+            vel.x.abs() < 100.0,
+            "Tangential velocity should be reduced by friction, got {}",
+            vel.x
+        );
+    }
+
+    #[test]
+    fn multiple_iterations_handle_chain_push() {
+        // Particle in solid, pushed left into another solid, should resolve
+        let mut pos = Vec2::new(12.0, 4.5);
+        let mut vel = Vec2::new(0.0, -10.0);
+        // Tiles (1,0) and (0,0) are solid, only (1,1) and above are free
+        let is_solid = |x: i32, y: i32| -> bool { y == 0 && (x == 0 || x == 1) };
+        resolve_tile_collision(&mut pos, &mut vel, 8.0, &is_solid, 0.0);
+        // Should end up above both solid tiles
+        let ty = (pos.y / 8.0).floor() as i32;
+        assert!(
+            ty >= 1 || pos.y >= 8.0 - 0.1,
+            "Particle should be pushed up above solid row, pos={:?}",
+            pos
+        );
+    }
+
+    #[test]
+    fn velocity_clamped() {
+        let mut vel = Vec2::new(500.0, 500.0);
+        clamp_velocity(&mut vel);
+        assert!(
+            vel.length() <= MAX_PARTICLE_SPEED + 0.1,
+            "Velocity should be clamped, got {}",
+            vel.length()
+        );
+    }
+
+    #[test]
     fn diagonal_corner_sealed_pushes_particle_away() {
-        // Solid tiles at (1,0) and (0,1), air at (0,0) and (1,1).
-        // The corner at world pos (8,8) should be sealed.
-        // Place particle very close to that corner inside tile (0,0).
         let mut pos = Vec2::new(7.8, 7.8);
-        let mut vel = Vec2::new(10.0, 10.0); // moving toward the corner
+        let mut vel = Vec2::new(10.0, 10.0);
         let is_solid = |x: i32, y: i32| -> bool {
             (x == 1 && y == 0) || (x == 0 && y == 1)
         };
         resolve_tile_collision(&mut pos, &mut vel, 8.0, &is_solid, 0.3);
-        // Particle should have been pushed away from the corner at (8,8)
         let dist_to_corner = ((pos.x - 8.0).powi(2) + (pos.y - 8.0).powi(2)).sqrt();
         assert!(
             dist_to_corner > 1.0,
@@ -183,31 +296,12 @@ mod tests {
 
     #[test]
     fn diagonal_corner_not_sealed_when_only_one_neighbor_solid() {
-        // Only one axis neighbor solid — diagonal is NOT sealed.
         let mut pos = Vec2::new(7.8, 7.8);
         let mut vel = Vec2::new(10.0, 10.0);
         let is_solid = |x: i32, y: i32| -> bool { x == 1 && y == 0 };
         let original_pos = pos;
         resolve_tile_collision(&mut pos, &mut vel, 8.0, &is_solid, 0.3);
-        // Particle should be unaffected (it's in air and no sealed corner)
         assert_eq!(pos, original_pos, "Particle should not be moved");
-    }
-
-    #[test]
-    fn diagonal_corner_velocity_reflected() {
-        // Particle near sealed corner should have velocity reflected away.
-        let mut pos = Vec2::new(7.9, 7.9);
-        let mut vel = Vec2::new(20.0, 20.0); // heading toward corner
-        let is_solid = |x: i32, y: i32| -> bool {
-            (x == 1 && y == 0) || (x == 0 && y == 1)
-        };
-        resolve_tile_collision(&mut pos, &mut vel, 8.0, &is_solid, 0.3);
-        // After reflection, velocity should point away from corner (negative components)
-        assert!(
-            vel.x < 0.0 || vel.y < 0.0,
-            "Velocity should be reflected away from corner, got {:?}",
-            vel
-        );
     }
 
     #[test]

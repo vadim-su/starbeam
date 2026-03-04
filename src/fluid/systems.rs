@@ -11,7 +11,7 @@ use bevy::shader::ShaderRef;
 use bevy::sprite_render::{AlphaMode2d, Material2d, Material2dKey, MeshMaterial2d};
 
 use crate::fluid::events::FluidReactionEvent;
-use crate::fluid::sph_collision::{enforce_world_bounds, resolve_tile_collision};
+use crate::fluid::sph_collision::{clamp_velocity, enforce_world_bounds, resolve_tile_collision};
 use crate::fluid::sph_particle::ParticleStore;
 use crate::fluid::sph_render::build_particle_mesh;
 use crate::fluid::sph_simulation::{sph_step, SphConfig};
@@ -200,7 +200,8 @@ pub fn sph_fluid_simulation(
     let particles = &mut *particles;
     let (positions, velocities) = (&mut particles.positions, &mut particles.velocities);
     for i in 0..positions.len() {
-        resolve_tile_collision(&mut positions[i], &mut velocities[i], tile_size, &is_solid, 0.2);
+        clamp_velocity(&mut velocities[i]);
+        resolve_tile_collision(&mut positions[i], &mut velocities[i], tile_size, &is_solid, 0.05);
         enforce_world_bounds(
             &mut positions[i],
             &mut velocities[i],
