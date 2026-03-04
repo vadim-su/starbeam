@@ -535,7 +535,7 @@ fn extract_lighting_data(
                             if cell.is_empty() {
                                 continue;
                             }
-                            let def = fluid_reg.get(cell.fluid_id);
+                            let def = fluid_reg.get(cell.fluid_id());
                             if def.light_absorption <= 0.0 {
                                 continue;
                             }
@@ -550,7 +550,7 @@ fn extract_lighting_data(
                             }
 
                             let absorption =
-                                cell.mass.min(1.0) * def.light_absorption;
+                                cell.mass().min(1.0) * def.light_absorption;
                             let fluid_density = (absorption * 255.0) as u8;
                             input.density[idx] = input.density[idx].max(fluid_density);
                         }
@@ -800,7 +800,7 @@ fn extract_lighting_data(
                             let mut top_fluid = above_chunk
                                 .map(|c| {
                                     let aidx = lx as usize; // bottom row of chunk above = ly=0
-                                    c.fluids[aidx].fluid_id
+                                    c.fluids[aidx].fluid_id()
                                 })
                                 .filter(|id| *id != FluidId::NONE)
                                 .unwrap_or(FluidId::NONE);
@@ -814,8 +814,8 @@ fn extract_lighting_data(
                                     cover_active = false;
                                 } else {
                                     if top_fluid == FluidId::NONE {
-                                        top_fluid = cell.fluid_id;
-                                    } else if cell.fluid_id != top_fluid {
+                                        top_fluid = cell.fluid_id();
+                                    } else if cell.fluid_id() != top_fluid {
                                         cover_active = true;
                                     }
                                     if cover_active {
@@ -835,11 +835,11 @@ fn extract_lighting_data(
                             if cell.is_empty() {
                                 continue;
                             }
-                            let def = fluid_reg.get(cell.fluid_id);
+                            let def = fluid_reg.get(cell.fluid_id());
                             if def.light_emission == [0, 0, 0] {
                                 continue;
                             }
-                            if cell.mass < 0.1 {
+                            if cell.mass() < 0.1 {
                                 continue;
                             }
                             // Skip emission for cells covered by a different
@@ -851,7 +851,7 @@ fn extract_lighting_data(
                             let buf_x = (tx - min_tx) as u32;
                             let buf_y = (max_ty - ty) as u32;
                             let idx = (buf_y * input_w + buf_x) as usize;
-                            let intensity = cell.mass.min(1.0);
+                            let intensity = cell.mass().min(1.0);
                             let e = def.light_emission;
                             let new_emission = [
                                 e[0] as f32 / 255.0 * POINT_LIGHT_BOOST * intensity,

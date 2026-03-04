@@ -63,7 +63,7 @@ pub fn detect_entity_water_entry(
             .map(|chunk| {
                 let idx = (local_y * chunk_size + local_x) as usize;
                 if idx < chunk.fluids.len() && !chunk.fluids[idx].is_empty() {
-                    chunk.fluids[idx].fluid_id
+                    chunk.fluids[idx].fluid_id()
                 } else {
                     FluidId::NONE
                 }

@@ -290,7 +290,7 @@ fn run_one_tick(
             world_map.chunks.get(&(cx, cy)),
         ) {
             initial.iter().zip(chunk.fluids.iter()).any(|(old, new)| {
-                old.fluid_id != new.fluid_id || (old.mass - new.mass).abs() >= CALM_MASS_EPSILON
+                old.fluid_id() != new.fluid_id() || (old.mass() - new.mass()).abs() >= CALM_MASS_EPSILON
             })
         } else {
             false

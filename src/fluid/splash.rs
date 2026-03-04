@@ -88,19 +88,19 @@ pub fn spawn_splash_particles(
         // Calculate displaced mass and particle count based on impact kind
         let (displaced, particle_count) = match event.kind {
             ImpactKind::Splash => {
-                let raw = cell.mass * splash_config.splash_displacement;
-                let displaced = raw.min(cell.mass - 0.01).max(0.0);
+                let raw = cell.mass() * splash_config.splash_displacement;
+                let displaced = raw.min(cell.mass() - 0.01).max(0.0);
                 let count = (displaced * splash_config.particles_per_mass)
                     .round()
                     .clamp(4.0, 30.0) as u32;
                 (displaced, count)
             }
             ImpactKind::Wake => {
-                let displaced = (cell.mass * 0.02).min(cell.mass - 0.01).max(0.0);
+                let displaced = (cell.mass() * 0.02).min(cell.mass() - 0.01).max(0.0);
                 (displaced, 2)
             }
             ImpactKind::Pour => {
-                let displaced = (cell.mass * 0.05).min(cell.mass - 0.01).max(0.0);
+                let displaced = (cell.mass() * 0.05).min(cell.mass() - 0.01).max(0.0);
                 let count = (displaced * splash_config.particles_per_mass)
                     .round()
                     .clamp(1.0, 5.0) as u32;
@@ -114,8 +114,8 @@ pub fn spawn_splash_particles(
 
         // Remove displaced mass from CA cell
         let chunk = world_map.chunks.get_mut(&(cx, cy)).unwrap();
-        chunk.fluids[idx].mass -= displaced;
-        if chunk.fluids[idx].mass < 0.001 {
+        chunk.fluids[idx].primary.mass -= displaced;
+        if chunk.fluids[idx].mass() < 0.001 {
             chunk.fluids[idx] = FluidCell::EMPTY;
         }
 
@@ -230,7 +230,7 @@ pub fn reabsorb_particles(
                 continue;
             }
             let cell = chunk.fluids[idx];
-            !cell.is_empty() && cell.fluid_id == p.fluid_id
+            !cell.is_empty() && cell.fluid_id() == p.fluid_id
         };
 
         if !should_reabsorb {
@@ -243,7 +243,7 @@ pub fn reabsorb_particles(
 
         // Add particle mass back to cell
         let chunk = world_map.chunks.get_mut(&(cx, cy)).unwrap();
-        chunk.fluids[idx].mass += particle_mass;
+        chunk.fluids[idx].primary.mass += particle_mass;
 
         // Apply wave impulse from particle velocity
         let impulse = particle_velocity.y.abs() * 0.01;
