@@ -3,6 +3,7 @@ use bevy::sprite_render::Material2dPlugin;
 
 pub mod cell;
 pub mod debug;
+pub mod debug_overlay;
 pub mod detectors;
 pub mod events;
 pub mod fluid_world;
@@ -40,6 +41,7 @@ impl Plugin for FluidPlugin {
             .init_resource::<wave::WaveState>()
             .init_resource::<splash::SplashConfig>()
             .init_resource::<detectors::SwimThrottle>()
+            .init_resource::<debug_overlay::FluidDebugState>()
             .add_systems(Startup, systems::init_fluid_material)
             .add_systems(
                 Update,
@@ -69,8 +71,17 @@ impl Plugin for FluidPlugin {
             )
             .add_systems(
                 Update,
-                debug::debug_place_fluid
+                (
+                    debug::debug_place_fluid,
+                    debug_overlay::toggle_fluid_debug,
+                )
                     .in_set(GameSet::Input)
+                    .run_if(in_state(AppState::InGame))
+                    .run_if(resource_exists::<FluidRegistry>),
+            )
+            .add_systems(
+                bevy_egui::EguiPrimaryContextPass,
+                debug_overlay::draw_fluid_debug_panel
                     .run_if(in_state(AppState::InGame))
                     .run_if(resource_exists::<FluidRegistry>),
             );

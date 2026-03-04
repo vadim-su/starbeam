@@ -37,7 +37,7 @@ pub struct FluidTickAccumulator {
 ///
 /// Bindings (all in @group(2)):
 ///   - texture(0) / sampler(1): lightmap
-///   - uniform(2): FluidUniforms { lightmap_uv_rect, time }
+///   - uniform(2): FluidUniforms { lightmap_uv_rect, time, debug_mode, show_grid }
 #[derive(Asset, AsBindGroup, Clone, TypePath)]
 pub struct FluidMaterial {
     #[texture(0)]
@@ -47,6 +47,12 @@ pub struct FluidMaterial {
     pub lightmap_uv_rect: Vec4,
     #[uniform(2)]
     pub time: f32,
+    /// Debug visualization mode: 0=off, 1=mass, 2=surface, 3=fluid_type, 4=depth.
+    #[uniform(2)]
+    pub debug_mode: u32,
+    /// Whether to show grid lines between cells in debug mode.
+    #[uniform(2)]
+    pub show_grid: u32,
 }
 
 impl Material2d for FluidMaterial {
@@ -134,18 +140,30 @@ pub fn init_fluid_material(
             lightmap: white_lightmap,
             lightmap_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
             time: 0.0,
+            debug_mode: 0,
+            show_grid: 0,
         }),
     });
 }
 
-/// Update the time uniform on the shared FluidMaterial each frame.
+/// Update the time and debug uniforms on the shared FluidMaterial each frame.
 pub fn update_fluid_time(
     time: Res<Time>,
     shared: Res<SharedFluidMaterial>,
     mut materials: ResMut<Assets<FluidMaterial>>,
+    debug_state: Option<Res<crate::fluid::debug_overlay::FluidDebugState>>,
 ) {
     if let Some(mat) = materials.get_mut(&shared.handle) {
         mat.time = time.elapsed_secs();
+        if let Some(dbg) = &debug_state {
+            if dbg.visible {
+                mat.debug_mode = dbg.mode.as_u32();
+                mat.show_grid = if dbg.show_grid { 1 } else { 0 };
+            } else {
+                mat.debug_mode = 0;
+                mat.show_grid = 0;
+            }
+        }
     }
 }
 
