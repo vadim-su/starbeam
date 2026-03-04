@@ -525,8 +525,7 @@ pub(crate) fn check_autotile_loading(
         RenderAssetUsages::RENDER_WORLD,
     ));
     let fluid_mat = fluid_materials.add(FluidMaterial {
-        color: Vec4::new(64.0 / 255.0, 128.0 / 255.0, 1.0, 1.0),
-        alpha: 0.6,
+        color_alpha: Vec4::new(64.0 / 255.0, 128.0 / 255.0, 1.0, 0.6),
         lightmap: white_lm_fluid,
         lightmap_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
     });

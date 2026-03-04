@@ -26,11 +26,9 @@ fn vertex(in: VertexInput) -> VertexOutput {
     return out;
 }
 
+/// xyz = fluid base color, w = alpha.
 struct FluidUniforms {
-    /// Fluid base color (RGB) packed into vec4 for alignment.
-    color: vec4<f32>,
-    /// Alpha for the fluid layer (opacity).
-    alpha: f32,
+    color_alpha: vec4<f32>,
 }
 
 struct LightmapXform {
@@ -46,12 +44,15 @@ struct LightmapXform {
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // UV.y encodes fluid level: 0.0 at bottom, 1.0 at surface.
-    // Use it to create slight vertical gradient for visual depth.
+    // Slight vertical gradient for visual depth.
     let depth_factor = mix(0.7, 1.0, in.uv.y);
 
     let lightmap_uv = in.world_pos * lm_xform.scale + lm_xform.offset;
     let light = textureSample(lightmap_texture, lightmap_sampler, lightmap_uv).rgb;
 
-    let lit_color = uniforms.color.rgb * depth_factor * light;
-    return vec4<f32>(lit_color, uniforms.alpha);
+    let color = uniforms.color_alpha.rgb;
+    let alpha = uniforms.color_alpha.w;
+
+    let lit_color = color * depth_factor * light;
+    return vec4<f32>(lit_color, alpha);
 }

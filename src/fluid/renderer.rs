@@ -14,10 +14,9 @@ use crate::world::mesh_builder::MeshBuildBuffers;
 /// Material for fluid rendering: flat color + lightmap.
 #[derive(Asset, AsBindGroup, Clone, TypePath)]
 pub struct FluidMaterial {
+    /// xyz = fluid color (RGB, 0.0–1.0), w = alpha (opacity).
     #[uniform(0)]
-    pub color: Vec4, // RGB color + padding
-    #[uniform(0)]
-    pub alpha: f32,
+    pub color_alpha: Vec4,
     #[texture(1)]
     #[sampler(2)]
     pub lightmap: Handle<Image>,
