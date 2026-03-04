@@ -1,0 +1,208 @@
+use bevy::math::Vec2;
+use bevy::prelude::Resource;
+
+use crate::fluid::spatial_hash::SpatialHash;
+use crate::fluid::sph_kernels::{poly6, spiky_gradient, viscosity_laplacian};
+use crate::fluid::sph_particle::ParticleStore;
+
+#[derive(Debug, Clone, Resource)]
+pub struct SphConfig {
+    pub smoothing_radius: f32,
+    pub rest_density: f32,
+    pub stiffness: f32,
+    pub viscosity: f32,
+    pub gravity: Vec2,
+    pub particle_mass: f32,
+}
+
+impl Default for SphConfig {
+    fn default() -> Self {
+        Self {
+            smoothing_radius: 16.0,
+            rest_density: 1.0,
+            stiffness: 50.0,
+            viscosity: 0.1,
+            gravity: Vec2::new(0.0, -98.0),
+            particle_mass: 1.0,
+        }
+    }
+}
+
+pub fn compute_density_pressure(store: &mut ParticleStore, config: &SphConfig) {
+    let h = config.smoothing_radius;
+    let grid = SpatialHash::from_positions(&store.positions, h);
+    for i in 0..store.len() {
+        let pos_i = store.positions[i];
+        let mut density = 0.0f32;
+        for &j in &grid.query(pos_i) {
+            let r = pos_i.distance(store.positions[j]);
+            density += store.masses[j] * poly6(r, h);
+        }
+        store.densities[i] = density;
+        store.pressures[i] = config.stiffness * (density - config.rest_density);
+    }
+}
+
+pub fn compute_forces(store: &mut ParticleStore, config: &SphConfig) {
+    let h = config.smoothing_radius;
+    let grid = SpatialHash::from_positions(&store.positions, h);
+    for i in 0..store.len() {
+        let pos_i = store.positions[i];
+        let vel_i = store.velocities[i];
+        let pressure_i = store.pressures[i];
+        let density_i = store.densities[i];
+        let mut f_pressure = Vec2::ZERO;
+        let mut f_viscosity = Vec2::ZERO;
+        for &j in &grid.query(pos_i) {
+            if i == j {
+                continue;
+            }
+            let pos_j = store.positions[j];
+            let diff = pos_i - pos_j;
+            let r = diff.length();
+            if r < 1e-6 || r > h {
+                continue;
+            }
+            let dir = diff / r;
+            let density_j = store.densities[j];
+            if density_j > 1e-6 {
+                let pressure_j = store.pressures[j];
+                let pressure_avg = (pressure_i + pressure_j) * 0.5;
+                f_pressure +=
+                    dir * store.masses[j] * pressure_avg / density_j * spiky_gradient(r, h);
+            }
+            if density_j > 1e-6 {
+                let vel_j = store.velocities[j];
+                f_viscosity +=
+                    (vel_j - vel_i) * store.masses[j] / density_j * viscosity_laplacian(r, h);
+            }
+        }
+        f_viscosity *= config.viscosity;
+        let f_gravity = config.gravity * density_i;
+        store.forces[i] = f_pressure + f_viscosity + f_gravity;
+    }
+}
+
+pub fn integrate(store: &mut ParticleStore, dt: f32) {
+    for i in 0..store.len() {
+        let density = store.densities[i].max(1e-6);
+        let acceleration = store.forces[i] / density;
+        store.velocities[i] += acceleration * dt;
+        store.positions[i] += store.velocities[i] * dt;
+    }
+}
+
+pub fn sph_step(store: &mut ParticleStore, config: &SphConfig, dt: f32) {
+    if store.is_empty() {
+        return;
+    }
+    compute_density_pressure(store, config);
+    compute_forces(store, config);
+    integrate(store, dt);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fluid::cell::FluidId;
+    use crate::fluid::sph_particle::{Particle, ParticleStore};
+    use bevy::math::Vec2;
+
+    fn test_config() -> SphConfig {
+        SphConfig {
+            smoothing_radius: 16.0,
+            rest_density: 1.0,
+            stiffness: 50.0,
+            viscosity: 0.1,
+            gravity: Vec2::new(0.0, -98.0),
+            particle_mass: 1.0,
+        }
+    }
+
+    fn two_particles_store(dist: f32) -> ParticleStore {
+        let mut store = ParticleStore::new();
+        store.add(Particle::new(Vec2::new(0.0, 0.0), FluidId(1), 1.0));
+        store.add(Particle::new(Vec2::new(dist, 0.0), FluidId(1), 1.0));
+        store
+    }
+
+    #[test]
+    fn density_increases_with_proximity() {
+        let config = test_config();
+        let mut close = two_particles_store(4.0);
+        let mut far = two_particles_store(12.0);
+        compute_density_pressure(&mut close, &config);
+        compute_density_pressure(&mut far, &config);
+        assert!(
+            close.densities[0] > far.densities[0],
+            "Closer particles should have higher density: {} vs {}",
+            close.densities[0],
+            far.densities[0]
+        );
+    }
+
+    #[test]
+    fn pressure_follows_equation_of_state() {
+        let config = test_config();
+        let mut store = two_particles_store(2.0);
+        compute_density_pressure(&mut store, &config);
+        // P = k * (rho - rho_0)
+        let expected = config.stiffness * (store.densities[0] - config.rest_density);
+        assert!(
+            (store.pressures[0] - expected).abs() < 1e-6,
+            "Pressure should follow equation of state: got {}, expected {}",
+            store.pressures[0],
+            expected
+        );
+    }
+
+    #[test]
+    fn gravity_pulls_down() {
+        let config = test_config();
+        let mut store = ParticleStore::new();
+        store.add(Particle::new(Vec2::new(0.0, 100.0), FluidId(1), 1.0));
+        compute_density_pressure(&mut store, &config);
+        compute_forces(&mut store, &config);
+        assert!(store.forces[0].y < 0.0, "Gravity should pull down");
+    }
+
+    #[test]
+    fn pressure_pushes_apart() {
+        let config = test_config();
+        let mut store = two_particles_store(4.0);
+        compute_density_pressure(&mut store, &config);
+        compute_forces(&mut store, &config);
+        // Particle 0 at x=0 pushed left, particle 1 at x=4 pushed right
+        assert!(
+            store.forces[0].x < 0.0,
+            "Left particle pushed left: {}",
+            store.forces[0].x
+        );
+        assert!(
+            store.forces[1].x > 0.0,
+            "Right particle pushed right: {}",
+            store.forces[1].x
+        );
+    }
+
+    #[test]
+    fn integrate_moves_particle() {
+        let config = test_config();
+        let mut store = ParticleStore::new();
+        store.add(Particle::new(Vec2::new(0.0, 100.0), FluidId(1), 1.0));
+        compute_density_pressure(&mut store, &config);
+        compute_forces(&mut store, &config);
+        integrate(&mut store, 1.0 / 60.0);
+        assert!(store.positions[0].y < 100.0, "Particle should fall");
+        assert!(store.velocities[0].y < 0.0, "Velocity should be downward");
+    }
+
+    #[test]
+    fn step_full_cycle() {
+        let config = test_config();
+        let mut store = two_particles_store(8.0);
+        let initial_y = store.positions[0].y;
+        sph_step(&mut store, &config, 1.0 / 60.0);
+        assert_ne!(store.positions[0].y, initial_y);
+    }
+}

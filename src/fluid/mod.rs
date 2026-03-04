@@ -15,6 +15,8 @@ pub mod spatial_hash;
 pub mod sph_collision;
 pub mod sph_kernels;
 pub mod sph_particle;
+pub mod sph_render;
+pub mod sph_simulation;
 pub mod splash;
 pub mod systems;
 pub mod wave;
