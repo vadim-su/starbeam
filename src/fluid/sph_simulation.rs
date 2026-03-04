@@ -21,8 +21,8 @@ impl Default for SphConfig {
             smoothing_radius: 16.0,
             rest_density: 0.0,
             stiffness: 100.0,
-            viscosity: 1.0,
-            gravity: Vec2::new(0.0, -98.0),
+            viscosity: 0.2,
+            gravity: Vec2::new(0.0, -200.0),
             particle_mass: 1.0,
         }
     }

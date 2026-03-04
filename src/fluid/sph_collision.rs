@@ -4,7 +4,8 @@ use bevy::math::Vec2;
 pub const MAX_PARTICLE_SPEED: f32 = 300.0;
 
 /// Friction applied to tangential velocity on surface contact (0=no friction, 1=full stop).
-const SURFACE_FRICTION: f32 = 0.3;
+/// Water has very low friction — it slides freely along surfaces.
+const SURFACE_FRICTION: f32 = 0.02;
 
 /// Number of collision resolution iterations per particle.
 const COLLISION_ITERATIONS: u32 = 3;
