@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::fluid::cell::{FluidCell, FluidId};
+use crate::fluid::cell::{FluidCell, FluidId, FluidSlot};
 use crate::fluid::registry::FluidRegistry;
 use crate::registry::tile::{TileId, TileRegistry};
 use crate::world::chunk::WorldMap;
@@ -108,36 +108,58 @@ impl<'a> FluidWorld<'a> {
         }
     }
 
-    /// Add mass to a cell. If the cell was empty, sets the fluid_id.
-    /// If the cell already has fluid, adds to existing mass.
-    pub fn add_mass(&mut self, gx: i32, gy: i32, fluid_id: FluidId, amount: f32) {
+    /// Add mass to a cell's matching slot, or create a new slot if possible.
+    /// Returns the amount actually added (0.0 if both slots are occupied by other fluids).
+    pub fn add_mass(&mut self, gx: i32, gy: i32, fluid_id: FluidId, amount: f32) -> f32 {
         let Some((cx, cy, lx, ly)) = self.resolve(gx, gy) else {
-            return;
+            return 0.0;
         };
-        if let Some(chunk) = self.world_map.chunks.get_mut(&(cx, cy)) {
-            let idx = (ly * self.chunk_size + lx) as usize;
-            let cell = &mut chunk.fluids[idx];
-            if cell.is_empty() {
-                cell.fluid_id = fluid_id;
-                cell.mass = amount;
-            } else {
-                cell.mass += amount;
-            }
+        let Some(chunk) = self.world_map.chunks.get_mut(&(cx, cy)) else {
+            return 0.0;
+        };
+        let idx = (ly * self.chunk_size + lx) as usize;
+        let cell = &mut chunk.fluids[idx];
+
+        // 1. Primary already has this fluid
+        if cell.primary.fluid_id == fluid_id && !cell.primary.is_empty() {
+            cell.primary.mass += amount;
+            return amount;
         }
+        // 2. Secondary already has this fluid
+        if cell.secondary.fluid_id == fluid_id && !cell.secondary.is_empty() {
+            cell.secondary.mass += amount;
+            return amount;
+        }
+        // 3. Cell is completely empty → create primary
+        if cell.is_empty() {
+            cell.primary = FluidSlot::new(fluid_id, amount);
+            return amount;
+        }
+        // 4. Secondary slot is empty → create secondary
+        if cell.secondary.is_empty() {
+            cell.secondary = FluidSlot::new(fluid_id, amount);
+            return amount;
+        }
+        // 5. Both slots occupied by other fluids
+        0.0
     }
 
-    /// Subtract mass from a cell. If mass drops to zero or below, clears the cell.
-    pub fn sub_mass(&mut self, gx: i32, gy: i32, amount: f32) {
+    /// Subtract mass from the slot matching `fluid_id`. If mass drops to zero or below,
+    /// clears that slot and normalizes the cell.
+    pub fn sub_mass(&mut self, gx: i32, gy: i32, fluid_id: FluidId, amount: f32) {
         let Some((cx, cy, lx, ly)) = self.resolve(gx, gy) else {
             return;
         };
         if let Some(chunk) = self.world_map.chunks.get_mut(&(cx, cy)) {
             let idx = (ly * self.chunk_size + lx) as usize;
             let cell = &mut chunk.fluids[idx];
-            cell.mass -= amount;
-            if cell.mass <= 0.0 {
-                *cell = FluidCell::EMPTY;
+            if let Some(slot) = cell.slot_for_mut(fluid_id) {
+                slot.mass -= amount;
+                if slot.mass <= 0.0 {
+                    *slot = FluidSlot::EMPTY;
+                }
             }
+            cell.normalize();
         }
     }
 
@@ -293,8 +315,8 @@ mod tests {
         fw.write(1, 2, water);
 
         let read_back = fw.read_current(1, 2);
-        assert_eq!(read_back.fluid_id, FluidId(1));
-        assert!((read_back.mass - 0.75).abs() < f32::EPSILON);
+        assert_eq!(read_back.fluid_id(), FluidId(1));
+        assert!((read_back.mass() - 0.75).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -319,8 +341,8 @@ mod tests {
 
         // Current returns the new state
         let current = fw.read_current(1, 2);
-        assert_eq!(current.fluid_id, FluidId(1));
-        assert!((current.mass - 0.5).abs() < f32::EPSILON);
+        assert_eq!(current.fluid_id(), FluidId(1));
+        assert!((current.mass() - 0.5).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -363,8 +385,8 @@ mod tests {
 
         // (1, 1) should now have water
         let b = fw.read_current(1, 1);
-        assert_eq!(b.fluid_id, FluidId(1));
-        assert!((b.mass - 0.8).abs() < f32::EPSILON);
+        assert_eq!(b.fluid_id(), FluidId(1));
+        assert!((b.mass() - 0.8).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -391,10 +413,11 @@ mod tests {
         let fr = test_fluid_registry();
         let mut fw = FluidWorld::new(&mut world_map, cs, 2, 4, &tr, &fr);
 
-        fw.add_mass(1, 1, FluidId(1), 0.5);
+        let added = fw.add_mass(1, 1, FluidId(1), 0.5);
+        assert!((added - 0.5).abs() < f32::EPSILON);
         let cell = fw.read_current(1, 1);
-        assert_eq!(cell.fluid_id, FluidId(1));
-        assert!((cell.mass - 0.5).abs() < f32::EPSILON);
+        assert_eq!(cell.fluid_id(), FluidId(1));
+        assert!((cell.mass() - 0.5).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -408,10 +431,11 @@ mod tests {
         let mut fw = FluidWorld::new(&mut world_map, cs, 2, 4, &tr, &fr);
 
         fw.write(1, 1, FluidCell::new(FluidId(1), 0.3));
-        fw.add_mass(1, 1, FluidId(1), 0.4);
+        let added = fw.add_mass(1, 1, FluidId(1), 0.4);
+        assert!((added - 0.4).abs() < f32::EPSILON);
 
         let cell = fw.read_current(1, 1);
-        assert!((cell.mass - 0.7).abs() < f32::EPSILON);
+        assert!((cell.mass() - 0.7).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -425,7 +449,7 @@ mod tests {
         let mut fw = FluidWorld::new(&mut world_map, cs, 2, 4, &tr, &fr);
 
         fw.write(1, 1, FluidCell::new(FluidId(1), 0.5));
-        fw.sub_mass(1, 1, 0.5);
+        fw.sub_mass(1, 1, FluidId(1), 0.5);
 
         let cell = fw.read_current(1, 1);
         assert!(cell.is_empty());
