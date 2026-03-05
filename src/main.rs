@@ -1,7 +1,6 @@
 mod camera;
 pub mod cosmos;
 pub mod crafting;
-pub mod fluid;
 mod interaction;
 pub mod inventory;
 pub mod item;
@@ -51,7 +50,6 @@ fn main() {
         .add_plugins(world::WorldPlugin)
         .add_plugins(player::PlayerPlugin)
         .add_plugins(physics::PhysicsPlugin)
-        .add_plugins(fluid::FluidPlugin)
         .add_plugins(particles::ParticlePlugin)
         .add_plugins(camera::CameraPlugin)
         .add_plugins(parallax::ParallaxPlugin)

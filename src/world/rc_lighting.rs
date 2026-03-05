@@ -2,9 +2,6 @@ use bevy::prelude::*;
 use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 use bevy::tasks::ComputeTaskPool;
 
-use crate::fluid::cell::FluidId;
-use crate::fluid::registry::FluidRegistry;
-use crate::fluid::systems::{FluidMaterial, SharedFluidMaterial};
 use crate::object::definition::ObjectId;
 use crate::object::registry::ObjectRegistry;
 use crate::registry::tile::{TileId, TileRegistry};
@@ -278,7 +275,6 @@ fn extract_lighting_data(
     world_time: Option<Res<crate::world::day_night::WorldTime>>,
     time: Res<Time>,
     object_registry: Option<Res<ObjectRegistry>>,
-    fluid_registry: Option<Res<FluidRegistry>>,
     mut rc_dirty: ResMut<RcGridDirty>,
     mut cache: Local<RcCachedGrid>,
 ) {
@@ -498,68 +494,6 @@ fn extract_lighting_data(
         cache.size = new_size;
     }
 
-    // --- Overlay fluid density on top of tile density (every frame) ---
-    // Fluids move each tick so this cannot be cached inside `need_rebuild`.
-    // Only increases density for air tiles (fluids don't make solid tiles darker).
-    if let Some(ref fluid_reg) = fluid_registry {
-        let cs = world_config.chunk_size as i32;
-        let cs_u = world_config.chunk_size;
-        let clamp_min_ty = min_ty.max(0);
-        let clamp_max_ty = max_ty.min(height_tiles - 1);
-        if clamp_min_ty <= clamp_max_ty {
-            let fl_min_cy = clamp_min_ty.div_euclid(cs);
-            let fl_max_cy = clamp_max_ty.div_euclid(cs);
-            let fl_min_cx = min_tx.div_euclid(cs);
-            let fl_max_cx = max_tx.div_euclid(cs);
-
-            for cy in fl_min_cy..=fl_max_cy {
-                for cx in fl_min_cx..=fl_max_cx {
-                    let data_cx = world_config.wrap_chunk_x(cx);
-                    let Some(chunk) = world_map.chunk(data_cx, cy) else {
-                        continue;
-                    };
-
-                    let chunk_tx0 = cx * cs;
-                    let chunk_ty0 = cy * cs;
-                    let tx0 = chunk_tx0.max(min_tx);
-                    let tx1 = (chunk_tx0 + cs).min(max_tx + 1);
-                    let ty0 = chunk_ty0.max(clamp_min_ty);
-                    let ty1 = (chunk_ty0 + cs).min(clamp_max_ty + 1);
-
-                    for ty in ty0..ty1 {
-                        let ly = (ty - chunk_ty0) as u32;
-                        for tx in tx0..tx1 {
-                            let lx = (tx - chunk_tx0) as u32;
-                            let fidx = (ly * cs_u + lx) as usize;
-                            let cell = chunk.fluids[fidx];
-                            if cell.is_empty() {
-                                continue;
-                            }
-                            let def = fluid_reg.get(cell.fluid_id());
-                            if def.light_absorption <= 0.0 {
-                                continue;
-                            }
-
-                            let buf_x = (tx - min_tx) as u32;
-                            let buf_y = (max_ty - ty) as u32;
-                            let idx = (buf_y * input_w + buf_x) as usize;
-
-                            // Skip solid tiles — fluids don't make them more opaque
-                            if input.density[idx] >= 255 {
-                                continue;
-                            }
-
-                            let absorption =
-                                cell.mass().min(1.0) * def.light_absorption;
-                            let fluid_density = (absorption * 255.0) as u8;
-                            input.density[idx] = input.density[idx].max(fluid_density);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     // --- Compute effective sun color from day/night cycle ---
     // Bake ambient_min into sun emitters: each channel is at least ambient_min.
     // This ensures sky-visible tiles always emit some light (even at night),
@@ -754,125 +688,6 @@ fn extract_lighting_data(
         }
     }
 
-    // --- Fluid emissive (lava, etc.) ---
-    // Emissive fluids inject light directly into the RC emissive buffer.
-    // Only overwrites if the new emission is brighter than what's already there.
-    if let Some(ref fluid_reg) = fluid_registry {
-        let cs = world_config.chunk_size as i32;
-        let cs_u = world_config.chunk_size;
-        let clamp_min_ty = min_ty.max(0);
-        let clamp_max_ty = max_ty.min(height_tiles - 1);
-        if clamp_min_ty <= clamp_max_ty {
-            let fl_min_cy = clamp_min_ty.div_euclid(cs);
-            let fl_max_cy = clamp_max_ty.div_euclid(cs);
-            let fl_min_cx = min_tx.div_euclid(cs);
-            let fl_max_cx = max_tx.div_euclid(cs);
-
-            for cy in fl_min_cy..=fl_max_cy {
-                for cx in fl_min_cx..=fl_max_cx {
-                    let data_cx = world_config.wrap_chunk_x(cx);
-                    let Some(chunk) = world_map.chunk(data_cx, cy) else {
-                        continue;
-                    };
-
-                    let chunk_tx0 = cx * cs;
-                    let chunk_ty0 = cy * cs;
-                    let tx0 = chunk_tx0.max(min_tx);
-                    let tx1 = (chunk_tx0 + cs).min(max_tx + 1);
-                    let ty0 = chunk_ty0.max(clamp_min_ty);
-                    let ty1 = (chunk_ty0 + cs).min(clamp_max_ty + 1);
-
-                    // Pre-compute per-cell emission coverage for this chunk.
-                    // A cell is "covered" when a contiguous column of fluid
-                    // above it contains a different fluid type (e.g. water
-                    // over lava).  Covered emissive cells are skipped so
-                    // their light doesn't bleed into the lightmap through
-                    // the covering fluid.
-                    let total = (cs_u * cs_u) as usize;
-                    let mut emission_covered = vec![false; total];
-                    {
-                        // Seed top_fluid from the chunk above (cross-boundary).
-                        let above_chunk = world_map.chunk(
-                            world_config.wrap_chunk_x(cx),
-                            cy + 1,
-                        );
-                        for lx in 0..cs_u {
-                            let mut top_fluid = above_chunk
-                                .map(|c| {
-                                    let aidx = lx as usize; // bottom row of chunk above = ly=0
-                                    c.fluids[aidx].fluid_id()
-                                })
-                                .filter(|id| *id != FluidId::NONE)
-                                .unwrap_or(FluidId::NONE);
-                            let mut cover_active = false;
-
-                            for ly in (0..cs_u).rev() {
-                                let cidx = (ly * cs_u + lx) as usize;
-                                let cell = chunk.fluids[cidx];
-                                if cell.is_empty() {
-                                    top_fluid = FluidId::NONE;
-                                    cover_active = false;
-                                } else {
-                                    if top_fluid == FluidId::NONE {
-                                        top_fluid = cell.fluid_id();
-                                    } else if cell.fluid_id() != top_fluid {
-                                        cover_active = true;
-                                    }
-                                    if cover_active {
-                                        emission_covered[cidx] = true;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    for ty in ty0..ty1 {
-                        let ly = (ty - chunk_ty0) as u32;
-                        for tx in tx0..tx1 {
-                            let lx = (tx - chunk_tx0) as u32;
-                            let fidx = (ly * cs_u + lx) as usize;
-                            let cell = chunk.fluids[fidx];
-                            if cell.is_empty() {
-                                continue;
-                            }
-                            let def = fluid_reg.get(cell.fluid_id());
-                            if def.light_emission == [0, 0, 0] {
-                                continue;
-                            }
-                            if cell.mass() < 0.1 {
-                                continue;
-                            }
-                            // Skip emission for cells covered by a different
-                            // fluid above (e.g. lava under water).
-                            if emission_covered[fidx] {
-                                continue;
-                            }
-
-                            let buf_x = (tx - min_tx) as u32;
-                            let buf_y = (max_ty - ty) as u32;
-                            let idx = (buf_y * input_w + buf_x) as usize;
-                            let intensity = cell.mass().min(1.0);
-                            let e = def.light_emission;
-                            let new_emission = [
-                                e[0] as f32 / 255.0 * POINT_LIGHT_BOOST * intensity,
-                                e[1] as f32 / 255.0 * POINT_LIGHT_BOOST * intensity,
-                                e[2] as f32 / 255.0 * POINT_LIGHT_BOOST * intensity,
-                                1.0,
-                            ];
-                            let existing = input.emissive[idx];
-                            if new_emission[0] > existing[0]
-                                || new_emission[1] > existing[1]
-                                || new_emission[2] > existing[2]
-                            {
-                                input.emissive[idx] = new_emission;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     rc_dirty.0 = false;
     input.dirty = true;
 
@@ -895,10 +710,8 @@ fn update_tile_lightmap(
     gpu_images: Option<Res<rc_pipeline::RcGpuImages>>,
     config: Option<Res<RcLightingConfig>>,
     shared_material: Option<Res<SharedTileMaterial>>,
-    shared_fluid_material: Option<Res<SharedFluidMaterial>>,
     mut tile_materials: ResMut<Assets<TileMaterial>>,
     mut lit_sprite_materials: ResMut<Assets<LitSpriteMaterial>>,
-    mut fluid_materials: ResMut<Assets<FluidMaterial>>,
 ) {
     let (Some(gpu_images), Some(config), Some(shared_material)) =
         (gpu_images, config, shared_material)
@@ -939,14 +752,6 @@ fn update_tile_lightmap(
     for (_id, mat) in lit_sprite_materials.iter_mut() {
         mat.lightmap = gpu_images.lightmap.clone();
         mat.lightmap_uv_rect = lm_params;
-    }
-
-    // Update fluid material with current lightmap
-    if let Some(shared_fluid) = shared_fluid_material {
-        if let Some(mat) = fluid_materials.get_mut(&shared_fluid.handle) {
-            mat.lightmap = gpu_images.lightmap.clone();
-            mat.lightmap_uv_rect = lm_params;
-        }
     }
 }
 

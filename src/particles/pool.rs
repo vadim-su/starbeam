@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 
 use super::particle::Particle;
-use crate::fluid::cell::FluidId;
 
 /// Global configuration for the particle system.
 #[derive(Resource, Debug, Clone)]
@@ -47,8 +46,6 @@ impl ParticlePool {
         &mut self,
         position: Vec2,
         velocity: Vec2,
-        mass: f32,
-        fluid_id: FluidId,
         lifetime: f32,
         size: f32,
         color: [f32; 4],
@@ -64,16 +61,7 @@ impl ParticlePool {
                 let idx = (self.next_free + i) % len;
                 if self.particles[idx].is_dead() {
                     self.init_particle(
-                        idx,
-                        position,
-                        velocity,
-                        mass,
-                        fluid_id,
-                        lifetime,
-                        size,
-                        color,
-                        gravity_scale,
-                        fade_out,
+                        idx, position, velocity, lifetime, size, color, gravity_scale, fade_out,
                     );
                     self.next_free = (idx + 1) % len.max(1);
                     return Some(idx);
@@ -85,15 +73,7 @@ impl ParticlePool {
         if len < capacity {
             let idx = len;
             self.particles.push(Self::make_particle(
-                position,
-                velocity,
-                mass,
-                fluid_id,
-                lifetime,
-                size,
-                color,
-                gravity_scale,
-                fade_out,
+                position, velocity, lifetime, size, color, gravity_scale, fade_out,
             ));
             self.next_free = (idx + 1) % self.particles.len().max(1);
             return Some(idx);
@@ -116,16 +96,7 @@ impl ParticlePool {
             .unwrap();
 
         self.init_particle(
-            oldest_idx,
-            position,
-            velocity,
-            mass,
-            fluid_id,
-            lifetime,
-            size,
-            color,
-            gravity_scale,
-            fade_out,
+            oldest_idx, position, velocity, lifetime, size, color, gravity_scale, fade_out,
         );
         self.next_free = (oldest_idx + 1) % len.max(1);
         Some(oldest_idx)
@@ -141,8 +112,6 @@ impl ParticlePool {
     fn make_particle(
         position: Vec2,
         velocity: Vec2,
-        mass: f32,
-        fluid_id: FluidId,
         lifetime: f32,
         size: f32,
         color: [f32; 4],
@@ -152,8 +121,6 @@ impl ParticlePool {
         Particle {
             position,
             velocity,
-            mass,
-            fluid_id,
             lifetime,
             age: 0.0,
             size,
@@ -169,8 +136,6 @@ impl ParticlePool {
         idx: usize,
         position: Vec2,
         velocity: Vec2,
-        mass: f32,
-        fluid_id: FluidId,
         lifetime: f32,
         size: f32,
         color: [f32; 4],
@@ -180,8 +145,6 @@ impl ParticlePool {
         let p = &mut self.particles[idx];
         p.position = position;
         p.velocity = velocity;
-        p.mass = mass;
-        p.fluid_id = fluid_id;
         p.lifetime = lifetime;
         p.age = 0.0;
         p.size = size;
@@ -195,7 +158,6 @@ impl ParticlePool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fluid::cell::FluidId;
 
     #[test]
     fn spawn_and_count() {
@@ -203,8 +165,6 @@ mod tests {
         pool.spawn(
             Vec2::ZERO,
             Vec2::ZERO,
-            0.1,
-            FluidId(1),
             1.0,
             2.0,
             [0.0; 4],
@@ -221,8 +181,6 @@ mod tests {
             .spawn(
                 Vec2::ZERO,
                 Vec2::ZERO,
-                0.1,
-                FluidId(1),
                 1.0,
                 2.0,
                 [0.0; 4],
@@ -235,8 +193,6 @@ mod tests {
             .spawn(
                 Vec2::ONE,
                 Vec2::ONE,
-                0.2,
-                FluidId(1),
                 2.0,
                 3.0,
                 [1.0; 4],
@@ -255,8 +211,6 @@ mod tests {
             pool.spawn(
                 Vec2::ZERO,
                 Vec2::ZERO,
-                0.1,
-                FluidId(1),
                 1.0,
                 2.0,
                 [0.0; 4],
@@ -268,8 +222,6 @@ mod tests {
         let idx = pool.spawn(
             Vec2::ZERO,
             Vec2::ZERO,
-            0.1,
-            FluidId(1),
             1.0,
             2.0,
             [0.0; 4],
@@ -285,8 +237,6 @@ mod tests {
         let p = Particle {
             position: Vec2::ZERO,
             velocity: Vec2::ZERO,
-            mass: 0.0,
-            fluid_id: FluidId::NONE,
             lifetime: 2.0,
             age: 1.0,
             size: 1.0,

@@ -5,7 +5,6 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::cosmos::persistence::{DirtyChunks, Universe};
-use crate::fluid::FluidCell;
 use crate::item::DroppedItem;
 use crate::object::definition::ObjectId;
 use crate::object::placed::{OccupancyRef, PlacedObject};
@@ -82,8 +81,6 @@ impl TileLayer {
 pub struct ChunkData {
     pub fg: TileLayer,
     pub bg: TileLayer,
-    #[serde(default)]
-    pub fluids: Vec<FluidCell>,
     pub objects: Vec<PlacedObject>,
     pub occupancy: Vec<Option<OccupancyRef>>,
     #[allow(dead_code)] // Reserved for future block-damage system
@@ -144,7 +141,6 @@ impl WorldMap {
                     tiles: chunk_tiles.bg,
                     bitmasks: vec![0; len],
                 },
-                fluids: vec![FluidCell::EMPTY; len],
                 objects: Vec::new(),
                 occupancy: vec![None; len],
                 damage: vec![0; len],
@@ -218,32 +214,6 @@ impl WorldMap {
             .unwrap()
             .layer_mut(layer)
             .set(lx, ly, tile, ctx.config.chunk_size);
-    }
-
-    /// Read fluid cell if chunk is loaded.
-    pub fn get_fluid(&self, tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> Option<FluidCell> {
-        if tile_y < 0 || tile_y >= ctx.config.height_tiles {
-            return Some(FluidCell::EMPTY);
-        }
-        let wrapped_x = ctx.config.wrap_tile_x(tile_x);
-        let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, ctx.config.chunk_size);
-        let (lx, ly) = tile_to_local(wrapped_x, tile_y, ctx.config.chunk_size);
-        self.chunks
-            .get(&(cx, cy))
-            .map(|chunk| chunk.fluids[(ly * ctx.config.chunk_size + lx) as usize])
-    }
-
-    /// Set fluid cell in a loaded chunk.
-    pub fn set_fluid(&mut self, tile_x: i32, tile_y: i32, cell: FluidCell, ctx: &WorldCtxRef) {
-        if tile_y < 0 || tile_y >= ctx.config.height_tiles {
-            return;
-        }
-        let wrapped_x = ctx.config.wrap_tile_x(tile_x);
-        let (cx, cy) = tile_to_chunk(wrapped_x, tile_y, ctx.config.chunk_size);
-        let (lx, ly) = tile_to_local(wrapped_x, tile_y, ctx.config.chunk_size);
-        if let Some(chunk) = self.chunks.get_mut(&(cx, cy)) {
-            chunk.fluids[(ly * ctx.config.chunk_size + lx) as usize] = cell;
-        }
     }
 
     /// Read-only: returns whether tile is solid (false for unloaded chunks).

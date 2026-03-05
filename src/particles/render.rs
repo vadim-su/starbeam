@@ -25,7 +25,7 @@ pub struct SharedParticleMaterial {
     pub handle: Handle<ColorMaterial>,
 }
 
-/// Particle z-layer — sits above fluid (0.5) and below UI.
+/// Particle z-layer — sits above tiles and below UI.
 pub const PARTICLE_Z: f32 = 1.0;
 
 /// Create the shared `ColorMaterial` and the singleton `ParticleMeshEntity`.
@@ -130,27 +130,15 @@ pub fn rebuild_particle_mesh(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fluid::cell::FluidId;
     use crate::particles::pool::ParticlePool;
 
     #[test]
     fn particle_mesh_entity_marker_exists() {
-        // Just a compile-time check that the marker type exists.
         let _ = std::any::TypeId::of::<ParticleMeshEntity>();
     }
 
     #[test]
-    fn particle_z_above_fluid_z() {
-        const FLUID_Z: f32 = 0.5;
-        assert!(
-            PARTICLE_Z > FLUID_Z,
-            "particles must render above fluid layer"
-        );
-    }
-
-    #[test]
     fn empty_pool_produces_zero_vertices() {
-        // Verify the logic: an empty pool gives no alive particles.
         let pool = ParticlePool::new(100);
         let alive: Vec<_> = pool.particles.iter().filter(|p| !p.is_dead()).collect();
         assert_eq!(alive.len(), 0);
@@ -162,8 +150,6 @@ mod tests {
         pool.spawn(
             Vec2::ZERO,
             Vec2::ZERO,
-            0.1,
-            FluidId(1),
             1.0,
             4.0,
             [0.2, 0.5, 1.0, 1.0],
@@ -173,7 +159,6 @@ mod tests {
         let alive: Vec<_> = pool.particles.iter().filter(|p| !p.is_dead()).collect();
         assert_eq!(alive.len(), 1);
 
-        // Verify 4 positions and 6 indices would be produced.
         let n = alive.len();
         assert_eq!(n * 4, 4, "4 verts per particle");
         assert_eq!(n * 6, 6, "6 indices per particle");
@@ -185,8 +170,6 @@ mod tests {
         let p = Particle {
             position: Vec2::ZERO,
             velocity: Vec2::ZERO,
-            mass: 0.0,
-            fluid_id: FluidId::NONE,
             lifetime: 2.0,
             age: 1.0, // 50% through life
             size: 1.0,
@@ -212,8 +195,6 @@ mod tests {
         let p = Particle {
             position: Vec2::ZERO,
             velocity: Vec2::ZERO,
-            mass: 0.0,
-            fluid_id: FluidId::NONE,
             lifetime: 2.0,
             age: 1.0,
             size: 1.0,

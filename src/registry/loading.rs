@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use super::assets::{
-    AnimationDef, AutotileAsset, BiomeAsset, CharacterDefAsset, FluidRegistryAsset, ItemDefAsset,
+    AnimationDef, AutotileAsset, BiomeAsset, CharacterDefAsset, ItemDefAsset,
     ObjectDefAsset, ParallaxConfigAsset, PlanetTypeAsset, TileRegistryAsset,
 };
 use super::biome::{
@@ -19,7 +19,6 @@ use super::tile::TileRegistry;
 use super::world::ActiveWorld;
 use super::{AppState, BiomeParallaxConfigs, RegistryHandles};
 use crate::cosmos::address::CelestialSeeds;
-use crate::fluid::{FluidReactionRegistry, FluidRegistry};
 use crate::cosmos::assets::{GenerationConfigAsset, StarTypeAsset};
 use crate::cosmos::current::CurrentSystem;
 use crate::cosmos::generation::generate_system;
@@ -40,7 +39,6 @@ use crate::world::tile_renderer::{SharedTileMaterial, TileMaterial};
 #[derive(Resource)]
 pub(crate) struct LoadingAssets {
     tiles: Handle<TileRegistryAsset>,
-    fluids: Handle<FluidRegistryAsset>,
     objects: Vec<(String, Handle<ObjectDefAsset>)>,
     character: Handle<CharacterDefAsset>,
     generation_config: Handle<GenerationConfigAsset>,
@@ -75,7 +73,6 @@ pub struct CharacterAnimConfig {
 
 pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServer>) {
     let tiles = asset_server.load::<TileRegistryAsset>("worlds/tiles.registry.ron");
-    let fluids = asset_server.load::<FluidRegistryAsset>("content/fluids/fluids.fluid.ron");
     let character = asset_server
         .load::<CharacterDefAsset>("content/characters/adventurer/adventurer.character.ron");
 
@@ -144,7 +141,6 @@ pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServe
 
     commands.insert_resource(LoadingAssets {
         tiles,
-        fluids,
         objects,
         character,
         generation_config,
@@ -158,7 +154,6 @@ pub(crate) fn check_loading(
     mut commands: Commands,
     loading: Res<LoadingAssets>,
     tile_assets: Res<Assets<TileRegistryAsset>>,
-    fluid_assets: Res<Assets<FluidRegistryAsset>>,
     object_assets: Res<Assets<ObjectDefAsset>>,
     character_assets: Res<Assets<CharacterDefAsset>>,
     gen_config_assets: Res<Assets<GenerationConfigAsset>>,
@@ -167,9 +162,8 @@ pub(crate) fn check_loading(
     item_assets: Res<Assets<ItemDefAsset>>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
-    let (Some(tiles), Some(fluid_asset), Some(character)) = (
+    let (Some(tiles), Some(character)) = (
         tile_assets.get(&loading.tiles),
-        fluid_assets.get(&loading.fluids),
         character_assets.get(&loading.character),
     ) else {
         return; // not loaded yet
@@ -236,20 +230,8 @@ pub(crate) fn check_loading(
 
     // Build resources from loaded assets
     let registry_ref = TileRegistry::from_defs(tiles.tiles.clone());
-    let fluid_registry = FluidRegistry::from_defs(fluid_asset.fluids.clone());
-
-    // Build fluid reaction registry (water+lava→stone, etc.)
-    if !fluid_asset.reactions.is_empty() {
-        let reaction_registry = FluidReactionRegistry::from_defs(
-            &fluid_asset.reactions,
-            &fluid_registry,
-            &registry_ref,
-        );
-        commands.insert_resource(reaction_registry);
-    }
 
     commands.insert_resource(registry_ref);
-    commands.insert_resource(fluid_registry);
     commands.insert_resource(ObjectRegistry::from_defs(object_defs));
     commands.insert_resource(PlayerConfig {
         speed: character.speed,

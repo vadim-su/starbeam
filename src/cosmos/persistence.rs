@@ -247,7 +247,6 @@ pub fn respawn_saved_dropped_items(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fluid::{FluidCell, FluidId};
     use crate::registry::tile::TileId;
     use crate::world::chunk::TileLayer;
     use bevy::math::IVec2;
@@ -468,7 +467,6 @@ mod tests {
         let chunk_a = ChunkData {
             fg: TileLayer::new_air(len),
             bg: TileLayer::new_air(len),
-            fluids: vec![FluidCell::EMPTY; len],
             objects: Vec::new(),
             occupancy: vec![None; len],
             damage: vec![0; len],
@@ -510,7 +508,6 @@ mod tests {
         let chunk = ChunkData {
             fg,
             bg: TileLayer::new_air(len),
-            fluids: vec![FluidCell::EMPTY; len],
             objects: Vec::new(),
             occupancy: vec![None; len],
             damage: vec![0; len],
@@ -619,7 +616,6 @@ mod tests {
         let chunk = ChunkData {
             fg: TileLayer::new_air(len),
             bg: TileLayer::new_air(len),
-            fluids: vec![FluidCell::EMPTY; len],
             objects: Vec::new(),
             occupancy: vec![None; len],
             damage: vec![0; len],
@@ -645,60 +641,4 @@ mod tests {
         assert!(!save.chunks.contains_key(&(2, 0)));
     }
 
-    #[test]
-    fn round_trip_preserves_fluid_data() {
-        let mut universe = Universe::default();
-        let addr = test_address();
-        let chunk_size = 32;
-        let len = (chunk_size * chunk_size) as usize;
-
-        let mut fluids = vec![FluidCell::EMPTY; len];
-        fluids[0] = FluidCell::new(FluidId(1), 0.8);
-        fluids[5] = FluidCell::new(FluidId(2), 1.5);
-
-        let chunk = ChunkData {
-            fg: TileLayer::new_air(len),
-            bg: TileLayer::new_air(len),
-            fluids,
-            objects: Vec::new(),
-            occupancy: vec![None; len],
-            damage: vec![0; len],
-        };
-
-        let mut world_map = WorldMap::default();
-        world_map.chunks.insert((0, 0), chunk);
-
-        let mut dirty = DirtyChunks::default();
-        dirty.0.insert((0, 0));
-
-        // Save
-        save_current_world(&mut universe, &addr, &world_map, &dirty, vec![], 100.0);
-
-        // Clear and reload
-        world_map.chunks.clear();
-        dirty.0.clear();
-        load_world_save(&universe, &addr, &mut world_map, &mut dirty, 200.0);
-
-        let restored = world_map.chunk(0, 0).expect("chunk should be restored");
-        assert_eq!(restored.fluids[0].fluid_id(), FluidId(1));
-        assert!((restored.fluids[0].mass() - 0.8).abs() < f32::EPSILON);
-        assert_eq!(restored.fluids[5].fluid_id(), FluidId(2));
-        assert!((restored.fluids[5].mass() - 1.5).abs() < f32::EPSILON);
-        assert!(restored.fluids[1].is_empty());
-    }
-
-    #[test]
-    fn old_save_without_fluids_deserializes_with_empty_vec() {
-        // Simulate an old save format: ChunkData RON without a `fluids` field.
-        // Thanks to #[serde(default)], the `fluids` field should default to an empty Vec.
-        let ron_str = r#"(
-            fg: (tiles: [], bitmasks: []),
-            bg: (tiles: [], bitmasks: []),
-            objects: [],
-            occupancy: [],
-            damage: [],
-        )"#;
-        let chunk: ChunkData = ron::from_str(ron_str).unwrap();
-        assert!(chunk.fluids.is_empty());
-    }
 }

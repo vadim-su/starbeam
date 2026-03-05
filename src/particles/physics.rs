@@ -64,7 +64,6 @@ pub fn particle_physics(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fluid::cell::FluidId;
     use crate::particles::particle::Particle;
 
     #[test]
@@ -72,8 +71,6 @@ mod tests {
         let mut p = Particle {
             position: Vec2::ZERO,
             velocity: Vec2::ZERO,
-            mass: 0.1,
-            fluid_id: FluidId(1),
             lifetime: 0.5,
             age: 0.0,
             size: 2.0,

@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 
 use assets::{
-    AutotileAsset, BiomeAsset, CharacterDefAsset, FluidRegistryAsset, ItemDefAsset,
+    AutotileAsset, BiomeAsset, CharacterDefAsset, ItemDefAsset,
     ObjectDefAsset, ParallaxConfigAsset, PlanetTypeAsset, TileRegistryAsset,
 };
 use crate::cosmos::assets::{GenerationConfigAsset, StarTypeAsset};
@@ -62,14 +62,12 @@ impl Plugin for RegistryPlugin {
     fn build(&self, app: &mut App) {
         app.init_state::<AppState>()
             .init_asset::<TileRegistryAsset>()
-            .init_asset::<FluidRegistryAsset>()
             .init_asset::<ObjectDefAsset>()
             .init_asset::<CharacterDefAsset>()
             .init_asset::<ItemDefAsset>()
             .init_asset::<ParallaxConfigAsset>()
             .init_asset::<AutotileAsset>()
             .register_asset_loader(RonLoader::<TileRegistryAsset>::new(&["registry.ron"]))
-            .register_asset_loader(RonLoader::<FluidRegistryAsset>::new(&["fluid.ron"]))
             .register_asset_loader(RonLoader::<ObjectDefAsset>::new(&["object.ron"]))
             .register_asset_loader(RonLoader::<CharacterDefAsset>::new(&["character.ron"]))
             .register_asset_loader(RonLoader::<ItemDefAsset>::new(&["item.ron"]))

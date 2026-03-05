@@ -1,15 +1,9 @@
 use bevy::prelude::*;
 
-use crate::fluid::cell::FluidId;
-
 #[derive(Debug, Clone)]
 pub struct Particle {
     pub position: Vec2,
     pub velocity: Vec2,
-    /// Fluid mass carried (for CA reabsorption). 0 for visual-only.
-    pub mass: f32,
-    /// Which fluid. `FluidId::NONE` for non-fluid particles.
-    pub fluid_id: FluidId,
     /// Max lifetime in seconds.
     pub lifetime: f32,
     /// Current age in seconds.
