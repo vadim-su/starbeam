@@ -8,7 +8,11 @@ pub mod system;
 
 pub use data::*;
 pub use registry::*;
-pub use render::{DirtyLiquidChunks, LiquidMaterial, LiquidMeshEntity, SharedLiquidMaterial};
+pub use render::{
+    DirtyLiquidChunks, LiquidFieldMaterial, LiquidFieldQuad, LiquidFieldTexture,
+    LiquidFieldUniforms, LiquidMaterial, LiquidMeshEntity, SharedLiquidFieldMaterial,
+    SharedLiquidMaterial,
+};
 pub use system::LiquidSimState;
 
 use crate::registry::AppState;
@@ -34,6 +38,18 @@ impl Plugin for LiquidPlugin {
                 render::rebuild_liquid_meshes
                     .in_set(GameSet::WorldUpdate)
                     .after(system::liquid_simulation_system),
+            )
+            .add_systems(
+                Update,
+                render::upload_liquid_field
+                    .in_set(GameSet::WorldUpdate)
+                    .after(system::liquid_simulation_system),
+            )
+            .add_systems(
+                Update,
+                render::update_liquid_field_quad
+                    .in_set(GameSet::WorldUpdate)
+                    .after(render::upload_liquid_field),
             )
             .add_systems(
                 Update,
