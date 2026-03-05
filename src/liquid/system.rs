@@ -309,14 +309,25 @@ fn run_liquid_step(
                             let bn = get_liquid_from_map(world_map, nx, ny - 1, config);
                             bn.is_empty() || bn.level < 0.8
                         };
-                    let ledge_bonus = if below_neighbor_open { 2.0 } else { 0.0 };
+                    let ledge_bonus = if below_neighbor_open { 4.0 } else { 0.0 };
+
+                    // Surface flow bonus: when this cell is at the surface
+                    // (no liquid above), give extra horizontal push so thin
+                    // layers flow over ledges faster instead of sitting idle.
+                    let above = get_liquid_from_map(world_map, tx, ty + 1, config);
+                    let surface_bonus = if above.is_empty() && cell.level > MIN_LEVEL {
+                        // Scale with cell level — fuller surface cells push harder.
+                        1.5 * cell.level
+                    } else {
+                        0.0
+                    };
 
                     // When cell below can still accept liquid, dampen (but
                     // don't suppress) horizontal flow to prioritize falling.
                     // 0.35 lets water spread sideways while still preferring
                     // to fall, reducing surface "bumps" during settling.
                     let h_damp = if below_open { 0.35 } else { 1.0 };
-                    (ledge_bonus, h_damp)
+                    (ledge_bonus + surface_bonus, h_damp)
                 }
             };
 
