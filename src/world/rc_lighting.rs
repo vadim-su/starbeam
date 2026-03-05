@@ -277,6 +277,7 @@ fn extract_lighting_data(
     object_registry: Option<Res<ObjectRegistry>>,
     mut rc_dirty: ResMut<RcGridDirty>,
     mut cache: Local<RcCachedGrid>,
+    liquid_registry: Res<crate::liquid::registry::LiquidRegistry>,
 ) {
     let world_config = &*ctx.config;
     let tile_registry = &*ctx.tile_registry;
@@ -485,13 +486,74 @@ fn extract_lighting_data(
                 let albedo = tile_registry.albedo(fg_id);
                 input.albedo[idx] = [albedo[0], albedo[1], albedo[2], 255];
             } else {
-                input.density[idx] = 0;
+                // Check for liquid light opacity in air tiles.
+                let liquid_opacity = {
+                    let buf_x = idx % w_usize;
+                    let buf_y = idx / w_usize;
+                    let tx = new_grid_origin.x + buf_x as i32;
+                    let ty = new_grid_origin.y + buf_y as i32;
+                    let wtx = world_config.wrap_tile_x(tx);
+                    if ty >= 0 && ty < height_tiles {
+                        let (cx, cy) = crate::world::chunk::tile_to_chunk(wtx, ty, world_config.chunk_size);
+                        let (lx, ly) = crate::world::chunk::tile_to_local(wtx, ty, world_config.chunk_size);
+                        world_map.chunk(cx, cy).map_or(0u8, |chunk| {
+                            let cell = chunk.liquid.get(lx, ly, world_config.chunk_size);
+                            if cell.is_empty() {
+                                0
+                            } else {
+                                liquid_registry
+                                    .get(cell.liquid_type)
+                                    .map(|d| (d.light_opacity as f32 * cell.level.clamp(0.0, 1.0)) as u8)
+                                    .unwrap_or(0)
+                            }
+                        })
+                    } else {
+                        0
+                    }
+                };
+                input.density[idx] = liquid_opacity;
                 input.albedo[idx] = [0, 0, 0, 0];
             }
         }
 
         cache.origin = new_grid_origin;
         cache.size = new_size;
+    }
+
+    // --- Pre-extract liquid emission data for the parallel emissive pass ---
+    let total = (input_w * input_h) as usize;
+    let mut liquid_emission: Vec<[f32; 3]> = vec![[0.0; 3]; total];
+    {
+        let new_grid_origin = cache.origin;
+        let w_usize = input_w as usize;
+        for idx in 0..total {
+            let buf_x = idx % w_usize;
+            let buf_y = idx / w_usize;
+            let tx = new_grid_origin.x + buf_x as i32;
+            let ty = new_grid_origin.y + buf_y as i32;
+            if ty < 0 || ty >= height_tiles {
+                continue;
+            }
+            let wtx = world_config.wrap_tile_x(tx);
+            let (cx, cy) = crate::world::chunk::tile_to_chunk(wtx, ty, world_config.chunk_size);
+            let (lx, ly) = crate::world::chunk::tile_to_local(wtx, ty, world_config.chunk_size);
+            if let Some(chunk) = world_map.chunk(cx, cy) {
+                let cell = chunk.liquid.get(lx, ly, world_config.chunk_size);
+                if !cell.is_empty() {
+                    if let Some(ldef) = liquid_registry.get(cell.liquid_type) {
+                        let e = ldef.light_emission;
+                        if e != [0, 0, 0] {
+                            let scale = cell.level.clamp(0.0, 1.0);
+                            liquid_emission[idx] = [
+                                e[0] as f32 / 255.0 * scale,
+                                e[1] as f32 / 255.0 * scale,
+                                e[2] as f32 / 255.0 * scale,
+                            ];
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // --- Compute effective sun color from day/night cycle ---
@@ -527,6 +589,7 @@ fn extract_lighting_data(
         let fg = cache.fg.as_slice();
         let bg = cache.bg.as_slice();
         let tr = tile_registry;
+        let liq_em = liquid_emission.as_slice();
 
         let emissive = input.emissive.as_mut_slice();
         pool.scope(|s| {
@@ -584,20 +647,31 @@ fn extract_lighting_data(
                                     ];
                                 }
                             } else {
-                                // FG is air: sun emitter if BG is also air
-                                let bg_id = bg[global_idx];
-                                let bg_air = !tr.is_solid(bg_id);
-                                if bg_air {
-                                    let open = count_open_neighbors_grid(
-                                        buf_x, buf_y, w_usize, h_usize, fg, bg, tr,
-                                    );
-                                    let intensity = (1 + open) as f32 / 5.0;
+                                // FG is air: check for liquid emission first,
+                                // then fall back to sun emitter if BG is also air.
+                                let le = liq_em[global_idx];
+                                if le[0] > 0.0 || le[1] > 0.0 || le[2] > 0.0 {
                                     strip[local_idx] = [
-                                        sun[0] * intensity,
-                                        sun[1] * intensity,
-                                        sun[2] * intensity,
+                                        le[0] * POINT_LIGHT_BOOST,
+                                        le[1] * POINT_LIGHT_BOOST,
+                                        le[2] * POINT_LIGHT_BOOST,
                                         1.0,
                                     ];
+                                } else {
+                                    let bg_id = bg[global_idx];
+                                    let bg_air = !tr.is_solid(bg_id);
+                                    if bg_air {
+                                        let open = count_open_neighbors_grid(
+                                            buf_x, buf_y, w_usize, h_usize, fg, bg, tr,
+                                        );
+                                        let intensity = (1 + open) as f32 / 5.0;
+                                        strip[local_idx] = [
+                                            sun[0] * intensity,
+                                            sun[1] * intensity,
+                                            sun[2] * intensity,
+                                            1.0,
+                                        ];
+                                    }
                                 }
                             }
                         }
