@@ -144,7 +144,9 @@ impl WorldMap {
                     tiles: chunk_tiles.bg,
                     bitmasks: vec![0; len],
                 },
-                liquid: LiquidLayer::new_empty(len),
+                liquid: LiquidLayer {
+                    cells: chunk_tiles.liquid,
+                },
                 objects: Vec::new(),
                 occupancy: vec![None; len],
                 damage: vec![0; len],

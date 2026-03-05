@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use noise::{NoiseFn, Perlin};
 
+use crate::liquid::data::{LiquidCell, LiquidId};
 use crate::registry::biome::WorldLayer;
 use crate::registry::tile::TileId;
 use crate::registry::world::ActiveWorld;
@@ -194,6 +195,41 @@ pub fn generate_bg_tile(tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> TileId {
 pub struct ChunkTiles {
     pub fg: Vec<TileId>,
     pub bg: Vec<TileId>,
+    pub liquid: Vec<LiquidCell>,
+}
+
+/// Generate liquid for a tile based on its position and the foreground tile.
+/// Water fills air pockets below sea level.
+pub fn generate_liquid(tile_x: i32, tile_y: i32, fg_tile: TileId, ctx: &WorldCtxRef) -> LiquidCell {
+    // Only generate liquid in air tiles.
+    if fg_tile != TileId::AIR {
+        return LiquidCell::EMPTY;
+    }
+
+    let wc = ctx.config;
+    let planet_config = ctx.planet_config;
+
+    // Sea level: slightly below the average surface height (~60% of world height).
+    let sea_level = (wc.height_tiles as f64 * SURFACE_BASE * 0.85) as i32;
+
+    if tile_y <= sea_level {
+        // Check surface height at this x to avoid filling above-ground air.
+        let surface_h = surface_height(
+            ctx.noise_cache,
+            tile_x,
+            wc,
+            planet_config.layers.surface.terrain_frequency,
+            planet_config.layers.surface.terrain_amplitude,
+        );
+        if tile_y < surface_h {
+            return LiquidCell {
+                liquid_type: LiquidId(1), // water
+                level: 1.0,
+            };
+        }
+    }
+
+    LiquidCell::EMPTY
 }
 
 pub fn generate_chunk_tiles(chunk_x: i32, chunk_y: i32, ctx: &WorldCtxRef) -> ChunkTiles {
@@ -203,17 +239,20 @@ pub fn generate_chunk_tiles(chunk_x: i32, chunk_y: i32, ctx: &WorldCtxRef) -> Ch
     let cap = (chunk_size * chunk_size) as usize;
     let mut fg = Vec::with_capacity(cap);
     let mut bg = Vec::with_capacity(cap);
+    let mut liquid = Vec::with_capacity(cap);
 
     for local_y in 0..chunk_size as i32 {
         for local_x in 0..chunk_size as i32 {
             let x = base_x + local_x;
             let y = base_y + local_y;
-            fg.push(generate_tile(x, y, ctx));
+            let fg_tile = generate_tile(x, y, ctx);
+            fg.push(fg_tile);
             bg.push(generate_bg_tile(x, y, ctx));
+            liquid.push(generate_liquid(x, y, fg_tile, ctx));
         }
     }
 
-    ChunkTiles { fg, bg }
+    ChunkTiles { fg, bg, liquid }
 }
 
 #[cfg(test)]
