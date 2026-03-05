@@ -1,6 +1,7 @@
 pub mod data;
 pub mod registry;
 pub mod simulation;
+pub mod sleep;
 
 pub use data::*;
 pub use registry::*;
