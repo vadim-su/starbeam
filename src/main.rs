@@ -4,6 +4,7 @@ pub mod crafting;
 mod interaction;
 pub mod inventory;
 pub mod item;
+pub mod liquid;
 pub mod math;
 mod menu;
 pub mod object;
@@ -48,6 +49,7 @@ fn main() {
         .add_plugins(menu::MenuPlugin)
         .add_plugins(registry::RegistryPlugin)
         .add_plugins(world::WorldPlugin)
+        .add_plugins(liquid::LiquidPlugin)
         .add_plugins(player::PlayerPlugin)
         .add_plugins(physics::PhysicsPlugin)
         .add_plugins(particles::ParticlePlugin)
