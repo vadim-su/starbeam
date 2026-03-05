@@ -13,7 +13,7 @@ use crate::world::chunk::{self, WorldMap};
 // Constants (matching simulation.rs)
 // ---------------------------------------------------------------------------
 
-const GRAVITY_SCALE: f32 = 0.15;
+const GRAVITY_SCALE: f32 = 0.35;
 const GRAVITY_BIAS_DOWN: f32 = 6.0;
 /// Must be > -1.0 so that a full cell (level=1.0) can push upward.
 /// At -0.8, upward flow only starts when cell level > ~0.8 — water must be
@@ -313,7 +313,9 @@ fn run_liquid_step(
 
                     // When cell below can still accept liquid, dampen (but
                     // don't suppress) horizontal flow to prioritize falling.
-                    let h_damp = if below_open { 0.15 } else { 1.0 };
+                    // 0.35 lets water spread sideways while still preferring
+                    // to fall, reducing surface "bumps" during settling.
+                    let h_damp = if below_open { 0.35 } else { 1.0 };
                     (ledge_bonus, h_damp)
                 }
             };

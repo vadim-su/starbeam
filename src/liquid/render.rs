@@ -13,6 +13,7 @@ use bevy::sprite_render::{Material2d, Material2dKey};
 
 use crate::liquid::data::{LiquidCell, LiquidId};
 use crate::liquid::registry::LiquidRegistry;
+use crate::registry::tile::TileRegistry;
 use crate::registry::world::ActiveWorld;
 use crate::world::chunk::{self, ChunkCoord, LoadedChunks, WorldMap};
 
@@ -159,10 +160,10 @@ pub struct LiquidRenderConfig {
 impl Default for LiquidRenderConfig {
     fn default() -> Self {
         Self {
-            threshold: 0.4,
-            smoothing: 0.1,
-            blur_radius: 1,
-            show_debug_meshes: true,
+            threshold: 0.33,
+            smoothing: 0.095,
+            blur_radius: 0,
+            show_debug_meshes: false,
         }
     }
 }
@@ -372,8 +373,8 @@ pub fn init_liquid_material(
             water_color: Vec4::new(0.2, 0.4, 0.8, 0.6),
             lava_color: Vec4::new(1.0, 0.3, 0.0, 1.0),
             oil_color: Vec4::new(0.15, 0.1, 0.05, 0.85),
-            threshold: 0.4,
-            smoothing: 0.1,
+            threshold: 0.33,
+            smoothing: 0.095,
             _pad: Vec2::ZERO,
         },
         field_texture: field_handle,
@@ -483,6 +484,7 @@ pub fn upload_liquid_field(
     world_map: Res<WorldMap>,
     config: Res<ActiveWorld>,
     render_config: Res<LiquidRenderConfig>,
+    tile_registry: Res<TileRegistry>,
     camera_query: Query<(&Camera, &Transform, &Projection), With<Camera2d>>,
 ) {
     // --- Camera viewport geometry ---
@@ -609,6 +611,21 @@ pub fn upload_liquid_field(
         }
     }
 
+    // --- Wall wetting: extend liquid into adjacent solid tiles ---
+    // Without this, bilinear filtering creates a visible gap between water
+    // and walls because solid tiles have field value 0. By propagating
+    // liquid values into solid neighbors, the water appears to touch walls.
+    dilate_into_solid_tiles(
+        &mut field.pixels,
+        new_w,
+        new_h,
+        min_tx,
+        min_ty,
+        &world_map,
+        &config,
+        &tile_registry,
+    );
+
     // Apply blur for metaball merging effect
     let (w, h, r) = (field.width, field.height, render_config.blur_radius);
     blur_liquid_field(&mut field.pixels, w, h, r);
@@ -675,6 +692,97 @@ fn blur_liquid_field(pixels: &mut [u8], width: u32, height: u32, radius: u32) {
             let di = (y * w + x) * 4;
             for c in 0..4 {
                 pixels[di + c] = (sums[c] / count) as u8;
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Wall wetting — dilate liquid values into adjacent solid tiles
+// ---------------------------------------------------------------------------
+
+/// For each solid tile in the visible field that has no liquid, check the 4
+/// cardinal neighbors. If any neighbor contains liquid, copy its value into
+/// this solid tile. This prevents bilinear filtering from creating a visible
+/// gap between water and walls.
+///
+/// Operates on the raw pixel buffer *before* blur, so the blur then smooths
+/// the extended values naturally.
+fn dilate_into_solid_tiles(
+    pixels: &mut [u8],
+    width: u32,
+    height: u32,
+    origin_tx: i32,
+    origin_ty: i32,
+    world_map: &WorldMap,
+    config: &ActiveWorld,
+    tile_registry: &TileRegistry,
+) {
+    use crate::registry::tile::TileId;
+
+    if width == 0 || height == 0 {
+        return;
+    }
+
+    let w = width as usize;
+    let h = height as usize;
+    let chunk_size = config.chunk_size;
+
+    // We need a copy to read original values while writing dilated ones.
+    let source = pixels.to_vec();
+
+    for py in 0..h {
+        for px in 0..w {
+            let di = (py * w + px) * 4;
+
+            // Skip if this pixel already has liquid data.
+            if source[di] > 0 || source[di + 1] > 0 || source[di + 2] > 0 {
+                continue;
+            }
+
+            // Convert pixel coords back to tile coords.
+            // py is in flipped-Y space (row 0 = top = highest tile Y).
+            let tx = origin_tx + px as i32;
+            let ty = origin_ty + (h - 1 - py) as i32;
+
+            // Only dilate into solid tiles — we don't want to extend water
+            // into air tiles (that would make water surface look bloated).
+            let wx = config.wrap_tile_x(tx);
+            let (cx, cy) = chunk::tile_to_chunk(wx, ty, chunk_size);
+            let (lx, ly) = chunk::tile_to_local(wx, ty, chunk_size);
+            let is_solid = world_map
+                .chunk(cx, cy)
+                .map(|c| {
+                    let tile_id = c.fg.get(lx, ly, chunk_size);
+                    tile_id != TileId::AIR && tile_registry.is_solid(tile_id)
+                })
+                .unwrap_or(false);
+
+            if !is_solid {
+                continue;
+            }
+
+            // Check 4 cardinal neighbors in the pixel buffer and take max.
+            let mut best = [0u8; 4];
+            let neighbors: [(isize, isize); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
+            for (dx, dy) in neighbors {
+                let nx = px as isize + dx;
+                let ny = py as isize + dy;
+                if nx < 0 || nx >= w as isize || ny < 0 || ny >= h as isize {
+                    continue;
+                }
+                let ni = (ny as usize * w + nx as usize) * 4;
+                for c in 0..4 {
+                    best[c] = best[c].max(source[ni + c]);
+                }
+            }
+
+            // Only write if at least one neighbor had liquid.
+            if best[0] > 0 || best[1] > 0 || best[2] > 0 {
+                pixels[di] = best[0];
+                pixels[di + 1] = best[1];
+                pixels[di + 2] = best[2];
+                pixels[di + 3] = best[3];
             }
         }
     }

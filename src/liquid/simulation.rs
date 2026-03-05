@@ -5,7 +5,9 @@ use super::data::*;
 // ---------------------------------------------------------------------------
 
 /// Gravity contribution to pressure per unit of depth.
-const GRAVITY_SCALE: f32 = 0.15;
+/// Higher values create stronger pressure gradients, making water level out
+/// faster and reducing surface "bumps".
+const GRAVITY_SCALE: f32 = 0.35;
 
 /// Bias added to downward flow (encourages liquid to fall).
 const GRAVITY_BIAS_DOWN: f32 = 6.0;
