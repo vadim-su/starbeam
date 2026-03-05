@@ -107,8 +107,12 @@ pub fn block_interaction_system(
     mut lit_materials: ResMut<Assets<LitSpriteMaterial>>,
     object_registry: Option<Res<ObjectRegistry>>,
     object_sprites: Option<Res<ObjectSpriteMaterials>>,
-    object_entities: Query<(Entity, &PlacedObjectEntity)>,
+    object_params: (
+        Query<(Entity, &PlacedObjectEntity)>,
+        Option<ResMut<crate::liquid::LiquidSimState>>,
+    ),
 ) {
+    let (object_entities, mut liquid_sim) = object_params;
     let (fallback_lm, fallback_img, mut rc_dirty, mut dirty_chunks) = fallbacks;
     let left_click = mouse.just_pressed(MouseButton::Left);
     let right_click = mouse.just_pressed(MouseButton::Right);
@@ -215,6 +219,10 @@ pub fn block_interaction_system(
                 &fallback_img.0,
             );
             world_map.set_tile(tile_x, tile_y, Layer::Fg, TileId::AIR, &ctx_ref);
+            // Wake liquid neighbors when a solid tile is removed.
+            if let Some(ref mut sim) = liquid_sim {
+                sim.sleep.wake_with_neighbors(tile_x, tile_y);
+            }
             let wrapped_x = ctx_ref.config.wrap_tile_x(tile_x);
             let (dirty_cx, dirty_cy) = tile_to_chunk(wrapped_x, tile_y, ctx_ref.config.chunk_size);
             dirty_chunks.0.insert((dirty_cx, dirty_cy));
@@ -375,6 +383,19 @@ pub fn block_interaction_system(
                 return;
             };
 
+            // Displace liquid when placing a solid tile.
+            if let Some(ref mut sim) = liquid_sim {
+                let liquid = world_map.get_liquid(tile_x, tile_y, &ctx_ref);
+                if !liquid.is_empty() {
+                    world_map.set_liquid(
+                        tile_x,
+                        tile_y,
+                        crate::liquid::data::LiquidCell::EMPTY,
+                        &ctx_ref,
+                    );
+                    sim.sleep.wake_with_neighbors(tile_x, tile_y);
+                }
+            }
             world_map.set_tile(tile_x, tile_y, Layer::Fg, place_id, &ctx_ref);
             let wrapped_x = ctx_ref.config.wrap_tile_x(tile_x);
             let (dirty_cx, dirty_cy) = tile_to_chunk(wrapped_x, tile_y, ctx_ref.config.chunk_size);
