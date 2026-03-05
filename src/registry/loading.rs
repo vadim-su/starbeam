@@ -231,6 +231,24 @@ pub(crate) fn check_loading(
     // Build resources from loaded assets
     let registry_ref = TileRegistry::from_defs(tiles.tiles.clone());
 
+    // Load liquid registry from RON
+    let liquid_registry = match std::fs::read_to_string("assets/worlds/liquids.registry.ron") {
+        Ok(ron_str) => {
+            match ron::from_str::<Vec<crate::liquid::registry::LiquidDef>>(&ron_str) {
+                Ok(defs) => crate::liquid::registry::LiquidRegistry::from_defs(defs),
+                Err(e) => {
+                    bevy::log::warn!("Failed to parse liquids.registry.ron: {e}");
+                    crate::liquid::registry::LiquidRegistry::default()
+                }
+            }
+        }
+        Err(e) => {
+            bevy::log::warn!("Failed to read liquids.registry.ron: {e}");
+            crate::liquid::registry::LiquidRegistry::default()
+        }
+    };
+    commands.insert_resource(liquid_registry);
+
     commands.insert_resource(registry_ref);
     commands.insert_resource(ObjectRegistry::from_defs(object_defs));
     commands.insert_resource(PlayerConfig {
