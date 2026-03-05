@@ -4,7 +4,7 @@ use bevy_egui::{egui, EguiContexts};
 
 use crate::liquid::data::{LiquidCell, LiquidId};
 use crate::liquid::registry::LiquidRegistry;
-use crate::liquid::render::DirtyLiquidChunks;
+use crate::liquid::render::{DirtyLiquidChunks, LiquidRenderConfig};
 use crate::liquid::system::LiquidSimState;
 use crate::registry::world::ActiveWorld;
 use crate::world::chunk::{tile_to_chunk, tile_to_local, world_to_tile, WorldMap};
@@ -163,6 +163,7 @@ pub fn draw_liquid_debug_panel(
     debug_type: Res<DebugLiquidType>,
     liquid_registry: Res<LiquidRegistry>,
     liquid_sim: Res<LiquidSimState>,
+    mut render_config: ResMut<LiquidRenderConfig>,
     world_map: Res<WorldMap>,
     config: Res<ActiveWorld>,
     windows: Query<&Window, With<PrimaryWindow>>,
@@ -217,6 +218,24 @@ pub fn draw_liquid_debug_panel(
                             );
                             ui.end_row();
                         });
+                });
+
+            // --- Render Settings ---
+            egui::CollapsingHeader::new(egui::RichText::new("Render Settings").strong())
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::Slider::new(&mut render_config.threshold, 0.05..=0.95)
+                            .text("Threshold"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_config.smoothing, 0.01..=0.5)
+                            .text("Smoothing"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut render_config.blur_radius, 0..=3)
+                            .text("Blur radius"),
+                    );
                 });
 
             // --- Registry ---

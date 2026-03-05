@@ -10,8 +10,8 @@ pub use data::*;
 pub use registry::*;
 pub use render::{
     DirtyLiquidChunks, LiquidFieldMaterial, LiquidFieldQuad, LiquidFieldTexture,
-    LiquidFieldUniforms, LiquidMaterial, LiquidMeshEntity, SharedLiquidFieldMaterial,
-    SharedLiquidMaterial,
+    LiquidFieldUniforms, LiquidMaterial, LiquidMeshEntity, LiquidRenderConfig,
+    SharedLiquidFieldMaterial, SharedLiquidMaterial,
 };
 pub use system::LiquidSimState;
 
@@ -28,6 +28,7 @@ impl Plugin for LiquidPlugin {
             .init_resource::<DirtyLiquidChunks>()
             .init_resource::<debug::DebugLiquidType>()
             .init_resource::<debug::LiquidDebugState>()
+            .init_resource::<render::LiquidRenderConfig>()
             .add_systems(OnEnter(AppState::InGame), render::init_liquid_material)
             .add_systems(
                 Update,

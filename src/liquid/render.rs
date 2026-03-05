@@ -135,6 +135,36 @@ impl Material2d for LiquidFieldMaterial {
 }
 
 // ---------------------------------------------------------------------------
+// Render configuration (tunable via debug panel)
+// ---------------------------------------------------------------------------
+
+/// Tunable parameters for the scalar-field liquid renderer.
+///
+/// Exposed as egui sliders in the F8 liquid debug panel so artists and
+/// developers can tweak the metaball look at runtime.
+#[derive(Resource)]
+pub struct LiquidRenderConfig {
+    /// Smoothstep threshold — controls how much liquid level is needed before
+    /// a pixel becomes visible. Lower = more visible, higher = tighter blobs.
+    pub threshold: f32,
+    /// Smoothstep transition width — controls the softness of blob edges.
+    pub smoothing: f32,
+    /// Box-blur radius applied to the scalar field before upload.
+    /// 0 = no blur, 1 = 3×3, 2 = 5×5, 3 = 7×7.
+    pub blur_radius: u32,
+}
+
+impl Default for LiquidRenderConfig {
+    fn default() -> Self {
+        Self {
+            threshold: 0.4,
+            smoothing: 0.1,
+            blur_radius: 1,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Shared material resources
 // ---------------------------------------------------------------------------
 
@@ -432,6 +462,7 @@ pub fn upload_liquid_field(
     mut images: ResMut<Assets<Image>>,
     world_map: Res<WorldMap>,
     config: Res<ActiveWorld>,
+    render_config: Res<LiquidRenderConfig>,
     camera_query: Query<(&Camera, &Transform, &Projection), With<Camera2d>>,
 ) {
     // --- Camera viewport geometry ---
@@ -558,11 +589,72 @@ pub fn upload_liquid_field(
         }
     }
 
+    // Apply blur for metaball merging effect
+    let (w, h, r) = (field.width, field.height, render_config.blur_radius);
+    blur_liquid_field(&mut field.pixels, w, h, r);
+
     // --- Upload to GPU image ---
     if let Some(image) = images.get_mut(&field.handle) {
         if let Some(data) = image.data.as_mut() {
             let len = field.pixels.len().min(data.len());
             data[..len].copy_from_slice(&field.pixels[..len]);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CPU-side box blur for metaball merging
+// ---------------------------------------------------------------------------
+
+/// Separable box blur on RGBA8 pixel buffer. Radius 1 = 3×3 kernel.
+fn blur_liquid_field(pixels: &mut [u8], width: u32, height: u32, radius: u32) {
+    if radius == 0 || width == 0 || height == 0 {
+        return;
+    }
+    let w = width as usize;
+    let h = height as usize;
+    let r = radius as usize;
+    let mut temp = vec![0u8; pixels.len()];
+
+    // Horizontal pass: pixels → temp
+    for y in 0..h {
+        for x in 0..w {
+            let mut sums = [0u32; 4];
+            let mut count = 0u32;
+            let x_lo = x.saturating_sub(r);
+            let x_hi = (x + r + 1).min(w);
+            for sx in x_lo..x_hi {
+                let si = (y * w + sx) * 4;
+                for c in 0..4 {
+                    sums[c] += pixels[si + c] as u32;
+                }
+                count += 1;
+            }
+            let di = (y * w + x) * 4;
+            for c in 0..4 {
+                temp[di + c] = (sums[c] / count) as u8;
+            }
+        }
+    }
+
+    // Vertical pass: temp → pixels
+    for y in 0..h {
+        for x in 0..w {
+            let mut sums = [0u32; 4];
+            let mut count = 0u32;
+            let y_lo = y.saturating_sub(r);
+            let y_hi = (y + r + 1).min(h);
+            for sy in y_lo..y_hi {
+                let si = (sy * w + x) * 4;
+                for c in 0..4 {
+                    sums[c] += temp[si + c] as u32;
+                }
+                count += 1;
+            }
+            let di = (y * w + x) * 4;
+            for c in 0..4 {
+                pixels[di + c] = (sums[c] / count) as u8;
+            }
         }
     }
 }
@@ -580,6 +672,7 @@ pub fn update_liquid_field_quad(
     field: Res<LiquidFieldTexture>,
     config: Res<ActiveWorld>,
     liquid_registry: Res<LiquidRegistry>,
+    render_config: Res<LiquidRenderConfig>,
     shared_mat: Option<Res<SharedLiquidFieldMaterial>>,
     mut materials: ResMut<Assets<LiquidFieldMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -592,6 +685,10 @@ pub fn update_liquid_field_quad(
 
     // Update field texture handle (may have been recreated).
     mat.field_texture = field.handle.clone();
+
+    // Apply render config to material uniforms.
+    mat.uniforms.threshold = render_config.threshold;
+    mat.uniforms.smoothing = render_config.smoothing;
 
     // Update liquid colors from registry.
     if let Some(water) = liquid_registry.get(LiquidId(1)) {
