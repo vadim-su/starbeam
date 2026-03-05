@@ -80,6 +80,12 @@ pub struct LiquidFieldUniforms {
     pub oil_color: Vec4,
     pub threshold: f32,
     pub smoothing: f32,
+    /// World-space size of one tile in pixels.
+    pub tile_size: f32,
+    /// Elapsed time in seconds for animated effects (Voronoi caustics).
+    pub time: f32,
+    /// World-space origin of the field texture (bottom-left corner).
+    pub field_origin: Vec2,
     /// Padding to satisfy GPU alignment (16-byte boundary).
     pub _pad: Vec2,
 }
@@ -313,6 +319,7 @@ pub fn init_liquid_material(
     mut field_materials: ResMut<Assets<LiquidFieldMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
+    config: Res<ActiveWorld>,
 ) {
     // Create our own 1x1 white fallback lightmap so we don't depend on
     // FallbackLightmap resource ordering during OnEnter(InGame).
@@ -375,6 +382,9 @@ pub fn init_liquid_material(
             oil_color: Vec4::new(0.15, 0.1, 0.05, 0.85),
             threshold: 0.33,
             smoothing: 0.095,
+            tile_size: config.tile_size,
+            time: 0.0,
+            field_origin: Vec2::ZERO,
             _pad: Vec2::ZERO,
         },
         field_texture: field_handle,
@@ -802,6 +812,7 @@ pub fn update_liquid_field_quad(
     config: Res<ActiveWorld>,
     liquid_registry: Res<LiquidRegistry>,
     render_config: Res<LiquidRenderConfig>,
+    time: Res<Time>,
     shared_mat: Option<Res<SharedLiquidFieldMaterial>>,
     mut materials: ResMut<Assets<LiquidFieldMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -818,6 +829,12 @@ pub fn update_liquid_field_quad(
     // Apply render config to material uniforms.
     mat.uniforms.threshold = render_config.threshold;
     mat.uniforms.smoothing = render_config.smoothing;
+    mat.uniforms.tile_size = config.tile_size;
+    mat.uniforms.time = time.elapsed_secs();
+    mat.uniforms.field_origin = Vec2::new(
+        field.origin_tx as f32 * config.tile_size,
+        field.origin_ty as f32 * config.tile_size,
+    );
 
     // Update liquid colors from registry.
     if let Some(water) = liquid_registry.get(LiquidId(1)) {
