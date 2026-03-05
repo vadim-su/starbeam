@@ -15,6 +15,7 @@ use bevy::prelude::*;
 use bevy::sprite_render::Material2dPlugin;
 
 use crate::cosmos::persistence::{self, DirtyChunks, Universe};
+use crate::liquid::LiquidMaterial;
 use crate::registry::AppState;
 use crate::sets::GameSet;
 use crate::world::chunk::{LoadedChunks, WorldMap};
@@ -28,6 +29,7 @@ impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(Material2dPlugin::<TileMaterial>::default())
             .add_plugins(Material2dPlugin::<LitSpriteMaterial>::default())
+            .add_plugins(Material2dPlugin::<LiquidMaterial>::default())
             .add_plugins(rc_lighting::RcLightingPlugin)
             .init_resource::<WorldMap>()
             .init_resource::<LoadedChunks>()

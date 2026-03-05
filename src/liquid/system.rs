@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use crate::cosmos::persistence::DirtyChunks;
 use crate::liquid::data::*;
 use crate::liquid::registry::LiquidRegistry;
+use crate::liquid::render::DirtyLiquidChunks;
 use crate::liquid::sleep::SleepTracker;
 use crate::registry::tile::TileRegistry;
 use crate::registry::world::ActiveWorld;
@@ -43,6 +44,7 @@ pub fn liquid_simulation_system(
     mut world_map: ResMut<WorldMap>,
     mut sim_state: ResMut<LiquidSimState>,
     mut dirty_chunks: ResMut<DirtyChunks>,
+    mut dirty_liquid: ResMut<DirtyLiquidChunks>,
 ) {
     if liquid_registry.defs.is_empty() {
         return;
@@ -59,6 +61,7 @@ pub fn liquid_simulation_system(
             &mut world_map,
             &mut sim_state.sleep,
             &mut dirty_chunks,
+            &mut dirty_liquid,
             LIQUID_DT,
         );
     }
@@ -160,6 +163,7 @@ fn run_liquid_step(
     world_map: &mut WorldMap,
     sleep: &mut SleepTracker,
     dirty_chunks: &mut DirtyChunks,
+    dirty_liquid: &mut DirtyLiquidChunks,
     dt: f32,
 ) {
     // Collect active tiles (snapshot to avoid borrow issues).
@@ -356,10 +360,11 @@ fn run_liquid_step(
     for &(tx, ty, cell) in &changes {
         set_liquid_in_map(world_map, tx, ty, cell, config);
 
-        // Mark chunk dirty for rendering.
+        // Mark chunk dirty for persistence and liquid mesh rendering.
         let wx = config.wrap_tile_x(tx);
         let (cx, cy) = chunk::tile_to_chunk(wx, ty, config.chunk_size);
         dirty_chunks.0.insert((cx, cy));
+        dirty_liquid.0.insert((cx, cy));
 
         // Wake changed tiles and their neighbors.
         sleep.mark_changed(tx, ty);

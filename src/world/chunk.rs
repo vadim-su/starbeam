@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::cosmos::persistence::{DirtyChunks, Universe};
 use crate::item::DroppedItem;
+use crate::liquid::registry::LiquidRegistry;
+use crate::liquid::render::{build_liquid_mesh, LiquidMeshEntity, SharedLiquidMaterial};
 use crate::liquid::{LiquidCell, LiquidLayer};
 use crate::object::definition::ObjectId;
 use crate::object::placed::{OccupancyRef, PlacedObject};
@@ -39,10 +41,11 @@ pub struct ChunkDirty;
 #[derive(Component)]
 pub struct ChunkLayer(pub Layer);
 
-/// Both entities for a loaded chunk.
+/// All entities for a loaded chunk.
 pub struct ChunkEntities {
     pub fg: Entity,
     pub bg: Entity,
+    pub liquid: Entity,
 }
 
 /// Identifies which tile layer to operate on.
@@ -417,6 +420,8 @@ pub fn spawn_chunk(
     atlas: &TileAtlas,
     material: &SharedTileMaterial,
     buffers: &mut MeshBuildBuffers,
+    liquid_registry: &LiquidRegistry,
+    liquid_material: Option<&SharedLiquidMaterial>,
     display_chunk_x: i32,
     chunk_y: i32,
 ) {
@@ -500,11 +505,53 @@ pub fn spawn_chunk(
         ))
         .id();
 
+    // Build and spawn liquid mesh entity (z=-0.5, between bg and fg)
+    let liquid_mesh = build_liquid_mesh(
+        &chunk_data.liquid.cells,
+        display_chunk_x,
+        chunk_y,
+        ctx.config.chunk_size,
+        ctx.config.tile_size,
+        liquid_registry,
+    );
+    let liquid_handle = meshes.add(liquid_mesh);
+
+    let liquid_entity = if let Some(liq_mat) = liquid_material {
+        commands
+            .spawn((
+                ChunkCoord {
+                    x: display_chunk_x,
+                    y: chunk_y,
+                },
+                LiquidMeshEntity,
+                Mesh2d(liquid_handle),
+                MeshMaterial2d(liq_mat.0.clone()),
+                Transform::from_translation(Vec3::new(0.0, 0.0, -0.5)),
+                Visibility::default(),
+            ))
+            .id()
+    } else {
+        // No liquid material yet — spawn a placeholder entity that will be
+        // updated once the material is available.
+        commands
+            .spawn((
+                ChunkCoord {
+                    x: display_chunk_x,
+                    y: chunk_y,
+                },
+                LiquidMeshEntity,
+                Transform::from_translation(Vec3::new(0.0, 0.0, -0.5)),
+                Visibility::Hidden,
+            ))
+            .id()
+    };
+
     loaded_chunks.map.insert(
         (display_chunk_x, chunk_y),
         ChunkEntities {
             fg: fg_entity,
             bg: bg_entity,
+            liquid: liquid_entity,
         },
     );
 }
@@ -518,6 +565,7 @@ pub fn despawn_chunk(
     if let Some(entities) = loaded_chunks.map.remove(&(chunk_x, chunk_y)) {
         commands.entity(entities.fg).despawn();
         commands.entity(entities.bg).despawn();
+        commands.entity(entities.liquid).despawn();
     }
 }
 
@@ -583,12 +631,14 @@ pub fn chunk_loading_system(
     atlas: Res<TileAtlas>,
     material: Res<SharedTileMaterial>,
     mut buffers: ResMut<MeshBuildBuffers>,
+    liquid_params: (Res<LiquidRegistry>, Option<Res<SharedLiquidMaterial>>),
     object_registry: Option<Res<ObjectRegistry>>,
     object_sprites: Option<Res<ObjectSpriteMaterials>>,
     quad: Option<Res<SharedLitQuad>>,
     mut lit_materials: ResMut<Assets<LitSpriteMaterial>>,
     object_entities: Query<(Entity, &ObjectDisplayChunk)>,
 ) {
+    let (liquid_registry, liquid_material) = liquid_params;
     let Ok(camera_transform) = camera_query.single() else {
         return;
     };
@@ -634,6 +684,8 @@ pub fn chunk_loading_system(
                 &atlas,
                 &material,
                 &mut buffers,
+                &liquid_registry,
+                liquid_material.as_deref(),
                 display_cx,
                 cy,
             );
