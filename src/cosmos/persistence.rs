@@ -247,6 +247,7 @@ pub fn respawn_saved_dropped_items(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::liquid::data::{LiquidCell, LiquidId};
     use crate::liquid::LiquidLayer;
     use crate::registry::tile::TileId;
     use crate::world::chunk::TileLayer;
@@ -503,14 +504,20 @@ mod tests {
         let chunk_size = 32;
         let len = (chunk_size * chunk_size) as usize;
 
-        // Create a chunk with a non-air tile at position (1, 2)
+        // Create a chunk with a non-air tile at position (1, 2) and liquid at (3, 4)
         let mut fg = TileLayer::new_air(len);
         fg.set(1, 2, TileId(42), chunk_size);
+
+        let mut liquid = LiquidLayer::new_empty(len);
+        liquid.cells[(4 * chunk_size + 3) as usize] = LiquidCell {
+            liquid_type: LiquidId(1),
+            level: 0.75,
+        };
 
         let chunk = ChunkData {
             fg,
             bg: TileLayer::new_air(len),
-            liquid: LiquidLayer::new_empty(len),
+            liquid,
             objects: Vec::new(),
             occupancy: vec![None; len],
             damage: vec![0; len],
@@ -537,6 +544,11 @@ mod tests {
         let restored = world_map.chunk(0, 0).expect("chunk should be restored");
         assert_eq!(restored.fg.get(1, 2, chunk_size), TileId(42));
         assert_eq!(restored.fg.get(0, 0, chunk_size), TileId::AIR);
+
+        // Verify liquid data was preserved
+        let liq = &restored.liquid.cells[(4 * chunk_size + 3) as usize];
+        assert_eq!(liq.liquid_type, LiquidId(1));
+        assert!((liq.level - 0.75).abs() < f32::EPSILON);
     }
 
     #[test]
