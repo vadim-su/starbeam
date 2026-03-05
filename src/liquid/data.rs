@@ -68,6 +68,13 @@ impl LiquidLayer {
         }
     }
 
+    /// Serde default for backwards compatibility with old saves that lack a
+    /// `liquid` field. Produces an empty layer with zero cells; the chunk
+    /// loading code will resize if needed.
+    pub fn serde_default() -> Self {
+        Self { cells: Vec::new() }
+    }
+
     pub fn get(&self, local_x: u32, local_y: u32, chunk_size: u32) -> LiquidCell {
         self.cells[(local_y * chunk_size + local_x) as usize]
     }

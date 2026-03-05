@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cosmos::persistence::{DirtyChunks, Universe};
 use crate::item::DroppedItem;
+use crate::liquid::{LiquidCell, LiquidLayer};
 use crate::object::definition::ObjectId;
 use crate::object::placed::{OccupancyRef, PlacedObject};
 use crate::object::plugin::ObjectSpriteMaterials;
@@ -81,6 +82,8 @@ impl TileLayer {
 pub struct ChunkData {
     pub fg: TileLayer,
     pub bg: TileLayer,
+    #[serde(default = "LiquidLayer::serde_default")]
+    pub liquid: LiquidLayer,
     pub objects: Vec<PlacedObject>,
     pub occupancy: Vec<Option<OccupancyRef>>,
     #[allow(dead_code)] // Reserved for future block-damage system
@@ -141,6 +144,7 @@ impl WorldMap {
                     tiles: chunk_tiles.bg,
                     bitmasks: vec![0; len],
                 },
+                liquid: LiquidLayer::new_empty(len),
                 objects: Vec::new(),
                 occupancy: vec![None; len],
                 damage: vec![0; len],
@@ -214,6 +218,31 @@ impl WorldMap {
             .unwrap()
             .layer_mut(layer)
             .set(lx, ly, tile, ctx.config.chunk_size);
+    }
+
+    pub fn get_liquid(&self, tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> LiquidCell {
+        let tx = ctx.config.wrap_tile_x(tile_x);
+        if tile_y < 0 || tile_y >= ctx.config.height_tiles {
+            return LiquidCell::EMPTY;
+        }
+        let (cx, cy) = tile_to_chunk(tx, tile_y, ctx.config.chunk_size);
+        let (lx, ly) = tile_to_local(tx, tile_y, ctx.config.chunk_size);
+        match self.chunk(cx, cy) {
+            Some(chunk) => chunk.liquid.get(lx, ly, ctx.config.chunk_size),
+            None => LiquidCell::EMPTY,
+        }
+    }
+
+    pub fn set_liquid(&mut self, tile_x: i32, tile_y: i32, cell: LiquidCell, ctx: &WorldCtxRef) {
+        let tx = ctx.config.wrap_tile_x(tile_x);
+        if tile_y < 0 || tile_y >= ctx.config.height_tiles {
+            return;
+        }
+        let (cx, cy) = tile_to_chunk(tx, tile_y, ctx.config.chunk_size);
+        let (lx, ly) = tile_to_local(tx, tile_y, ctx.config.chunk_size);
+        if let Some(chunk) = self.chunk_mut(cx, cy) {
+            chunk.liquid.set(lx, ly, cell, ctx.config.chunk_size);
+        }
     }
 
     /// Read-only: returns whether tile is solid (false for unloaded chunks).

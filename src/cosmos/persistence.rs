@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use super::address::CelestialAddress;
 use crate::item::{DroppedItem, ItemRegistry};
+use crate::liquid::LiquidLayer;
 use crate::physics::{Bounce, Friction, Gravity, Grounded, TileCollider, Velocity};
 use crate::ui::game_ui::icon_registry::ItemIconRegistry;
 use crate::world::chunk::{ChunkData, WorldMap};
@@ -467,6 +468,7 @@ mod tests {
         let chunk_a = ChunkData {
             fg: TileLayer::new_air(len),
             bg: TileLayer::new_air(len),
+            liquid: LiquidLayer::new_empty(len),
             objects: Vec::new(),
             occupancy: vec![None; len],
             damage: vec![0; len],
@@ -508,6 +510,7 @@ mod tests {
         let chunk = ChunkData {
             fg,
             bg: TileLayer::new_air(len),
+            liquid: LiquidLayer::new_empty(len),
             objects: Vec::new(),
             occupancy: vec![None; len],
             damage: vec![0; len],
@@ -616,6 +619,7 @@ mod tests {
         let chunk = ChunkData {
             fg: TileLayer::new_air(len),
             bg: TileLayer::new_air(len),
+            liquid: LiquidLayer::new_empty(len),
             objects: Vec::new(),
             occupancy: vec![None; len],
             damage: vec![0; len],
@@ -640,5 +644,4 @@ mod tests {
         assert!(!save.chunks.contains_key(&(0, 0)));
         assert!(!save.chunks.contains_key(&(2, 0)));
     }
-
 }
