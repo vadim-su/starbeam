@@ -18,6 +18,7 @@ pub use system::LiquidSimState;
 use crate::registry::AppState;
 use crate::sets::GameSet;
 use bevy::prelude::*;
+use bevy_egui::EguiPrimaryContextPass;
 
 pub struct LiquidPlugin;
 
@@ -56,11 +57,10 @@ impl Plugin for LiquidPlugin {
                 Update,
                 debug::debug_liquid_keys.in_set(GameSet::WorldUpdate),
             )
+            .add_systems(Update, debug::toggle_liquid_debug.in_set(GameSet::Ui))
             .add_systems(
-                Update,
-                (debug::toggle_liquid_debug, debug::draw_liquid_debug_panel)
-                    .chain()
-                    .in_set(GameSet::Ui),
+                EguiPrimaryContextPass,
+                debug::draw_liquid_debug_panel.run_if(in_state(AppState::InGame)),
             );
     }
 }
