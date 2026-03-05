@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 
 use super::address::CelestialAddress;
 use crate::item::{DroppedItem, ItemRegistry};
-use crate::liquid::LiquidLayer;
 use crate::physics::{Bounce, Friction, Gravity, Grounded, TileCollider, Velocity};
 use crate::ui::game_ui::icon_registry::ItemIconRegistry;
 use crate::world::chunk::{ChunkData, WorldMap};
@@ -248,6 +247,7 @@ pub fn respawn_saved_dropped_items(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::liquid::LiquidLayer;
     use crate::registry::tile::TileId;
     use crate::world::chunk::TileLayer;
     use bevy::math::IVec2;

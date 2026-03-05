@@ -336,6 +336,39 @@ fn run_liquid_step(
         }
 
         let current = get_liquid_from_map(world_map, tx, ty, config);
+
+        // Check for reactions between different liquid types.
+        if !current.is_empty()
+            && incoming_type != LiquidId::NONE
+            && incoming_type != current.liquid_type
+            && net_delta > 0.0
+        {
+            if let Some(reaction) = liquid_registry.get_reaction(current.liquid_type, incoming_type)
+            {
+                if let Some(tile_name) = &reaction.produce_tile {
+                    // Produce a solid tile (e.g., water + lava = obsidian).
+                    let produced_tile = tile_registry.by_name(tile_name);
+                    if produced_tile != crate::registry::tile::TileId::AIR {
+                        // Set tile directly on chunk (chunk is already loaded).
+                        let wtx = config.wrap_tile_x(tx);
+                        let (cx, cy) = chunk::tile_to_chunk(wtx, ty, config.chunk_size);
+                        let (lx, ly) = chunk::tile_to_local(wtx, ty, config.chunk_size);
+                        if let Some(chunk_data) = world_map.chunk_mut(cx, cy) {
+                            chunk_data.fg.set(lx, ly, produced_tile, config.chunk_size);
+                        }
+                    }
+                }
+                if reaction.consume_both {
+                    changes.push((tx, ty, LiquidCell::EMPTY));
+                } else {
+                    // Only incoming is consumed; existing stays.
+                    changes.push((tx, ty, current));
+                }
+                sleep.mark_changed(tx, ty);
+                continue;
+            }
+        }
+
         let mut new_level = current.level + net_delta;
         let new_type = if current.is_empty() {
             incoming_type
