@@ -1,9 +1,11 @@
 use bevy::prelude::*;
 
+use crate::liquid::data::LiquidCell;
+use crate::liquid::registry::LiquidRegistry;
 use crate::math::{tile_aabb, Aabb};
 use crate::object::registry::ObjectRegistry;
 use crate::sets::GameSet;
-use crate::world::chunk::WorldMap;
+use crate::world::chunk::{self, WorldMap};
 use crate::world::ctx::WorldCtx;
 
 /// Maximum delta time to prevent physics tunneling on lag spikes.
@@ -70,7 +72,13 @@ impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (apply_gravity, tile_collision, apply_friction, apply_bob)
+            (
+                apply_gravity,
+                tile_collision,
+                apply_liquid_physics,
+                apply_friction,
+                apply_bob,
+            )
                 .chain()
                 .in_set(GameSet::Physics),
         );
@@ -188,6 +196,97 @@ pub fn tile_collision(
                 bob.rest_y = pos.y;
             }
         }
+    }
+}
+
+/// Apply buoyancy, drag, and damage from liquid contact.
+///
+/// Checks which tiles the entity overlaps and applies liquid effects:
+/// - Buoyancy force counteracting gravity (proportional to submersion depth)
+/// - Velocity drag (reducing speed based on liquid viscosity)
+/// - Contact damage (e.g. lava)
+pub fn apply_liquid_physics(
+    time: Res<Time>,
+    ctx: WorldCtx,
+    world_map: Res<WorldMap>,
+    liquid_registry: Res<LiquidRegistry>,
+    mut query: Query<(&Transform, &mut Velocity, &TileCollider, Option<&Gravity>)>,
+) {
+    if liquid_registry.defs.is_empty() {
+        return;
+    }
+    let dt = time.delta_secs().min(MAX_DELTA_SECS);
+    let ts = ctx.config.tile_size;
+    let ctx_ref = ctx.as_ref();
+
+    for (tf, mut vel, collider, gravity) in &mut query {
+        let pos = tf.translation;
+        let w = collider.width;
+        let h = collider.height;
+
+        let aabb = Aabb::from_center(pos.x, pos.y, w, h);
+
+        // Check all tiles the entity overlaps for liquid.
+        let mut total_submersion: f32 = 0.0;
+        let mut weighted_density: f32 = 0.0;
+        let mut weighted_viscosity: f32 = 0.0;
+        let mut max_damage: f32 = 0.0;
+        let mut liquid_tiles = 0u32;
+
+        for (tx, ty) in aabb.overlapping_tiles(ts) {
+            let cell = {
+                let wtx = ctx_ref.config.wrap_tile_x(tx);
+                if ty < 0 || ty >= ctx_ref.config.height_tiles {
+                    LiquidCell::EMPTY
+                } else {
+                    let (cx, cy) = chunk::tile_to_chunk(wtx, ty, ctx_ref.config.chunk_size);
+                    let (lx, ly) = chunk::tile_to_local(wtx, ty, ctx_ref.config.chunk_size);
+                    match world_map.chunk(cx, cy) {
+                        Some(chunk) => chunk.liquid.get(lx, ly, ctx_ref.config.chunk_size),
+                        None => LiquidCell::EMPTY,
+                    }
+                }
+            };
+            if cell.is_empty() {
+                continue;
+            }
+
+            if let Some(def) = liquid_registry.get(cell.liquid_type) {
+                // How much of this tile is filled with liquid.
+                let fill = cell.level.clamp(0.0, 1.0);
+                total_submersion += fill;
+                weighted_density += def.density * fill;
+                weighted_viscosity += def.viscosity * fill;
+                max_damage = max_damage.max(def.damage_on_contact);
+                liquid_tiles += 1;
+            }
+        }
+
+        if liquid_tiles == 0 {
+            continue;
+        }
+
+        // Normalize weights.
+        let avg_density = weighted_density / total_submersion;
+        let avg_viscosity = weighted_viscosity / total_submersion;
+
+        // Submersion ratio: how much of the entity is submerged (0..1).
+        let entity_tile_height = (h / ts).max(1.0);
+        let submersion_ratio = (total_submersion / entity_tile_height).clamp(0.0, 1.0);
+
+        // Buoyancy: counteract gravity proportional to submersion and liquid density.
+        if let Some(grav) = gravity {
+            let buoyancy = grav.0 * avg_density * submersion_ratio;
+            vel.y += buoyancy * dt;
+        }
+
+        // Drag: reduce velocity based on viscosity and submersion.
+        let drag = (1.0 - avg_viscosity * 0.3 * submersion_ratio * dt).clamp(0.5, 1.0);
+        vel.x *= drag;
+        vel.y *= drag;
+
+        // TODO: Apply damage_on_contact to player health when health system exists.
+        let _ = max_damage;
     }
 }
 
