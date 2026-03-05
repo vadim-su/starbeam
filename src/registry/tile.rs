@@ -108,6 +108,10 @@ impl TileRegistry {
             .get(name)
             .unwrap_or_else(|| panic!("Unknown tile: {name}"))
     }
+
+    pub fn try_by_name(&self, name: &str) -> Option<TileId> {
+        self.name_to_id.get(name).copied()
+    }
 }
 
 #[cfg(test)]

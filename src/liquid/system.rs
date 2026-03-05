@@ -37,24 +37,35 @@ pub struct LiquidSimState {
 /// The main liquid simulation system. Runs at ~20 Hz via accumulator.
 #[allow(clippy::too_many_arguments)]
 pub fn liquid_simulation_system(
+    mut commands: Commands,
     time: Res<Time>,
     config: Res<ActiveWorld>,
     tile_registry: Res<TileRegistry>,
     liquid_registry: Res<LiquidRegistry>,
     mut world_map: ResMut<WorldMap>,
     mut sim_state: ResMut<LiquidSimState>,
-    mut dirty_chunks: ResMut<DirtyChunks>,
-    mut dirty_liquid: ResMut<DirtyLiquidChunks>,
+    dirty_resources: (
+        ResMut<DirtyChunks>,
+        ResMut<DirtyLiquidChunks>,
+        ResMut<crate::world::rc_lighting::RcGridDirty>,
+    ),
+    loaded_chunks: Res<chunk::LoadedChunks>,
+    chunk_query: Query<(Entity, &chunk::ChunkCoord, &chunk::ChunkLayer)>,
 ) {
+    let (mut dirty_chunks, mut dirty_liquid, mut rc_dirty) = dirty_resources;
+
     if liquid_registry.defs.is_empty() {
         return;
     }
 
     sim_state.accumulator += time.delta_secs().min(0.1);
 
+    let mut steps = 0u32;
+    let mut all_produced: Vec<(i32, i32)> = Vec::new();
     while sim_state.accumulator >= LIQUID_DT {
         sim_state.accumulator -= LIQUID_DT;
-        run_liquid_step(
+        steps += 1;
+        let produced = run_liquid_step(
             &config,
             &tile_registry,
             &liquid_registry,
@@ -63,6 +74,31 @@ pub fn liquid_simulation_system(
             &mut dirty_chunks,
             &mut dirty_liquid,
             LIQUID_DT,
+        );
+        all_produced.extend(produced);
+    }
+
+    // Mark tile mesh entities dirty for any reaction-produced solid tiles.
+    if !all_produced.is_empty() {
+        rc_dirty.0 = true;
+        for &(tx, ty) in &all_produced {
+            let wtx = config.wrap_tile_x(tx);
+            let (cx, cy) = chunk::tile_to_chunk(wtx, ty, config.chunk_size);
+            // Mark fg+bg chunk entities as ChunkDirty for mesh rebuild.
+            for (entity, coord, _layer) in &chunk_query {
+                let dcx = config.wrap_chunk_x(coord.x);
+                if dcx == cx && coord.y == cy {
+                    commands.entity(entity).insert(chunk::ChunkDirty);
+                }
+            }
+        }
+    }
+
+    if steps > 0 && sim_state.sleep.active_count() > 0 {
+        debug!(
+            "Liquid sim: {} steps, {} active tiles",
+            steps,
+            sim_state.sleep.active_count()
         );
     }
 }
@@ -156,6 +192,7 @@ fn compute_depth_above(
 // ---------------------------------------------------------------------------
 
 /// One simulation tick operating directly on WorldMap chunk data.
+/// Returns list of tile coords where reactions produced solid tiles (need mesh rebuild).
 fn run_liquid_step(
     config: &ActiveWorld,
     tile_registry: &TileRegistry,
@@ -165,7 +202,10 @@ fn run_liquid_step(
     dirty_chunks: &mut DirtyChunks,
     dirty_liquid: &mut DirtyLiquidChunks,
     dt: f32,
-) {
+) -> Vec<(i32, i32)> {
+    // Tiles where reactions produced solid blocks (need mesh rebuild).
+    let mut produced_tiles: Vec<(i32, i32)> = Vec::new();
+
     // Collect active tiles (snapshot to avoid borrow issues).
     let active: Vec<(i32, i32)> = sleep.active_tiles().collect();
 
@@ -196,6 +236,32 @@ fn run_liquid_step(
 
         let viscosity = liquid_registry.viscosity(cell.liquid_type).max(0.01);
 
+        // Suppress horizontal flow if the cell below can actually accept THIS liquid.
+        // This forces liquid to fall first before spreading sideways.
+        // But don't suppress if the cell below has a denser *different* liquid
+        // that would block downward flow anyway (e.g. oil sitting on water).
+        let below_open = {
+            let bx = tx;
+            let by = ty - 1;
+            if is_solid_at(world_map, tile_registry, bx, by, config) {
+                false
+            } else {
+                let below = get_liquid_from_map(world_map, bx, by, config);
+                if below.is_empty() {
+                    true // empty cell below — liquid should fall first
+                } else if below.liquid_type == cell.liquid_type {
+                    below.level < 0.95 // same type — fall if there's room
+                } else {
+                    // Different liquid below: only "open" if we're denser
+                    // (can displace it). If we're lighter, we can't go down,
+                    // so horizontal flow should NOT be suppressed.
+                    let density_me = liquid_registry.density(cell.liquid_type);
+                    let density_below = liquid_registry.density(below.liquid_type);
+                    density_me > density_below
+                }
+            }
+        };
+
         // Compute flows to 4 neighbors.
         let mut flows = [0.0_f32; 4];
         for face in 0..4 {
@@ -205,6 +271,11 @@ fn run_liquid_step(
 
             // Boundary / solid check.
             if is_solid_at(world_map, tile_registry, nx, ny, config) {
+                continue;
+            }
+
+            // Suppress horizontal flow when cell below can still accept liquid.
+            if below_open && (face == FACE_LEFT || face == FACE_RIGHT) {
                 continue;
             }
 
@@ -255,6 +326,8 @@ fn run_liquid_step(
 
     // -- Phase 3: Collect changes -------------------------------------------
     let mut changes: Vec<(i32, i32, LiquidCell)> = Vec::new();
+    // Displacement: liquid pushed to another cell by density sorting.
+    let mut displacements: Vec<(i32, i32, LiquidCell)> = Vec::new();
 
     // Track level deltas per tile coordinate.
     // Using a Vec of (tx, ty, delta, liquid_type) to avoid HashMap overhead.
@@ -337,38 +410,72 @@ fn run_liquid_step(
 
         let current = get_liquid_from_map(world_map, tx, ty, config);
 
-        // Check for reactions between different liquid types.
+        // --- Different liquid types meeting: reactions & displacement ---
         if !current.is_empty()
             && incoming_type != LiquidId::NONE
             && incoming_type != current.liquid_type
             && net_delta > 0.0
         {
+            // Check for reactions first (e.g., water + lava = stone).
             if let Some(reaction) = liquid_registry.get_reaction(current.liquid_type, incoming_type)
             {
                 if let Some(tile_name) = &reaction.produce_tile {
-                    // Produce a solid tile (e.g., water + lava = obsidian).
-                    let produced_tile = tile_registry.by_name(tile_name);
+                    let produced_tile = tile_registry
+                        .try_by_name(tile_name)
+                        .unwrap_or(crate::registry::tile::TileId::AIR);
                     if produced_tile != crate::registry::tile::TileId::AIR {
-                        // Set tile directly on chunk (chunk is already loaded).
                         let wtx = config.wrap_tile_x(tx);
                         let (cx, cy) = chunk::tile_to_chunk(wtx, ty, config.chunk_size);
                         let (lx, ly) = chunk::tile_to_local(wtx, ty, config.chunk_size);
                         if let Some(chunk_data) = world_map.chunk_mut(cx, cy) {
                             chunk_data.fg.set(lx, ly, produced_tile, config.chunk_size);
                         }
+                        dirty_chunks.0.insert((cx, cy));
+                        produced_tiles.push((tx, ty));
                     }
                 }
                 if reaction.consume_both {
                     changes.push((tx, ty, LiquidCell::EMPTY));
                 } else {
-                    // Only incoming is consumed; existing stays.
                     changes.push((tx, ty, current));
                 }
                 sleep.mark_changed(tx, ty);
                 continue;
             }
+
+            // No reaction — handle density displacement.
+            // Denser liquid stays in this cell, lighter one is displaced UP.
+            let density_incoming = liquid_registry.density(incoming_type);
+            let density_current = liquid_registry.density(current.liquid_type);
+
+            if density_incoming > density_current {
+                // Incoming is denser: it takes over this cell, existing displaced UP.
+                let incoming_amount = net_delta.min(MAX_LEVEL);
+                // Displace existing liquid upward.
+                displacements.push((tx, ty + 1, current));
+                changes.push((
+                    tx,
+                    ty,
+                    LiquidCell {
+                        liquid_type: incoming_type,
+                        level: incoming_amount,
+                    },
+                ));
+            } else {
+                // Incoming is lighter: it gets pushed UP, cell stays as-is.
+                let displaced = LiquidCell {
+                    liquid_type: incoming_type,
+                    level: net_delta.min(MAX_LEVEL),
+                };
+                displacements.push((tx, ty + 1, displaced));
+                // Cell keeps its current state (may have outgoing flow deltas
+                // handled via same-type delta merge below if also present).
+            }
+            sleep.mark_changed(tx, ty);
+            continue;
         }
 
+        // --- Same liquid type or flowing into empty cell ---
         let mut new_level = current.level + net_delta;
         let new_type = if current.is_empty() {
             incoming_type
@@ -402,4 +509,105 @@ fn run_liquid_step(
         // Wake changed tiles and their neighbors.
         sleep.mark_changed(tx, ty);
     }
+
+    // -- Phase 4b: Apply displacement (lighter liquid pushed upward) --------
+    for (tx, ty, displaced) in displacements {
+        if ty < 0 || ty >= config.height_tiles {
+            continue;
+        }
+        if is_solid_at(world_map, tile_registry, tx, ty, config) {
+            continue; // can't displace into solid — liquid is lost
+        }
+
+        let existing = get_liquid_from_map(world_map, tx, ty, config);
+        let new_cell = if existing.is_empty() {
+            displaced
+        } else if existing.liquid_type == displaced.liquid_type {
+            // Same type — merge levels.
+            LiquidCell {
+                liquid_type: displaced.liquid_type,
+                level: (existing.level + displaced.level).min(MAX_LEVEL),
+            }
+        } else {
+            // Different type again — denser stays, lighter pushed further up.
+            // For simplicity, place displaced here; the density swap pass
+            // below will sort it in the next tick.
+            let d_disp = liquid_registry.density(displaced.liquid_type);
+            let d_exist = liquid_registry.density(existing.liquid_type);
+            if d_disp <= d_exist {
+                // Displaced is lighter or equal — it goes here, existing
+                // stays below (already correct ordering).
+                LiquidCell {
+                    liquid_type: displaced.liquid_type,
+                    level: displaced.level.min(MAX_LEVEL),
+                }
+            } else {
+                // Displaced is denser than what's here — shouldn't happen
+                // normally, but keep existing for safety.
+                existing
+            }
+        };
+
+        set_liquid_in_map(world_map, tx, ty, new_cell, config);
+
+        let wx = config.wrap_tile_x(tx);
+        let (cx, cy) = chunk::tile_to_chunk(wx, ty, config.chunk_size);
+        dirty_chunks.0.insert((cx, cy));
+        dirty_liquid.0.insert((cx, cy));
+        sleep.mark_changed(tx, ty);
+    }
+
+    // -- Phase 5: Column density sorting ------------------------------------
+    // For each active column, swap adjacent cells where lighter liquid is
+    // below denser liquid. This ensures correct vertical stratification.
+    {
+        // Collect unique columns from active tiles.
+        let mut col_ranges: std::collections::HashMap<i32, (i32, i32)> =
+            std::collections::HashMap::new();
+        for &(tx, ty) in &active {
+            let entry = col_ranges.entry(tx).or_insert((ty, ty));
+            entry.0 = entry.0.min(ty);
+            entry.1 = entry.1.max(ty);
+        }
+
+        for (&tx, &(y_min, y_max)) in &col_ranges {
+            // Scan upward through the column.
+            for y in y_min..y_max {
+                if is_solid_at(world_map, tile_registry, tx, y, config)
+                    || is_solid_at(world_map, tile_registry, tx, y + 1, config)
+                {
+                    continue;
+                }
+
+                let bottom = get_liquid_from_map(world_map, tx, y, config);
+                let top = get_liquid_from_map(world_map, tx, y + 1, config);
+
+                if bottom.is_empty() || top.is_empty() {
+                    continue;
+                }
+                if bottom.liquid_type == top.liquid_type {
+                    continue;
+                }
+
+                let d_bottom = liquid_registry.density(bottom.liquid_type);
+                let d_top = liquid_registry.density(top.liquid_type);
+
+                if d_bottom < d_top {
+                    // Lighter below denser — swap cells.
+                    set_liquid_in_map(world_map, tx, y, top, config);
+                    set_liquid_in_map(world_map, tx, y + 1, bottom, config);
+
+                    for sy in [y, y + 1] {
+                        let wx = config.wrap_tile_x(tx);
+                        let (cx, cy) = chunk::tile_to_chunk(wx, sy, config.chunk_size);
+                        dirty_chunks.0.insert((cx, cy));
+                        dirty_liquid.0.insert((cx, cy));
+                        sleep.mark_changed(tx, sy);
+                    }
+                }
+            }
+        }
+    }
+
+    produced_tiles
 }

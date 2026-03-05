@@ -22,6 +22,11 @@ use crate::world::chunk::{ChunkCoord, LoadedChunks, WorldMap};
 pub struct LiquidMaterial {
     #[uniform(0)]
     pub color: LinearRgba,
+    #[texture(1)]
+    #[sampler(2)]
+    pub lightmap: Handle<Image>,
+    #[uniform(3)]
+    pub lightmap_uv_rect: Vec4, // (scale_x, scale_y, offset_x, offset_y)
 }
 
 impl Material2d for LiquidMaterial {
@@ -156,9 +161,30 @@ pub fn build_liquid_mesh(
 // Init system — create shared material on InGame enter
 // ---------------------------------------------------------------------------
 
-pub fn init_liquid_material(mut commands: Commands, mut materials: ResMut<Assets<LiquidMaterial>>) {
+pub fn init_liquid_material(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<LiquidMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    // Create our own 1x1 white fallback lightmap so we don't depend on
+    // FallbackLightmap resource ordering during OnEnter(InGame).
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    let white_lm = images.add(Image::new_fill(
+        Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[0x00u8, 0x3C, 0x00, 0x3C, 0x00, 0x3C, 0x00, 0x3C], // f16 1.0
+        TextureFormat::Rgba16Float,
+        bevy::asset::RenderAssetUsages::RENDER_WORLD,
+    ));
+
     let handle = materials.add(LiquidMaterial {
         color: LinearRgba::new(1.0, 1.0, 1.0, 1.0),
+        lightmap: white_lm,
+        lightmap_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
     });
     commands.insert_resource(SharedLiquidMaterial(handle));
 }

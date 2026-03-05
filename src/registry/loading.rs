@@ -247,6 +247,7 @@ pub(crate) fn check_loading(
             crate::liquid::registry::LiquidRegistry::default()
         }
     };
+    bevy::log::info!("Liquid registry loaded: {} defs", liquid_registry.defs.len());
     commands.insert_resource(liquid_registry);
 
     commands.insert_resource(registry_ref);

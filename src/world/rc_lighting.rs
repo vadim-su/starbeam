@@ -784,7 +784,9 @@ fn update_tile_lightmap(
     gpu_images: Option<Res<rc_pipeline::RcGpuImages>>,
     config: Option<Res<RcLightingConfig>>,
     shared_material: Option<Res<SharedTileMaterial>>,
+    shared_liquid_material: Option<Res<crate::liquid::SharedLiquidMaterial>>,
     mut tile_materials: ResMut<Assets<TileMaterial>>,
+    mut liquid_materials: ResMut<Assets<crate::liquid::LiquidMaterial>>,
     mut lit_sprite_materials: ResMut<Assets<LitSpriteMaterial>>,
 ) {
     let (Some(gpu_images), Some(config), Some(shared_material)) =
@@ -826,6 +828,14 @@ fn update_tile_lightmap(
     for (_id, mat) in lit_sprite_materials.iter_mut() {
         mat.lightmap = gpu_images.lightmap.clone();
         mat.lightmap_uv_rect = lm_params;
+    }
+
+    // Update liquid material with lightmap.
+    if let Some(shared_liq) = shared_liquid_material {
+        if let Some(mat) = liquid_materials.get_mut(&shared_liq.0) {
+            mat.lightmap = gpu_images.lightmap.clone();
+            mat.lightmap_uv_rect = lm_params;
+        }
     }
 }
 
