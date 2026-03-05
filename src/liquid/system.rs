@@ -13,11 +13,14 @@ use crate::world::chunk::{self, WorldMap};
 // Constants (matching simulation.rs)
 // ---------------------------------------------------------------------------
 
-const GRAVITY_SCALE: f32 = 0.1;
-const GRAVITY_BIAS_DOWN: f32 = 2.0;
-const GRAVITY_BIAS_UP: f32 = -1.0;
+const GRAVITY_SCALE: f32 = 0.15;
+const GRAVITY_BIAS_DOWN: f32 = 6.0;
+/// Must be > -1.0 so that a full cell (level=1.0) can push upward.
+/// At -0.8, upward flow only starts when cell level > ~0.8 — water must be
+/// nearly full before it pushes up, preventing tower formation.
+const GRAVITY_BIAS_UP: f32 = -0.8;
 
-const LIQUID_DT: f32 = 1.0 / 20.0;
+const LIQUID_DT: f32 = 1.0 / 30.0;
 
 // ---------------------------------------------------------------------------
 // Resource
@@ -34,7 +37,7 @@ pub struct LiquidSimState {
 // Bevy system
 // ---------------------------------------------------------------------------
 
-/// The main liquid simulation system. Runs at ~20 Hz via accumulator.
+/// The main liquid simulation system. Runs at 30 Hz via accumulator.
 #[allow(clippy::too_many_arguments)]
 pub fn liquid_simulation_system(
     mut commands: Commands,
@@ -49,7 +52,7 @@ pub fn liquid_simulation_system(
         ResMut<DirtyLiquidChunks>,
         ResMut<crate::world::rc_lighting::RcGridDirty>,
     ),
-    loaded_chunks: Res<chunk::LoadedChunks>,
+    _loaded_chunks: Res<chunk::LoadedChunks>,
     chunk_query: Query<(Entity, &chunk::ChunkCoord, &chunk::ChunkLayer)>,
 ) {
     let (mut dirty_chunks, mut dirty_liquid, mut rc_dirty) = dirty_resources;
@@ -193,6 +196,7 @@ fn compute_depth_above(
 
 /// One simulation tick operating directly on WorldMap chunk data.
 /// Returns list of tile coords where reactions produced solid tiles (need mesh rebuild).
+#[allow(clippy::too_many_arguments)]
 fn run_liquid_step(
     config: &ActiveWorld,
     tile_registry: &TileRegistry,
@@ -274,11 +278,6 @@ fn run_liquid_step(
                 continue;
             }
 
-            // Suppress horizontal flow when cell below can still accept liquid.
-            if below_open && (face == FACE_LEFT || face == FACE_RIGHT) {
-                continue;
-            }
-
             let neighbor = get_liquid_from_map(world_map, nx, ny, config);
 
             // Block flow into a cell with a denser *different* liquid.
@@ -299,16 +298,37 @@ fn run_liquid_step(
                 neighbor.level + n_density * GRAVITY_SCALE * n_depth
             };
 
-            // Gravity bias.
-            let gravity_bias = match face {
-                FACE_DOWN => GRAVITY_BIAS_DOWN,
-                FACE_UP => GRAVITY_BIAS_UP,
-                _ => 0.0,
+            // Gravity bias + horizontal damping.
+            let (gravity_bias, damping) = match face {
+                FACE_DOWN => (GRAVITY_BIAS_DOWN, 1.0),
+                FACE_UP => (GRAVITY_BIAS_UP, 1.0),
+                _ => {
+                    // Ledge detection: is the cell below the neighbor open?
+                    let below_neighbor_open =
+                        !is_solid_at(world_map, tile_registry, nx, ny - 1, config) && {
+                            let bn = get_liquid_from_map(world_map, nx, ny - 1, config);
+                            bn.is_empty() || bn.level < 0.8
+                        };
+                    let ledge_bonus = if below_neighbor_open { 2.0 } else { 0.0 };
+
+                    // When cell below can still accept liquid, dampen (but
+                    // don't suppress) horizontal flow to prioritize falling.
+                    let h_damp = if below_open { 0.15 } else { 1.0 };
+                    (ledge_bonus, h_damp)
+                }
             };
 
-            let flow = dt * (pressure - n_pressure + gravity_bias) / viscosity;
+            let flow = dt * (pressure - n_pressure + gravity_bias) / viscosity * damping;
             if flow > 0.0 {
-                flows[face] = flow.min(MAX_FLOW);
+                // Limit by available room in destination to prevent mass destruction.
+                let room = if neighbor.is_empty() {
+                    MAX_LEVEL
+                } else if neighbor.liquid_type == cell.liquid_type {
+                    (MAX_LEVEL - neighbor.level).max(0.0)
+                } else {
+                    MAX_LEVEL // different type — displacement handles it
+                };
+                flows[face] = flow.min(MAX_FLOW).min(room);
             }
         }
 
@@ -605,6 +625,78 @@ fn run_liquid_step(
                         sleep.mark_changed(tx, sy);
                     }
                 }
+            }
+        }
+    }
+
+    // -- Phase 6: Surface tension — consolidate tiny droplets ----------------
+    // Only absorb a droplet if a neighbor has *significantly* more liquid
+    // (at least 3× the droplet's level). This prevents chain-reaction
+    // evaporation on staircases where every cell is small.
+    // Truly isolated tiny drops (no same-type neighbor at all) evaporate.
+    {
+        const TENSION_THRESHOLD: f32 = 0.08;
+        const NEIGHBOR_RATIO: f32 = 3.0;
+
+        for &(tx, ty) in &active {
+            let cell = get_liquid_from_map(world_map, tx, ty, config);
+            if cell.is_empty() || cell.level >= TENSION_THRESHOLD {
+                continue;
+            }
+
+            // Count same-type neighbors and find the largest one.
+            let mut best_neighbor: Option<(i32, i32, f32)> = None;
+            let mut same_type_neighbors = 0u32;
+            for &(dx, dy) in &[(0i32, -1i32), (0, 1), (-1, 0), (1, 0)] {
+                let nx = tx + dx;
+                let ny = ty + dy;
+                if is_solid_at(world_map, tile_registry, nx, ny, config) {
+                    continue;
+                }
+                let neighbor = get_liquid_from_map(world_map, nx, ny, config);
+                if neighbor.is_empty() || neighbor.liquid_type != cell.liquid_type {
+                    continue;
+                }
+                same_type_neighbors += 1;
+                if neighbor.level > best_neighbor.map_or(0.0, |b| b.2) {
+                    best_neighbor = Some((nx, ny, neighbor.level));
+                }
+            }
+
+            match best_neighbor {
+                Some((nx, ny, n_level)) if n_level >= cell.level * NEIGHBOR_RATIO => {
+                    // Transfer this cell's liquid to the much-larger neighbor.
+                    let new_n_level = (n_level + cell.level).min(MAX_LEVEL);
+                    set_liquid_in_map(
+                        world_map,
+                        nx,
+                        ny,
+                        LiquidCell {
+                            liquid_type: cell.liquid_type,
+                            level: new_n_level,
+                        },
+                        config,
+                    );
+                    set_liquid_in_map(world_map, tx, ty, LiquidCell::EMPTY, config);
+
+                    for &(sx, sy) in &[(tx, ty), (nx, ny)] {
+                        let wx = config.wrap_tile_x(sx);
+                        let (cx, cy) = chunk::tile_to_chunk(wx, sy, config.chunk_size);
+                        dirty_chunks.0.insert((cx, cy));
+                        dirty_liquid.0.insert((cx, cy));
+                        sleep.mark_changed(sx, sy);
+                    }
+                }
+                _ if same_type_neighbors == 0 && cell.level < 0.03 => {
+                    // Completely isolated tiny drop — evaporate.
+                    set_liquid_in_map(world_map, tx, ty, LiquidCell::EMPTY, config);
+                    let wx = config.wrap_tile_x(tx);
+                    let (cx, cy) = chunk::tile_to_chunk(wx, ty, config.chunk_size);
+                    dirty_chunks.0.insert((cx, cy));
+                    dirty_liquid.0.insert((cx, cy));
+                    sleep.mark_changed(tx, ty);
+                }
+                _ => {}
             }
         }
     }

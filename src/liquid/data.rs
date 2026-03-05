@@ -35,7 +35,7 @@ pub const MIN_LEVEL: f32 = 0.001;
 /// Maximum level a cell can hold.
 pub const MAX_LEVEL: f32 = 1.0;
 /// Maximum flow per face per step.
-pub const MAX_FLOW: f32 = 0.5;
+pub const MAX_FLOW: f32 = 1.0;
 
 /// Flow state for a single cell — not persisted, recomputed each frame.
 #[derive(Debug, Clone, Copy, Default)]

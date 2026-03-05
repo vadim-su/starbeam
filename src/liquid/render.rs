@@ -152,6 +152,8 @@ pub struct LiquidRenderConfig {
     /// Box-blur radius applied to the scalar field before upload.
     /// 0 = no blur, 1 = 3×3, 2 = 5×5, 3 = 7×7.
     pub blur_radius: u32,
+    /// When true, show the old per-chunk debug meshes (simple colored rectangles).
+    pub show_debug_meshes: bool,
 }
 
 impl Default for LiquidRenderConfig {
@@ -160,6 +162,7 @@ impl Default for LiquidRenderConfig {
             threshold: 0.4,
             smoothing: 0.1,
             blur_radius: 1,
+            show_debug_meshes: true,
         }
     }
 }
@@ -264,7 +267,9 @@ pub fn build_liquid_mesh(
 
             let x = base_x + local_x as f32 * tile_size;
             let y = base_y + local_y as f32 * tile_size;
-            let height = cell.level.clamp(0.0, 1.0) * tile_size;
+            // Minimum visible height of 2px so small amounts don't disappear.
+            let min_height = 2.0_f32.min(tile_size * 0.25);
+            let height = (cell.level.clamp(0.0, 1.0) * tile_size).max(min_height);
 
             let vi = positions.len() as u32;
             // Quad: bottom-left, bottom-right, top-right, top-left
@@ -408,13 +413,28 @@ pub fn rebuild_liquid_meshes(
     liquid_registry: Res<LiquidRegistry>,
     loaded_chunks: Res<LoadedChunks>,
     mut dirty_liquid: ResMut<DirtyLiquidChunks>,
-    liquid_query: Query<(Entity, &ChunkCoord), With<LiquidMeshEntity>>,
+    render_config: Res<LiquidRenderConfig>,
+    liquid_query: Query<(Entity, &ChunkCoord, &Visibility), With<LiquidMeshEntity>>,
 ) {
-    if dirty_liquid.0.is_empty() {
+    let target_vis = if render_config.show_debug_meshes {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+
+    // Update visibility for all liquid mesh entities when toggle changes.
+    for (entity, _coord, vis) in &liquid_query {
+        if *vis != target_vis {
+            commands.entity(entity).insert(target_vis);
+        }
+    }
+
+    if dirty_liquid.0.is_empty() || !render_config.show_debug_meshes {
+        dirty_liquid.0.clear();
         return;
     }
 
-    for (entity, coord) in &liquid_query {
+    for (entity, coord, _vis) in &liquid_query {
         let data_cx = config.wrap_chunk_x(coord.x);
         if !dirty_liquid.0.contains(&(data_cx, coord.y)) {
             continue;
@@ -594,11 +614,12 @@ pub fn upload_liquid_field(
     blur_liquid_field(&mut field.pixels, w, h, r);
 
     // --- Upload to GPU image ---
-    if let Some(image) = images.get_mut(&field.handle) {
-        if let Some(data) = image.data.as_mut() {
-            let len = field.pixels.len().min(data.len());
-            data[..len].copy_from_slice(&field.pixels[..len]);
-        }
+    if let Some(data) = images
+        .get_mut(&field.handle)
+        .and_then(|img| img.data.as_mut())
+    {
+        let len = field.pixels.len().min(data.len());
+        data[..len].copy_from_slice(&field.pixels[..len]);
     }
 }
 

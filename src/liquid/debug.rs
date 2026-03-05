@@ -37,6 +37,7 @@ pub struct LiquidDebugState {
 
 /// F5: Spawn liquid at cursor position.
 /// F6: Cycle liquid type (water -> lava -> oil -> water).
+#[allow(clippy::too_many_arguments)]
 pub fn debug_liquid_keys(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut debug_type: ResMut<DebugLiquidType>,
@@ -224,6 +225,8 @@ pub fn draw_liquid_debug_panel(
             egui::CollapsingHeader::new(egui::RichText::new("Render Settings").strong())
                 .default_open(true)
                 .show(ui, |ui| {
+                    ui.checkbox(&mut render_config.show_debug_meshes, "Show debug meshes");
+                    ui.separator();
                     ui.add(
                         egui::Slider::new(&mut render_config.threshold, 0.05..=0.95)
                             .text("Threshold"),
@@ -329,7 +332,7 @@ pub fn draw_liquid_debug_panel(
 
                                         ui.label("Level:");
                                         let bar_color =
-                                            liquid_color_egui32(&liquid_registry, cell.liquid_type);
+                                            liquid_color_egui(&liquid_registry, cell.liquid_type);
                                         ui.horizontal(|ui| {
                                             ui.monospace(format!("{:.3}", cell.level));
                                             let bar =
@@ -425,10 +428,6 @@ fn get_liquid_at(world_map: &WorldMap, config: &ActiveWorld, tx: i32, ty: i32) -
 }
 
 fn liquid_color_egui(registry: &LiquidRegistry, id: LiquidId) -> egui::Color32 {
-    liquid_color_egui32(registry, id)
-}
-
-fn liquid_color_egui32(registry: &LiquidRegistry, id: LiquidId) -> egui::Color32 {
     if let Some(def) = registry.get(id) {
         let r = (def.color[0] * 255.0) as u8;
         let g = (def.color[1] * 255.0) as u8;

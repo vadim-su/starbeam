@@ -34,7 +34,7 @@ impl Plugin for PlayerPlugin {
             OnEnter(AppState::InGame),
             (
                 animation::load_character_animations,
-                spawn_player,
+                spawn_player.after(crate::world::lit_sprite::init_lit_sprite_resources),
                 respawn_player_on_warp,
             )
                 .chain(),
@@ -56,7 +56,7 @@ fn spawn_player(
     planet_config: Res<PlanetConfig>,
     noise_cache: Res<TerrainNoiseCache>,
     animations: Res<CharacterAnimations>,
-    quad: Res<SharedLitQuad>,
+    quad: Option<Res<SharedLitQuad>>,
     fallback_lm: Res<FallbackLightmap>,
     mut lit_materials: ResMut<Assets<LitSpriteMaterial>>,
     existing_player: Query<Entity, With<Player>>,
@@ -65,6 +65,11 @@ fn spawn_player(
     if existing_player.iter().next().is_some() {
         return;
     }
+
+    let Some(quad) = quad else {
+        warn!("SharedLitQuad not ready yet, deferring player spawn");
+        return;
+    };
 
     let spawn_tile_x = 0;
     let surface_y = terrain_gen::surface_height(

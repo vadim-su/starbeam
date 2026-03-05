@@ -5,13 +5,14 @@ use super::data::*;
 // ---------------------------------------------------------------------------
 
 /// Gravity contribution to pressure per unit of depth.
-const GRAVITY_SCALE: f32 = 0.1;
+const GRAVITY_SCALE: f32 = 0.15;
 
 /// Bias added to downward flow (encourages liquid to fall).
-const GRAVITY_BIAS_DOWN: f32 = 2.0;
+const GRAVITY_BIAS_DOWN: f32 = 6.0;
 
 /// Bias added to upward flow (discourages liquid from rising).
-const GRAVITY_BIAS_UP: f32 = -1.0;
+/// Must be > -1.0 so a full cell can push liquid upward.
+const GRAVITY_BIAS_UP: f32 = -0.8;
 
 // ---------------------------------------------------------------------------
 // SimGrid — standalone simulation grid for testing
@@ -228,11 +229,8 @@ pub fn step(grid: &mut SimGrid, densities: &[f32], viscosities: &[f32], dt: f32)
             }
 
             let cell = grid.cells[i];
-            if cell.is_empty() {
-                // Even empty cells can receive incoming flow.
-            }
 
-            // Subtract outgoing flows.
+            // Subtract outgoing flows (empty cells can still receive incoming).
             for face in 0..4 {
                 let out = grid.flows[i][face];
                 if out > 0.0 {
@@ -254,12 +252,12 @@ pub fn step(grid: &mut SimGrid, densities: &[f32], viscosities: &[f32], dt: f32)
     }
 
     // Apply deltas.
-    for i in 0..len {
+    for (i, delta) in deltas.iter().enumerate() {
         if grid.solid[i] {
             continue;
         }
 
-        grid.cells[i].level += deltas[i];
+        grid.cells[i].level += delta;
 
         if grid.cells[i].level < MIN_LEVEL {
             grid.cells[i] = LiquidCell::EMPTY;

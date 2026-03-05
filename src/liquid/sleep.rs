@@ -62,6 +62,7 @@ impl SleepTracker {
     }
 
     /// Remove tiles outside the simulation bounds.
+    #[allow(dead_code)]
     pub fn cull_outside(&mut self, min_x: i32, min_y: i32, max_x: i32, max_y: i32) {
         self.active
             .retain(|&(x, y)| x >= min_x && x <= max_x && y >= min_y && y <= max_y);
