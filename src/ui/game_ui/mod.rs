@@ -125,7 +125,7 @@ fn toggle_inventory(
     mut state: ResMut<InventoryScreenState>,
     mut query: Query<&mut Visibility, With<InventoryScreen>>,
 ) {
-    if keyboard.just_pressed(KeyCode::KeyE) || keyboard.just_pressed(KeyCode::KeyI) {
+    if keyboard.just_pressed(KeyCode::KeyI) {
         state.visible = !state.visible;
 
         for mut vis in &mut query {
