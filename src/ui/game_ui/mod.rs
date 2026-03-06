@@ -1,4 +1,5 @@
 pub mod components;
+pub mod crafting_panel;
 pub mod drag_drop;
 pub mod hotbar;
 pub mod icon_registry;
@@ -90,7 +91,8 @@ pub struct GameUiPlugin;
 
 impl Plugin for GameUiPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<DragState>()
+        app.add_plugins(crafting_panel::CraftingUiPlugin)
+            .init_resource::<DragState>()
             .init_resource::<HoveredSlot>()
             .init_resource::<InventoryScreenState>()
             .insert_resource(UiTheme::load())
