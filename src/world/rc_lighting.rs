@@ -512,8 +512,10 @@ fn extract_lighting_data(
                     }
                 };
                 input.density[idx] = liquid_opacity;
-                // Set albedo from liquid color so lava bounces orange
-                // light off nearby walls via the RC bounce pass.
+                // Set albedo from liquid color for non-emissive liquids only.
+                // Emissive liquids (lava) must NOT have albedo — it creates a
+                // feedback loop where emitted light bounces off its own albedo
+                // and amplifies deep into surrounding terrain.
                 input.albedo[idx] = if liquid_opacity > 0 {
                     let buf_x = idx % w_usize;
                     let buf_y = idx / w_usize;
@@ -525,6 +527,10 @@ fn extract_lighting_data(
                     world_map.chunk(cx2, cy2).map_or([0, 0, 0, 0], |chunk| {
                         let cell = chunk.liquid.get(lx2, ly2, world_config.chunk_size);
                         liquid_registry.get(cell.liquid_type).map_or([0, 0, 0, 0], |ldef| {
+                            // Skip albedo for emissive liquids to avoid feedback.
+                            if ldef.light_emission != [0, 0, 0] {
+                                return [0, 0, 0, 0];
+                            }
                             [
                                 (ldef.color[0] * 255.0) as u8,
                                 (ldef.color[1] * 255.0) as u8,
