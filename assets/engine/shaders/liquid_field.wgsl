@@ -61,11 +61,6 @@ const CAUSTIC_EDGE_HI: f32 = 0.35;
 // Width of the surface band where caustics are visible (in tile-fraction units)
 const SURFACE_BAND: f32 = 0.18;
 
-// Vertical blend zone height (tile fraction) for color blending at type
-// boundaries. When the tile above/below has a different dominant type,
-// the color smoothly transitions over this band.
-const VBLEND: f32 = 0.2;
-
 // ---------------------------------------------------------------------------
 // Uniforms and bindings
 // ---------------------------------------------------------------------------
@@ -152,18 +147,6 @@ fn dominant_channel(field: vec4<f32>) -> i32 {
         return 1;
     }
     return 2;
-}
-
-/// Get the base color for a field sample based on its dominant liquid type.
-fn get_field_color(field: vec4<f32>) -> vec4<f32> {
-    let ch = dominant_channel(field);
-    if ch == 1 {
-        return uniforms.lava_color;
-    }
-    if ch == 2 {
-        return uniforms.oil_color;
-    }
-    return uniforms.water_color;
 }
 
 /// Compute weighted color from per-type levels.
@@ -345,25 +328,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
     var base_rgb = level_weighted_color(water_lvl, lava_lvl, oil_lvl);
 
-    // Vertical blend zone: if the tile above has a different dominant
-    // type, blend toward its color near the top of this tile.
     let center_dom = dominant_channel(field_c);
-    let above_dom  = dominant_channel(field_above);
-    let below_dom  = dominant_channel(field_below);
-
-    if above_any && above_dom != center_dom && above_dom >= 0 {
-        let above_color = get_field_color(field_above).rgb;
-        // Blend factor: 1.0 at top of tile, 0.0 at VBLEND distance down
-        let vblend_factor = smoothstep(comb_lvl - VBLEND, comb_lvl, frac.y);
-        base_rgb = mix(base_rgb, above_color, vblend_factor * 0.5);
-    }
-
-    if below_any && below_dom != center_dom && below_dom >= 0 {
-        let below_color = get_field_color(field_below).rgb;
-        // Blend factor: 1.0 at bottom of tile, 0.0 at VBLEND distance up
-        let vblend_factor = smoothstep(VBLEND, 0.0, frac.y);
-        base_rgb = mix(base_rgb, below_color, vblend_factor * 0.5);
-    }
 
     // -----------------------------------------------------------------------
     // Step 6: Voronoi caustic highlights on the unified surface.
