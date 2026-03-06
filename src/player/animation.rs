@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::sprite_render::MeshMaterial2d;
 
-use crate::physics::{Grounded, Velocity};
+use crate::physics::{Grounded, Submerged, Velocity};
 use crate::player::{Player, PLAYER_SPRITE_SIZE};
 use crate::registry::loading::CharacterAnimConfig;
 use crate::registry::player::PlayerConfig;
@@ -31,6 +31,7 @@ pub enum AnimationKind {
     Idle,
     Running,
     Jumping,
+    Swimming,
 }
 
 /// Load character animation frames from CharacterAnimConfig (data-driven).
@@ -80,13 +81,18 @@ pub fn animate_player(
             &mut Transform,
             &Velocity,
             &Grounded,
+            Option<&Submerged>,
         ),
         With<Player>,
     >,
 ) {
-    for (mut anim, mat_handle, mut transform, velocity, grounded) in &mut query {
+    for (mut anim, mat_handle, mut transform, velocity, grounded, submerged) in &mut query {
         // Determine animation kind
-        let new_kind = if !grounded.0 {
+        let is_swimming = submerged.is_some_and(|s| s.is_swimming());
+
+        let new_kind = if is_swimming {
+            AnimationKind::Swimming
+        } else if !grounded.0 {
             AnimationKind::Jumping
         } else if velocity.x.abs() > VELOCITY_DEADZONE {
             AnimationKind::Running
@@ -123,7 +129,7 @@ pub fn animate_player(
 
         // Frame advancement depends on animation kind
         match anim.kind {
-            AnimationKind::Jumping => {
+            AnimationKind::Jumping | AnimationKind::Swimming => {
                 // Velocity-based frame selection (not timer-based).
                 // Rising (vel.y > 0): frames 0..half (first half)
                 // Falling (vel.y <= 0): frames half..end (second half)
@@ -169,5 +175,6 @@ fn frames_for_kind(animations: &CharacterAnimations, kind: AnimationKind) -> &[H
         AnimationKind::Idle => &animations.idle,
         AnimationKind::Running => &animations.running,
         AnimationKind::Jumping => &animations.jumping,
+        AnimationKind::Swimming => &animations.jumping, // placeholder until swimming sprites exist
     }
 }
