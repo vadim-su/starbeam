@@ -55,6 +55,7 @@ fn spawn_tile_drops(
             lightmap: fallback_lm.0.clone(),
             lightmap_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
             sprite_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
+            submerge_tint: Vec4::ZERO,
         });
 
         let vel = params.velocity();

@@ -486,62 +486,47 @@ fn extract_lighting_data(
                 let albedo = tile_registry.albedo(fg_id);
                 input.albedo[idx] = [albedo[0], albedo[1], albedo[2], 255];
             } else {
-                // Check for liquid light opacity in air tiles.
-                let liquid_opacity = {
-                    let buf_x = idx % w_usize;
-                    let buf_y = idx / w_usize;
-                    let tx = new_grid_origin.x + buf_x as i32;
-                    let ty = new_grid_origin.y + buf_y as i32;
-                    let wtx = world_config.wrap_tile_x(tx);
-                    if ty >= 0 && ty < height_tiles {
-                        let (cx, cy) = crate::world::chunk::tile_to_chunk(wtx, ty, world_config.chunk_size);
-                        let (lx, ly) = crate::world::chunk::tile_to_local(wtx, ty, world_config.chunk_size);
-                        world_map.chunk(cx, cy).map_or(0u8, |chunk| {
-                            let cell = chunk.liquid.get(lx, ly, world_config.chunk_size);
-                            if cell.is_empty() {
-                                0
+                // Check for liquid light opacity and albedo in air tiles.
+                // Buffer is Y-flipped: buf_y=0 is max_ty (top of grid).
+                let buf_x = idx % w_usize;
+                let buf_y = idx / w_usize;
+                let tx = new_grid_origin.x + buf_x as i32;
+                let ty = max_ty - buf_y as i32;
+                let wtx = world_config.wrap_tile_x(tx);
+
+                let (liquid_opacity, liquid_albedo) = if ty >= 0 && ty < height_tiles {
+                    let (cx, cy) = crate::world::chunk::tile_to_chunk(wtx, ty, world_config.chunk_size);
+                    let (lx, ly) = crate::world::chunk::tile_to_local(wtx, ty, world_config.chunk_size);
+                    world_map.chunk(cx, cy).map_or((0u8, [0u8; 4]), |chunk| {
+                        let cell = chunk.liquid.get(lx, ly, world_config.chunk_size);
+                        if cell.is_empty() {
+                            return (0, [0; 4]);
+                        }
+                        liquid_registry.get(cell.liquid_type).map_or((0, [0; 4]), |ldef| {
+                            let opacity = (ldef.light_opacity as f32 * cell.level.clamp(0.0, 1.0)) as u8;
+                            // Set albedo from liquid color for non-emissive liquids only.
+                            // Emissive liquids (lava) must NOT have albedo — it creates a
+                            // feedback loop where emitted light bounces off its own albedo
+                            // and amplifies deep into surrounding terrain.
+                            let albedo = if opacity > 0 && ldef.light_emission == [0, 0, 0] {
+                                [
+                                    (ldef.color[0] * 255.0) as u8,
+                                    (ldef.color[1] * 255.0) as u8,
+                                    (ldef.color[2] * 255.0) as u8,
+                                    255,
+                                ]
                             } else {
-                                liquid_registry
-                                    .get(cell.liquid_type)
-                                    .map(|d| (d.light_opacity as f32 * cell.level.clamp(0.0, 1.0)) as u8)
-                                    .unwrap_or(0)
-                            }
-                        })
-                    } else {
-                        0
-                    }
-                };
-                input.density[idx] = liquid_opacity;
-                // Set albedo from liquid color for non-emissive liquids only.
-                // Emissive liquids (lava) must NOT have albedo — it creates a
-                // feedback loop where emitted light bounces off its own albedo
-                // and amplifies deep into surrounding terrain.
-                input.albedo[idx] = if liquid_opacity > 0 {
-                    let buf_x = idx % w_usize;
-                    let buf_y = idx / w_usize;
-                    let tx = new_grid_origin.x + buf_x as i32;
-                    let ty = new_grid_origin.y + buf_y as i32;
-                    let wtx = world_config.wrap_tile_x(tx);
-                    let (cx2, cy2) = crate::world::chunk::tile_to_chunk(wtx, ty, world_config.chunk_size);
-                    let (lx2, ly2) = crate::world::chunk::tile_to_local(wtx, ty, world_config.chunk_size);
-                    world_map.chunk(cx2, cy2).map_or([0, 0, 0, 0], |chunk| {
-                        let cell = chunk.liquid.get(lx2, ly2, world_config.chunk_size);
-                        liquid_registry.get(cell.liquid_type).map_or([0, 0, 0, 0], |ldef| {
-                            // Skip albedo for emissive liquids to avoid feedback.
-                            if ldef.light_emission != [0, 0, 0] {
-                                return [0, 0, 0, 0];
-                            }
-                            [
-                                (ldef.color[0] * 255.0) as u8,
-                                (ldef.color[1] * 255.0) as u8,
-                                (ldef.color[2] * 255.0) as u8,
-                                255,
-                            ]
+                                [0; 4]
+                            };
+                            (opacity, albedo)
                         })
                     })
                 } else {
-                    [0, 0, 0, 0]
+                    (0, [0; 4])
                 };
+
+                input.density[idx] = liquid_opacity;
+                input.albedo[idx] = liquid_albedo;
             }
         }
 

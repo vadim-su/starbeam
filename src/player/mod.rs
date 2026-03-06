@@ -6,6 +6,7 @@ use bevy::sprite_render::MeshMaterial2d;
 
 use crate::cosmos::warp::NeedsRespawn;
 use crate::inventory::{Hotbar, Inventory};
+use crate::liquid::registry::LiquidRegistry;
 use crate::physics::{Gravity, Submerged, TileCollider};
 use crate::registry::biome::PlanetConfig;
 use crate::registry::player::PlayerConfig;
@@ -44,7 +45,8 @@ impl Plugin for PlayerPlugin {
             (movement::player_input, animation::animate_player)
                 .chain()
                 .in_set(GameSet::Physics),
-        );
+        )
+        .add_systems(Update, update_submerge_tint.in_set(GameSet::Physics));
     }
 }
 
@@ -88,6 +90,7 @@ fn spawn_player(
         lightmap: fallback_lm.0.clone(),
         lightmap_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
         sprite_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
+        submerge_tint: Vec4::ZERO,
     });
 
     commands.spawn((
@@ -167,4 +170,35 @@ pub(crate) fn respawn_player_on_warp(
         "Player respawned at tile ({}, {}) → pixel ({:.0}, {:.0})",
         spawn_tile_x, surface_y, spawn_pixel_x, spawn_pixel_y
     );
+}
+
+/// Update the player sprite's submersion tint based on the `Submerged` component.
+/// Applies a multiplicative hue shift simulating view through liquid.
+fn update_submerge_tint(
+    liquid_registry: Res<LiquidRegistry>,
+    mut materials: ResMut<Assets<LitSpriteMaterial>>,
+    query: Query<(&Submerged, &MeshMaterial2d<LitSpriteMaterial>), With<Player>>,
+) {
+    for (sub, mat_handle) in &query {
+        let Some(mat) = materials.get_mut(&mat_handle.0) else {
+            continue;
+        };
+        if sub.ratio < 0.01 || sub.liquid_id.is_none() {
+            mat.submerge_tint = Vec4::ZERO;
+            continue;
+        }
+        let color = liquid_registry
+            .get(sub.liquid_id)
+            .map(|d| d.color)
+            .unwrap_or([0.0; 4]);
+        // Normalize liquid color to unit brightness so the tint shifts hue
+        // without overall darkening. E.g. water (0.2, 0.4, 0.8) → (0.25, 0.5, 1.0).
+        let max_c = color[0].max(color[1]).max(color[2]).max(0.01);
+        let tint_r = color[0] / max_c;
+        let tint_g = color[1] / max_c;
+        let tint_b = color[2] / max_c;
+        // Strength scales with submersion ratio. Capped to keep the effect subtle.
+        let strength = (sub.ratio * color[3]).min(0.5);
+        mat.submerge_tint = Vec4::new(tint_r, tint_g, tint_b, strength);
+    }
 }

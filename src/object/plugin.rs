@@ -81,6 +81,7 @@ fn load_object_sprites(
             lightmap: fallback_lm.0.clone(),
             lightmap_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
             sprite_uv_rect: Vec4::new(scale_x, scale_y, 0.0, 0.0),
+            submerge_tint: Vec4::ZERO,
         });
 
         materials.insert(id, material.clone());

@@ -505,7 +505,7 @@ pub fn spawn_chunk(
         ))
         .id();
 
-    // Build and spawn liquid mesh entity (z=-0.5, between bg and fg)
+    // Build and spawn liquid mesh entity (z=2.0, above player/objects like Terraria)
     let liquid_mesh = build_liquid_mesh(
         &chunk_data.liquid.cells,
         display_chunk_x,
@@ -526,7 +526,7 @@ pub fn spawn_chunk(
                 LiquidMeshEntity,
                 Mesh2d(liquid_handle),
                 MeshMaterial2d(liq_mat.0.clone()),
-                Transform::from_translation(Vec3::new(0.0, 0.0, -0.5)),
+                Transform::from_translation(Vec3::new(0.0, 0.0, 2.0)),
                 Visibility::default(),
             ))
             .id()
@@ -540,7 +540,7 @@ pub fn spawn_chunk(
                     y: chunk_y,
                 },
                 LiquidMeshEntity,
-                Transform::from_translation(Vec3::new(0.0, 0.0, -0.5)),
+                Transform::from_translation(Vec3::new(0.0, 0.0, 2.0)),
                 Visibility::Hidden,
             ))
             .id()

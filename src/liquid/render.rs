@@ -40,6 +40,10 @@ impl Material2d for LiquidMaterial {
         "engine/shaders/liquid.wgsl".into()
     }
 
+    fn alpha_mode(&self) -> bevy::sprite_render::AlphaMode2d {
+        bevy::sprite_render::AlphaMode2d::Blend
+    }
+
     fn specialize(
         descriptor: &mut RenderPipelineDescriptor,
         layout: &MeshVertexBufferLayoutRef,
@@ -116,6 +120,10 @@ impl Material2d for LiquidFieldMaterial {
 
     fn fragment_shader() -> ShaderRef {
         "engine/shaders/liquid_field.wgsl".into()
+    }
+
+    fn alpha_mode(&self) -> bevy::sprite_render::AlphaMode2d {
+        bevy::sprite_render::AlphaMode2d::Blend
     }
 
     fn specialize(
@@ -377,7 +385,7 @@ pub fn init_liquid_material(
     // --- Scalar-field material + quad entity ---
     let field_mat_handle = field_materials.add(LiquidFieldMaterial {
         uniforms: LiquidFieldUniforms {
-            water_color: Vec4::new(0.2, 0.4, 0.8, 0.6),
+            water_color: Vec4::new(0.2, 0.4, 0.8, 0.35),
             lava_color: Vec4::new(1.0, 0.3, 0.0, 1.0),
             oil_color: Vec4::new(0.15, 0.1, 0.05, 0.85),
             threshold: 0.33,
@@ -401,7 +409,7 @@ pub fn init_liquid_material(
         LiquidFieldQuad,
         Mesh2d(quad_mesh),
         MeshMaterial2d(field_mat_handle),
-        Transform::from_translation(Vec3::new(0.0, 0.0, -0.5)),
+        Transform::from_translation(Vec3::new(0.0, 0.0, 2.0)),
         Visibility::default(),
     ));
 }
@@ -760,7 +768,7 @@ pub fn update_liquid_field_quad(
     for (mut mesh_handle, mut transform) in &mut quad_q {
         *mesh_handle = Mesh2d(meshes.add(quad_mesh));
         // Center the quad over the field area.
-        transform.translation = Vec3::new(origin_x + world_w * 0.5, origin_y + world_h * 0.5, -0.5);
+        transform.translation = Vec3::new(origin_x + world_w * 0.5, origin_y + world_h * 0.5, 2.0);
     }
 }
 

@@ -387,6 +387,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // -----------------------------------------------------------------------
     // Step 8: Apply lightmap.
     // -----------------------------------------------------------------------
+    // Liquid renders as a transparent overlay above all already-lit entities
+    // (z=2.0, Terraria-style). The overlay should be darkened by the lightmap
+    // proportionally — this ensures the water tint and the objects behind it
+    // share the same brightness, keeping the character visible through water
+    // at any lighting level. Without this, a high floor would make the
+    // overlay glow relative to darkened objects behind it, hiding them.
 
     let lm_uv = in.world_pos * lm_xform.scale + lm_xform.offset;
     let light = textureSample(lightmap_texture, lightmap_sampler, lm_uv).rgb;

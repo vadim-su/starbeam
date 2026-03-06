@@ -28,6 +28,10 @@ pub struct LitSpriteMaterial {
     /// offset = frame position in normalized coords.
     #[uniform(5)]
     pub sprite_uv_rect: Vec4,
+    /// Submersion tint: (r, g, b, strength). When strength > 0, the sprite is
+    /// tinted toward (r,g,b) to simulate being underwater. Default (0,0,0,0) = no tint.
+    #[uniform(6)]
+    pub submerge_tint: Vec4,
 }
 
 impl Material2d for LitSpriteMaterial {

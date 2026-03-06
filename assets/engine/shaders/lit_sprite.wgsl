@@ -48,6 +48,12 @@ struct SpriteUvRect {
 
 @group(2) @binding(5) var<uniform> sprite_rect: SpriteUvRect;
 
+// Submersion tint: (r, g, b, strength).
+// When strength > 0, simulates looking through liquid: applies a subtle
+// multiplicative hue shift that matches the liquid color without killing
+// brightness. Think of it as looking through tinted glass.
+@group(2) @binding(6) var<uniform> submerge_tint: vec4<f32>;
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // Handle flipped UVs from negative Transform.scale.x (flip_x).
@@ -65,5 +71,16 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let lightmap_uv = in.world_pos * lm_xform.scale + lm_xform.offset;
     let light = textureSample(lightmap_texture, lightmap_sampler, lightmap_uv).rgb;
 
-    return vec4<f32>(color.rgb * light, color.a);
+    var lit = color.rgb * light;
+
+    // Submersion: multiplicative tint simulating view through liquid.
+    // The tint color is normalized (max channel = 1.0), so blue channel
+    // stays at full strength while red/green are reduced — giving a hue
+    // shift without overall darkening.
+    if submerge_tint.w > 0.0 {
+        let tint = mix(vec3<f32>(1.0), submerge_tint.xyz, submerge_tint.w);
+        lit = lit * tint;
+    }
+
+    return vec4<f32>(lit, color.a);
 }
