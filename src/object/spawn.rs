@@ -2,9 +2,10 @@ use bevy::prelude::*;
 use bevy::sprite_render::MeshMaterial2d;
 use rand::Rng;
 
-use super::definition::ObjectId;
+use super::definition::{ObjectId, ObjectType};
 use super::plugin::{ObjectAnimation, ObjectSpriteMaterials};
 use super::registry::ObjectRegistry;
+use crate::crafting::CraftingStation;
 use crate::world::chunk::WorldMap;
 use crate::world::lit_sprite::{LitSprite, LitSpriteMaterial, SharedLitQuad};
 
@@ -82,6 +83,13 @@ pub fn spawn_objects_for_chunk(
                 )),
             Visibility::default(),
         ));
+
+        if let ObjectType::CraftingStation { ref station_id } = def.object_type {
+            entity_cmd.insert(CraftingStation {
+                station_id: station_id.clone(),
+                active_craft: None,
+            });
+        }
 
         if let (Some(sprites), Some(q)) = (object_sprites, quad) {
             if let Some(template_handle) = sprites.materials.get(&obj.object_id) {
