@@ -301,83 +301,125 @@ pub fn step(grid: &mut SimGrid, densities: &[f32], viscosities: &[f32], _dt: f32
         }
     }
 
-    // -- Horizontal displacement: smooth staircase boundaries ---------------
-    // When a lighter liquid is horizontally adjacent to a denser liquid,
-    // push a fraction of the lighter liquid upward if there is space above.
-    // This smooths the stepped boundary that forms when liquids meet.
+    // -- Horizontal displacement (Archimedes): smooth staircase boundaries --
+    // When a lighter liquid is horizontally adjacent to a denser liquid:
+    //   1. Push lighter liquid upward (buoyancy)
+    //   2. Pull denser liquid into the vacated space (cross-displacement)
+    // This prevents lighter liquids from forming structural barriers.
+    //
+    // Process each cell checking both left and right neighbors.
     for y in 0..h {
-        // Only check rightward neighbor to avoid double-processing pairs.
-        for x in 0..(w.saturating_sub(1)) {
-            let li = grid.idx(x, y);
-            let ri = grid.idx(x + 1, y);
-
-            if grid.solid[li] || grid.solid[ri] {
+        for x in 0..w {
+            let ci = grid.idx(x, y);
+            if grid.solid[ci] {
+                continue;
+            }
+            let cell = grid.cells[ci];
+            if cell.is_empty() {
                 continue;
             }
 
-            let left = grid.cells[li];
-            let right = grid.cells[ri];
-
-            if left.is_empty() || right.is_empty() {
-                continue;
-            }
-            if left.liquid_type == right.liquid_type {
-                continue;
-            }
-
-            let d_left = densities
-                .get(left.liquid_type.0 as usize)
-                .copied()
-                .unwrap_or(1.0);
-            let d_right = densities
-                .get(right.liquid_type.0 as usize)
+            let d_cell = densities
+                .get(cell.liquid_type.0 as usize)
                 .copied()
                 .unwrap_or(1.0);
 
-            // Determine which cell holds the lighter liquid.
-            let (lighter_idx, lighter_cell, _heavier_idx, heavier_cell) = if d_left < d_right {
-                (li, left, ri, right)
-            } else if d_right < d_left {
-                (ri, right, li, left)
-            } else {
-                continue; // same density, nothing to do
-            };
+            // Check both horizontal neighbors.
+            let neighbors: [(usize, usize); 2] = [
+                (x.wrapping_sub(1), y), // left
+                (x + 1, y),             // right
+            ];
 
-            // Can the lighter liquid be pushed up?
-            let lighter_x = lighter_idx % w;
-            if y + 1 >= h {
-                continue;
-            }
-            let ai = grid.idx(lighter_x, y + 1);
-            if grid.solid[ai] {
-                continue;
-            }
-            let above = grid.cells[ai];
-            if !above.is_empty() && above.liquid_type != lighter_cell.liquid_type {
-                continue; // blocked by a third liquid type
-            }
+            for &(nx, ny) in &neighbors {
+                if nx >= w || ny >= h {
+                    continue;
+                }
+                let ni = grid.idx(nx, ny);
+                if grid.solid[ni] {
+                    continue;
+                }
+                let neighbor = grid.cells[ni];
+                if neighbor.is_empty() || neighbor.liquid_type == cell.liquid_type {
+                    continue;
+                }
 
-            let amount = lighter_cell.level.min(heavier_cell.level) * DISPLACEMENT_RATE;
-            if amount < MIN_FLOW {
-                continue;
-            }
+                let d_neighbor = densities
+                    .get(neighbor.liquid_type.0 as usize)
+                    .copied()
+                    .unwrap_or(1.0);
 
-            // Push lighter liquid upward.
-            let new_lighter_level = lighter_cell.level - amount;
-            if new_lighter_level < MIN_LEVEL {
-                grid.cells[lighter_idx] = LiquidCell::EMPTY;
-            } else {
-                grid.cells[lighter_idx].level = new_lighter_level;
-            }
+                // We are the lighter liquid; neighbor is denser.
+                if d_cell >= d_neighbor {
+                    continue;
+                }
 
-            // Add to cell above.
-            if above.is_empty() {
-                grid.cells[ai] = LiquidCell {
-                    liquid_type: lighter_cell.liquid_type,
-                    level: amount,
-                };
-            } else {
-                grid.cells[ai].level = (above.level + amount).min(MAX_LEVEL + MAX_COMPRESSION);
+                // Reload cell state (may have been modified by a previous neighbor).
+                let cell_now = grid.cells[ci];
+                if cell_now.is_empty() {
+                    break;
+                }
+                let neighbor_now = grid.cells[ni];
+
+                // Can we push ourselves (lighter) upward?
+                if y + 1 >= h {
+                    continue;
+                }
+                let ai = grid.idx(x, y + 1);
+                if grid.solid[ai] {
+                    continue;
+                }
+                let above = grid.cells[ai];
+                if !above.is_empty() && above.liquid_type != cell_now.liquid_type {
+                    continue; // blocked by a third liquid type
+                }
+
+                let amount = cell_now.level.min(neighbor_now.level) * DISPLACEMENT_RATE;
+                if amount < MIN_FLOW {
+                    continue;
+                }
+
+                // 1. Push lighter liquid (us) upward.
+                let new_level = cell_now.level - amount;
+                if new_level < MIN_LEVEL {
+                    grid.cells[ci] = LiquidCell::EMPTY;
+                } else {
+                    grid.cells[ci].level = new_level;
+                }
+
+                if above.is_empty() {
+                    grid.cells[ai] = LiquidCell {
+                        liquid_type: cell_now.liquid_type,
+                        level: amount,
+                    };
+                } else {
+                    grid.cells[ai].level = (above.level + amount).min(MAX_LEVEL + MAX_COMPRESSION);
+                }
+
+                // 2. Cross-displacement: pull denser liquid into our vacated space.
+                //    This simulates denser liquid flowing underneath the lighter one.
+                let cross_amount = amount.min(neighbor_now.level);
+                if cross_amount >= MIN_FLOW {
+                    let new_neighbor_level = neighbor_now.level - cross_amount;
+                    if new_neighbor_level < MIN_LEVEL {
+                        grid.cells[ni] = LiquidCell::EMPTY;
+                    } else {
+                        grid.cells[ni].level = new_neighbor_level;
+                    }
+
+                    // Add denser liquid to our cell (which just lost lighter liquid).
+                    let our_cell = grid.cells[ci];
+                    if our_cell.is_empty() {
+                        grid.cells[ci] = LiquidCell {
+                            liquid_type: neighbor_now.liquid_type,
+                            level: cross_amount,
+                        };
+                    } else if our_cell.liquid_type == neighbor_now.liquid_type {
+                        grid.cells[ci].level =
+                            (our_cell.level + cross_amount).min(MAX_LEVEL + MAX_COMPRESSION);
+                    }
+                    // If our cell still has lighter liquid (partial displacement),
+                    // skip cross — can't mix types in one cell.
+                }
             }
         }
     }

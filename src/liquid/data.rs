@@ -49,7 +49,8 @@ pub const MAX_SPEED: f32 = 4.0;
 pub const FLOW_SPEED: f32 = 1.0;
 /// Fraction of lighter liquid displaced upward per tick when adjacent to
 /// a denser liquid horizontally. Smooths staircase boundaries.
-pub const DISPLACEMENT_RATE: f32 = 0.15;
+/// Higher values prevent lighter liquids from forming structural barriers.
+pub const DISPLACEMENT_RATE: f32 = 0.4;
 
 // ---------------------------------------------------------------------------
 // Core algorithm functions (shared by system.rs and simulation.rs)
