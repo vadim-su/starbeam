@@ -488,7 +488,30 @@ fn run_reactions(
             if let Some(reaction) =
                 liquid_registry.get_reaction(cell.liquid_type, neighbor.liquid_type)
             {
-                // Produce tile at the reaction site (the neighbor cell).
+                // Gradual consumption: drain neighbor level over time instead
+                // of instantly destroying the cell.
+                if let Some(rate) = reaction.consume_rate {
+                    let new_level = neighbor.level - rate;
+                    if new_level < MIN_LEVEL {
+                        set_liquid_in_map(world_map, nx, ny, LiquidCell::EMPTY, config);
+                        consumed.insert((nx, ny));
+                    } else {
+                        set_liquid_in_map(
+                            world_map,
+                            nx,
+                            ny,
+                            LiquidCell {
+                                liquid_type: neighbor.liquid_type,
+                                level: new_level,
+                            },
+                            config,
+                        );
+                    }
+                    mark_dirty(nx, ny, config, dirty_chunks, dirty_liquid, sleep);
+                    continue;
+                }
+
+                // Instant reaction: produce tile and/or consume cells.
                 if let Some(tile_name) = &reaction.produce_tile {
                     let produced_tile = tile_registry
                         .try_by_name(tile_name)

@@ -9,6 +9,11 @@ pub struct LiquidReaction {
     pub other: String,
     pub produce_tile: Option<String>,
     pub consume_both: bool,
+    /// When set, the neighbor liquid is consumed gradually at this rate
+    /// (level per tick) instead of being destroyed instantly. The reaction
+    /// triggers every tick while the two liquids are adjacent.
+    #[serde(default)]
+    pub consume_rate: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

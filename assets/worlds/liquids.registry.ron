@@ -23,7 +23,7 @@
         swim_speed_factor: 0.2,
         reactions: [
             (other: "water", produce_tile: Some("stone"), consume_both: true),
-            (other: "oil", produce_tile: None, consume_both: false),
+            (other: "oil", produce_tile: None, consume_both: false, consume_rate: Some(0.15)),
         ],
     ),
     (
