@@ -890,4 +890,95 @@ mod tests {
             "Y should remain at rest while airborne"
         );
     }
+
+    // -----------------------------------------------------------------------
+    // Submersion / swimming tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn submerged_defaults_to_zero() {
+        let sub = Submerged::default();
+        assert_eq!(sub.ratio, 0.0);
+        assert!(!sub.is_swimming());
+    }
+
+    #[test]
+    fn submerged_swim_threshold() {
+        let mut sub = Submerged::default();
+        sub.ratio = Submerged::SWIM_THRESHOLD - 0.01;
+        assert!(!sub.is_swimming());
+        sub.ratio = Submerged::SWIM_THRESHOLD;
+        assert!(sub.is_swimming());
+        sub.ratio = 1.0;
+        assert!(sub.is_swimming());
+    }
+
+    #[test]
+    fn gravity_reduced_while_swimming() {
+        let sub = Submerged {
+            ratio: 0.5,
+            liquid_id: LiquidId(1),
+            swim_speed_factor: 0.5,
+        };
+        let swim_gravity_factor = 0.3_f32;
+        let gravity = 500.0_f32;
+        let effective = gravity * swim_gravity_factor;
+        assert!(sub.is_swimming());
+        assert!((effective - 150.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn swim_drag_is_fps_independent() {
+        let swim_drag = 0.15_f32;
+        let initial_vel = 100.0_f32;
+
+        // 60 FPS: 60 steps of dt=1/60
+        let mut vel_60 = initial_vel;
+        for _ in 0..60 {
+            vel_60 *= swim_drag.powf(1.0 / 60.0);
+        }
+
+        // 30 FPS: 30 steps of dt=1/30
+        let mut vel_30 = initial_vel;
+        for _ in 0..30 {
+            vel_30 *= swim_drag.powf(1.0 / 30.0);
+        }
+
+        // Both should converge to: initial * drag^1.0
+        let expected = initial_vel * swim_drag.powf(1.0);
+        assert!(
+            (vel_60 - expected).abs() < 0.1,
+            "60 FPS result {} should be close to {}",
+            vel_60,
+            expected
+        );
+        assert!(
+            (vel_30 - expected).abs() < 0.1,
+            "30 FPS result {} should be close to {}",
+            vel_30,
+            expected
+        );
+    }
+
+    #[test]
+    fn gravity_unchanged_without_submerged() {
+        // Entity without Submerged component should get full gravity
+        let mut app = fixtures::test_app();
+        app.add_systems(Update, apply_gravity);
+
+        app.world_mut()
+            .spawn((Velocity { x: 0.0, y: 0.0 }, Gravity(980.0)));
+
+        app.update();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        app.update();
+
+        let mut query = app.world_mut().query::<&Velocity>();
+        let vel = query.iter(app.world()).next().unwrap();
+        assert!(
+            vel.y < 0.0,
+            "gravity should pull entity down without Submerged, got {}",
+            vel.y
+        );
+    }
 }
