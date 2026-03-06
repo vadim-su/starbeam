@@ -27,6 +27,10 @@ const MIN_LEVEL: f32 = 0.004;
 // Minimum neighbor level to participate in horizontal blending
 const MIN_NEIGHBOR_LEVEL: f32 = 0.01;
 
+// Minimum level for isolated tiles (no liquid neighbors) to be visible.
+// Hides tiny scattered drops that look ugly as individual pixels.
+const ISOLATED_MIN_LEVEL: f32 = 0.08;
+
 // Smoothstep half-width for the surface edge transition
 const SURFACE_EDGE: f32 = 0.04;
 
@@ -191,9 +195,19 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let field_l     = load_field(px - 1, py,     tex_max);  // left neighbor
     let field_r     = load_field(px + 1, py,     tex_max);  // right neighbor
     let field_above = load_field(px,     py - 1, tex_max);  // tile above in world = py-1 in tex
+    let field_below = load_field(px,     py + 1, tex_max);  // tile below in world = py+1 in tex
 
     // Early discard: if center tile has no liquid, nothing to draw.
-    if max_level(field_c) < MIN_LEVEL {
+    let center_lvl = max_level(field_c);
+    if center_lvl < MIN_LEVEL {
+        discard;
+    }
+
+    // Discard isolated tiny drops — tiles with no liquid neighbors and
+    // very low level just produce ugly scattered pixels.
+    let any_neighbor = max(max_level(field_l), max(max_level(field_r),
+                       max(max_level(field_above), max_level(field_below))));
+    if any_neighbor < MIN_NEIGHBOR_LEVEL && center_lvl < ISOLATED_MIN_LEVEL {
         discard;
     }
 
@@ -232,55 +246,129 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let oil_lvl   = field_c.b * bc + field_l.b * bl + field_r.b * br;
 
     // -----------------------------------------------------------------------
-    // Step 4: Submerged vs. surface detection.
+    // Step 4: Fill computation with per-edge rounding.
     //
-    // A tile is "submerged" if the tile directly above it also contains the
-    // same liquid type. Submerged tiles are filled completely (fill = 1.0)
-    // with NO smoothstep height test — this eliminates horizontal stripe
-    // artifacts at every tile boundary within a water body.
+    // Every non-submerged tile gets rounded at each exposed edge (where the
+    // neighbor has no liquid of that type). This handles all cases uniformly:
+    //   - Isolated drop: rounded on all 4 sides
+    //   - Falling stream: rounded left+right, connected top+bottom
+    //   - Spreading blob: rounded on whichever sides lack neighbors
+    //   - Pool surface: rounded only at top (via water level smoothstep)
+    //   - Submerged interior: fill = 1.0, no rounding
     // -----------------------------------------------------------------------
 
     let above_water = field_above.r > MIN_NEIGHBOR_LEVEL;
     let above_lava  = field_above.g > MIN_NEIGHBOR_LEVEL;
     let above_oil   = field_above.b > MIN_NEIGHBOR_LEVEL;
 
-    // Surface tiles: smooth edge at the liquid level height.
-    // (1 - smoothstep) because frac.y=0 is the bottom, frac.y=1 is top,
-    // and we want fill=1 below the level and fill=0 above it.
-    let water_surface = (1.0 - smoothstep(water_lvl - SURFACE_EDGE, water_lvl + SURFACE_EDGE, frac.y))
-                      * step(MIN_NEIGHBOR_LEVEL, field_c.r);
-    let lava_surface  = (1.0 - smoothstep(lava_lvl  - SURFACE_EDGE, lava_lvl  + SURFACE_EDGE, frac.y))
-                      * step(MIN_NEIGHBOR_LEVEL, field_c.g);
-    let oil_surface   = (1.0 - smoothstep(oil_lvl   - SURFACE_EDGE, oil_lvl   + SURFACE_EDGE, frac.y))
-                      * step(MIN_NEIGHBOR_LEVEL, field_c.b);
+    let below_water = field_below.r > MIN_NEIGHBOR_LEVEL;
+    let below_lava  = field_below.g > MIN_NEIGHBOR_LEVEL;
+    let below_oil   = field_below.b > MIN_NEIGHBOR_LEVEL;
 
-    // Final fill: submerged = 1.0, surface = height-tested value.
-    let water_fill = select(water_surface, 1.0, above_water && field_c.r > MIN_NEIGHBOR_LEVEL);
-    let lava_fill  = select(lava_surface,  1.0, above_lava  && field_c.g > MIN_NEIGHBOR_LEVEL);
-    let oil_fill   = select(oil_surface,   1.0, above_oil   && field_c.b > MIN_NEIGHBOR_LEVEL);
+    let left_water = field_l.r > MIN_NEIGHBOR_LEVEL;
+    let left_lava  = field_l.g > MIN_NEIGHBOR_LEVEL;
+    let left_oil   = field_l.b > MIN_NEIGHBOR_LEVEL;
+
+    let right_water = field_r.r > MIN_NEIGHBOR_LEVEL;
+    let right_lava  = field_r.g > MIN_NEIGHBOR_LEVEL;
+    let right_oil   = field_r.b > MIN_NEIGHBOR_LEVEL;
+
+    // --- Edge rounding masks ---
+    // Each exposed edge fades the fill smoothly near that edge.
+    // EDGE_ROUND controls the rounding depth for left/right edges.
+    // Bottom rounding scales with water level — low-level tiles get
+    // heavily rounded bottoms so thin surface splashes look blobby.
+    let EDGE_ROUND = 0.15;
+
+    // Water edge masks
+    var w_mask = step(MIN_NEIGHBOR_LEVEL, field_c.r);
+    // Top: use water level smoothstep if no water above
+    if !above_water {
+        w_mask *= 1.0 - smoothstep(water_lvl - SURFACE_EDGE, water_lvl + SURFACE_EDGE, frac.y);
+    }
+    // Bottom: round only when falling (no liquid below AND missing at least
+    // one side neighbor). Pool bottoms sitting on solid ground keep sharp edges.
+    if !below_water && (!left_water || !right_water) {
+        let w_bot_round = max(EDGE_ROUND, water_lvl * 0.5);
+        w_mask *= smoothstep(0.0, w_bot_round, frac.y);
+    }
+    // Left: round if no water to the left
+    if !left_water {
+        w_mask *= smoothstep(0.0, EDGE_ROUND, frac.x);
+    }
+    // Right: round if no water to the right
+    if !right_water {
+        w_mask *= smoothstep(1.0, 1.0 - EDGE_ROUND, frac.x);
+    }
+
+    // Lava edge masks
+    var l_mask = step(MIN_NEIGHBOR_LEVEL, field_c.g);
+    if !above_lava {
+        l_mask *= 1.0 - smoothstep(lava_lvl - SURFACE_EDGE, lava_lvl + SURFACE_EDGE, frac.y);
+    }
+    if !below_lava && (!left_lava || !right_lava) {
+        let l_bot_round = max(EDGE_ROUND, lava_lvl * 0.5);
+        l_mask *= smoothstep(0.0, l_bot_round, frac.y);
+    }
+    if !left_lava {
+        l_mask *= smoothstep(0.0, EDGE_ROUND, frac.x);
+    }
+    if !right_lava {
+        l_mask *= smoothstep(1.0, 1.0 - EDGE_ROUND, frac.x);
+    }
+
+    // Oil edge masks
+    var o_mask = step(MIN_NEIGHBOR_LEVEL, field_c.b);
+    if !above_oil {
+        o_mask *= 1.0 - smoothstep(oil_lvl - SURFACE_EDGE, oil_lvl + SURFACE_EDGE, frac.y);
+    }
+    if !below_oil && (!left_oil || !right_oil) {
+        let o_bot_round = max(EDGE_ROUND, oil_lvl * 0.5);
+        o_mask *= smoothstep(0.0, o_bot_round, frac.y);
+    }
+    if !left_oil {
+        o_mask *= smoothstep(0.0, EDGE_ROUND, frac.x);
+    }
+    if !right_oil {
+        o_mask *= smoothstep(1.0, 1.0 - EDGE_ROUND, frac.x);
+    }
+
+    // --- Final fill ---
+    // Always use edge-rounded mask. When a neighbor exists on that side,
+    // the corresponding if-block above simply doesn't apply its rounding,
+    // so the mask naturally stays 1.0 on connected edges.
+    let water_fill = w_mask;
+    let lava_fill  = l_mask;
+    let oil_fill   = o_mask;
 
     // -----------------------------------------------------------------------
     // Step 5: Voronoi caustic highlights near the liquid surface.
+    //
+    // Caustics only on pool surface tiles — tiles that have at least one
+    // horizontal neighbor (part of a pool body), are not submerged, and
+    // are not fully isolated drops.
     // -----------------------------------------------------------------------
 
     let vor = voronoi(in.world_pos * VORONOI_FREQ, uniforms.time);
     let caustic = smoothstep(CAUSTIC_EDGE_LO, CAUSTIC_EDGE_HI, vor.y - vor.x) * CAUSTIC_INTENSITY;
 
-    // Surface proximity band — caustics only appear near the surface line
-    // and ONLY on surface tiles (not submerged). This prevents horizontal
-    // Voronoi stripes repeating at every tile boundary within a water body.
-    let is_water_surface = select(1.0, 0.0, above_water);
-    let is_lava_surface  = select(1.0, 0.0, above_lava);
+    // Caustic only on pool surfaces: must have at least one side neighbor
+    // and must not be submerged.
+    let water_has_side = left_water || right_water;
+    let lava_has_side  = left_lava  || right_lava;
+
+    let is_water_pool_surface = select(1.0, 0.0, above_water || !water_has_side);
+    let is_lava_pool_surface  = select(1.0, 0.0, above_lava  || !lava_has_side);
 
     let dist_to_water_surface = water_lvl - frac.y;
     let water_caustic_mask = smoothstep(SURFACE_BAND, 0.0, dist_to_water_surface)
                            * smoothstep(-SURFACE_EDGE, SURFACE_EDGE * 2.0, dist_to_water_surface)
-                           * is_water_surface;
+                           * is_water_pool_surface;
 
     let dist_to_lava_surface = lava_lvl - frac.y;
     let lava_caustic_mask = smoothstep(SURFACE_BAND, 0.0, dist_to_lava_surface)
                           * smoothstep(-SURFACE_EDGE, SURFACE_EDGE * 2.0, dist_to_lava_surface)
-                          * is_lava_surface;
+                          * is_lava_pool_surface;
 
     // -----------------------------------------------------------------------
     // Step 6: Composite liquid colors.

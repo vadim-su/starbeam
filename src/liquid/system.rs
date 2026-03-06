@@ -322,11 +322,9 @@ fn run_liquid_step(
                         0.0
                     };
 
-                    // When cell below can still accept liquid, dampen (but
-                    // don't suppress) horizontal flow to prioritize falling.
-                    // 0.35 lets water spread sideways while still preferring
-                    // to fall, reducing surface "bumps" during settling.
-                    let h_damp = if below_open { 0.35 } else { 1.0 };
+                    // When cell below can accept liquid, fully suppress
+                    // horizontal flow so falling water drops straight down.
+                    let h_damp = if below_open { 0.0 } else { 1.0 };
                     (ledge_bonus + surface_bonus, h_damp)
                 }
             };
@@ -646,7 +644,11 @@ fn run_liquid_step(
     // Only absorb a droplet if a neighbor has *significantly* more liquid
     // (at least 3× the droplet's level). This prevents chain-reaction
     // evaporation on staircases where every cell is small.
-    // Truly isolated tiny drops (no same-type neighbor at all) evaporate.
+    //
+    // NOTE: We do NOT evaporate isolated drops — that destroys volume.
+    // Instead, tiny isolated drops are left alone; the shader hides them
+    // below ISOLATED_MIN_LEVEL, and normal flow will eventually merge them
+    // or they'll settle on a surface.
     {
         const TENSION_THRESHOLD: f32 = 0.08;
         const NEIGHBOR_RATIO: f32 = 3.0;
@@ -657,9 +659,8 @@ fn run_liquid_step(
                 continue;
             }
 
-            // Count same-type neighbors and find the largest one.
+            // Find the largest same-type neighbor.
             let mut best_neighbor: Option<(i32, i32, f32)> = None;
-            let mut same_type_neighbors = 0u32;
             for &(dx, dy) in &[(0i32, -1i32), (0, 1), (-1, 0), (1, 0)] {
                 let nx = tx + dx;
                 let ny = ty + dy;
@@ -670,14 +671,13 @@ fn run_liquid_step(
                 if neighbor.is_empty() || neighbor.liquid_type != cell.liquid_type {
                     continue;
                 }
-                same_type_neighbors += 1;
                 if neighbor.level > best_neighbor.map_or(0.0, |b| b.2) {
                     best_neighbor = Some((nx, ny, neighbor.level));
                 }
             }
 
-            match best_neighbor {
-                Some((nx, ny, n_level)) if n_level >= cell.level * NEIGHBOR_RATIO => {
+            if let Some((nx, ny, n_level)) = best_neighbor {
+                if n_level >= cell.level * NEIGHBOR_RATIO {
                     // Transfer this cell's liquid to the much-larger neighbor.
                     let new_n_level = (n_level + cell.level).min(MAX_LEVEL);
                     set_liquid_in_map(
@@ -700,16 +700,6 @@ fn run_liquid_step(
                         sleep.mark_changed(sx, sy);
                     }
                 }
-                _ if same_type_neighbors == 0 && cell.level < 0.03 => {
-                    // Completely isolated tiny drop — evaporate.
-                    set_liquid_in_map(world_map, tx, ty, LiquidCell::EMPTY, config);
-                    let wx = config.wrap_tile_x(tx);
-                    let (cx, cy) = chunk::tile_to_chunk(wx, ty, config.chunk_size);
-                    dirty_chunks.0.insert((cx, cy));
-                    dirty_liquid.0.insert((cx, cy));
-                    sleep.mark_changed(tx, ty);
-                }
-                _ => {}
             }
         }
     }
