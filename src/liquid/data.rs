@@ -30,30 +30,54 @@ impl LiquidCell {
     }
 }
 
-/// Minimum level below which a cell is considered empty.
-pub const MIN_LEVEL: f32 = 0.001;
-/// Maximum level a cell can hold.
-pub const MAX_LEVEL: f32 = 1.0;
-/// Maximum flow per face per step.
-pub const MAX_FLOW: f32 = 1.0;
+// ---------------------------------------------------------------------------
+// jgallant / Starbound cellular-automata constants
+// ---------------------------------------------------------------------------
 
-/// Flow state for a single cell — not persisted, recomputed each frame.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct FlowCell {
-    pub flow: [f32; 4], // [right, up, left, down]
+/// Minimum level; cells below this are considered empty and zeroed out.
+pub const MIN_LEVEL: f32 = 0.005;
+/// Normal cell capacity (1 full tile of liquid).
+pub const MAX_LEVEL: f32 = 1.0;
+/// Extra liquid a bottom cell can hold beyond its top neighbor.
+/// Creates the implicit pressure gradient that drives communicating vessels.
+pub const MAX_COMPRESSION: f32 = 0.25;
+/// Minimum flow threshold for applying the speed multiplier.
+pub const MIN_FLOW: f32 = 0.005;
+/// Maximum flow per cell per iteration.
+pub const MAX_SPEED: f32 = 4.0;
+/// Base flow speed multiplier (0.0–1.0). Applied when flow > MIN_FLOW.
+pub const FLOW_SPEED: f32 = 1.0;
+
+// ---------------------------------------------------------------------------
+// Core algorithm functions (shared by system.rs and simulation.rs)
+// ---------------------------------------------------------------------------
+
+/// How much liquid the **bottom** cell should hold given the combined amount
+/// between two vertically-adjacent cells.
+///
+/// This is jgallant's `CalculateVerticalFlowValue`. The bottom cell is allowed
+/// to hold up to `MAX_COMPRESSION` more than the top, creating a natural
+/// pressure gradient without explicit pressure propagation.
+pub fn vertical_flow_target(remaining: f32, dest_liquid: f32) -> f32 {
+    let sum = remaining + dest_liquid;
+    if sum <= MAX_LEVEL {
+        MAX_LEVEL
+    } else if sum < 2.0 * MAX_LEVEL + MAX_COMPRESSION {
+        (MAX_LEVEL * MAX_LEVEL + sum * MAX_COMPRESSION) / (MAX_LEVEL + MAX_COMPRESSION)
+    } else {
+        (sum + MAX_COMPRESSION) / 2.0
+    }
 }
 
-/// Face indices.
-pub const FACE_RIGHT: usize = 0;
-pub const FACE_UP: usize = 1;
-pub const FACE_LEFT: usize = 2;
-pub const FACE_DOWN: usize = 3;
+/// Clamp a computed flow value to the valid range `[0, min(MAX_SPEED, remaining)]`.
+#[inline]
+pub fn constrain_flow(flow: f32, remaining: f32) -> f32 {
+    flow.max(0.0).min(MAX_SPEED).min(remaining)
+}
 
-/// Opposite face lookup.
-pub const OPPOSITE_FACE: [usize; 4] = [FACE_LEFT, FACE_DOWN, FACE_RIGHT, FACE_UP];
-
-/// Tile offsets for each face direction.
-pub const FACE_OFFSET: [(i32, i32); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
+// ---------------------------------------------------------------------------
+// Liquid layer (per-chunk storage)
+// ---------------------------------------------------------------------------
 
 /// Per-chunk liquid storage. Row-major: local_y * chunk_size + local_x.
 #[derive(Debug, Clone, Serialize, Deserialize)]
