@@ -261,6 +261,9 @@ pub(crate) fn check_loading(
         magnet_radius: character.magnet_radius,
         magnet_strength: character.magnet_strength,
         pickup_radius: character.pickup_radius,
+        swim_impulse: character.swim_impulse,
+        swim_gravity_factor: character.swim_gravity_factor,
+        swim_drag: character.swim_drag,
     });
 
     // Store character animation data for the animation system

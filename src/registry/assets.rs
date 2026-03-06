@@ -49,6 +49,12 @@ pub struct CharacterDefAsset {
     pub magnet_strength: f32,
     #[serde(default = "default_pickup_radius")]
     pub pickup_radius: f32,
+    #[serde(default = "default_swim_impulse")]
+    pub swim_impulse: f32,
+    #[serde(default = "default_swim_gravity_factor")]
+    pub swim_gravity_factor: f32,
+    #[serde(default = "default_swim_drag")]
+    pub swim_drag: f32,
     pub sprite_size: (u32, u32),
     pub animations: HashMap<String, AnimationDef>,
 }
@@ -115,6 +121,15 @@ fn default_magnet_strength() -> f32 {
 }
 fn default_pickup_radius() -> f32 {
     20.0
+}
+fn default_swim_impulse() -> f32 {
+    180.0
+}
+fn default_swim_gravity_factor() -> f32 {
+    0.3
+}
+fn default_swim_drag() -> f32 {
+    0.15
 }
 
 /// Asset loaded from *.parallax.ron
@@ -281,5 +296,4 @@ mod tests {
         assert_eq!(asset.max_stack, 999);
         assert!(asset.placeable.is_some());
     }
-
 }

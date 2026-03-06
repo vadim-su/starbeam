@@ -47,6 +47,9 @@ pub(crate) fn hot_reload_character(
             config.magnet_radius = asset.magnet_radius;
             config.magnet_strength = asset.magnet_strength;
             config.pickup_radius = asset.pickup_radius;
+            config.swim_impulse = asset.swim_impulse;
+            config.swim_gravity_factor = asset.swim_gravity_factor;
+            config.swim_drag = asset.swim_drag;
             info!(
                 "Hot-reloaded PlayerConfig: speed={}, jump={}, gravity={}, magnet_r={}, magnet_s={}",
                 asset.speed, asset.jump_velocity, asset.gravity,

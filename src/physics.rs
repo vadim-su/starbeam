@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::liquid::data::LiquidCell;
+use crate::liquid::data::{LiquidCell, LiquidId};
 use crate::liquid::registry::LiquidRegistry;
 use crate::math::{tile_aabb, Aabb};
 use crate::object::registry::ObjectRegistry;
@@ -60,6 +60,27 @@ pub struct BobEffect {
     pub speed: f32,
     pub phase: f32,
     pub rest_y: f32,
+}
+
+/// Tracks how much of the entity is submerged in liquid.
+/// Updated by the liquid detection system each frame.
+#[derive(Component, Debug, Default)]
+pub struct Submerged {
+    /// 0.0 = not submerged, 1.0 = fully submerged.
+    pub ratio: f32,
+    /// The dominant liquid type the entity is in (by fill weight).
+    pub liquid_id: LiquidId,
+    /// The swim_speed_factor of the dominant liquid.
+    pub swim_speed_factor: f32,
+}
+
+impl Submerged {
+    /// Threshold above which the entity is considered "swimming".
+    pub const SWIM_THRESHOLD: f32 = 0.3;
+
+    pub fn is_swimming(&self) -> bool {
+        self.ratio >= Self::SWIM_THRESHOLD
+    }
 }
 
 // ---------------------------------------------------------------------------

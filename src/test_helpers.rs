@@ -241,6 +241,9 @@ pub mod fixtures {
             magnet_radius: 96.0,
             magnet_strength: 400.0,
             pickup_radius: 20.0,
+            swim_impulse: 180.0,
+            swim_gravity_factor: 0.3,
+            swim_drag: 0.15,
         }
     }
 
