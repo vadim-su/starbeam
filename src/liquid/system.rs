@@ -582,4 +582,85 @@ fn run_density_sort(
             }
         }
     }
+
+    // --- Horizontal displacement: smooth staircase boundaries ---
+    // When a lighter liquid is horizontally adjacent to a denser liquid,
+    // push a fraction of the lighter liquid upward if there is space above.
+    for &(tx, ty) in &active {
+        let cell = get_liquid_from_map(world_map, tx, ty, config);
+        if cell.is_empty() {
+            continue;
+        }
+
+        // Only check the right neighbor to avoid double-processing.
+        let (nx, ny) = (tx + 1, ty);
+        if is_solid_at(world_map, tile_registry, nx, ny, config) {
+            continue;
+        }
+        let neighbor = get_liquid_from_map(world_map, nx, ny, config);
+        if neighbor.is_empty() || neighbor.liquid_type == cell.liquid_type {
+            continue;
+        }
+
+        let d_cell = liquid_registry.density(cell.liquid_type);
+        let d_neighbor = liquid_registry.density(neighbor.liquid_type);
+
+        // Determine which is lighter.
+        let (lighter_x, lighter, _heavier_x, heavier) = if d_cell < d_neighbor {
+            (tx, cell, nx, neighbor)
+        } else if d_neighbor < d_cell {
+            (nx, neighbor, tx, cell)
+        } else {
+            continue;
+        };
+
+        // Can the lighter liquid be pushed up?
+        let ay = ty + 1;
+        if is_solid_at(world_map, tile_registry, lighter_x, ay, config) {
+            continue;
+        }
+        let above = get_liquid_from_map(world_map, lighter_x, ay, config);
+        if !above.is_empty() && above.liquid_type != lighter.liquid_type {
+            continue;
+        }
+
+        let amount = lighter.level.min(heavier.level) * DISPLACEMENT_RATE;
+        if amount < MIN_FLOW {
+            continue;
+        }
+
+        // Push lighter liquid upward.
+        let new_lighter_level = lighter.level - amount;
+        if new_lighter_level < MIN_LEVEL {
+            set_liquid_in_map(world_map, lighter_x, ty, LiquidCell::EMPTY, config);
+        } else {
+            set_liquid_in_map(
+                world_map,
+                lighter_x,
+                ty,
+                LiquidCell {
+                    liquid_type: lighter.liquid_type,
+                    level: new_lighter_level,
+                },
+                config,
+            );
+        }
+
+        // Add to cell above.
+        let new_above = if above.is_empty() {
+            LiquidCell {
+                liquid_type: lighter.liquid_type,
+                level: amount,
+            }
+        } else {
+            LiquidCell {
+                liquid_type: lighter.liquid_type,
+                level: (above.level + amount).min(MAX_LEVEL + MAX_COMPRESSION),
+            }
+        };
+        set_liquid_in_map(world_map, lighter_x, ay, new_above, config);
+
+        mark_dirty(lighter_x, ty, config, dirty_chunks, dirty_liquid, sleep);
+        mark_dirty(lighter_x, ay, config, dirty_chunks, dirty_liquid, sleep);
+    }
 }

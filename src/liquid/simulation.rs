@@ -300,6 +300,87 @@ pub fn step(grid: &mut SimGrid, densities: &[f32], viscosities: &[f32], _dt: f32
             }
         }
     }
+
+    // -- Horizontal displacement: smooth staircase boundaries ---------------
+    // When a lighter liquid is horizontally adjacent to a denser liquid,
+    // push a fraction of the lighter liquid upward if there is space above.
+    // This smooths the stepped boundary that forms when liquids meet.
+    for y in 0..h {
+        // Only check rightward neighbor to avoid double-processing pairs.
+        for x in 0..(w.saturating_sub(1)) {
+            let li = grid.idx(x, y);
+            let ri = grid.idx(x + 1, y);
+
+            if grid.solid[li] || grid.solid[ri] {
+                continue;
+            }
+
+            let left = grid.cells[li];
+            let right = grid.cells[ri];
+
+            if left.is_empty() || right.is_empty() {
+                continue;
+            }
+            if left.liquid_type == right.liquid_type {
+                continue;
+            }
+
+            let d_left = densities
+                .get(left.liquid_type.0 as usize)
+                .copied()
+                .unwrap_or(1.0);
+            let d_right = densities
+                .get(right.liquid_type.0 as usize)
+                .copied()
+                .unwrap_or(1.0);
+
+            // Determine which cell holds the lighter liquid.
+            let (lighter_idx, lighter_cell, _heavier_idx, heavier_cell) = if d_left < d_right {
+                (li, left, ri, right)
+            } else if d_right < d_left {
+                (ri, right, li, left)
+            } else {
+                continue; // same density, nothing to do
+            };
+
+            // Can the lighter liquid be pushed up?
+            let lighter_x = lighter_idx % w;
+            if y + 1 >= h {
+                continue;
+            }
+            let ai = grid.idx(lighter_x, y + 1);
+            if grid.solid[ai] {
+                continue;
+            }
+            let above = grid.cells[ai];
+            if !above.is_empty() && above.liquid_type != lighter_cell.liquid_type {
+                continue; // blocked by a third liquid type
+            }
+
+            let amount = lighter_cell.level.min(heavier_cell.level) * DISPLACEMENT_RATE;
+            if amount < MIN_FLOW {
+                continue;
+            }
+
+            // Push lighter liquid upward.
+            let new_lighter_level = lighter_cell.level - amount;
+            if new_lighter_level < MIN_LEVEL {
+                grid.cells[lighter_idx] = LiquidCell::EMPTY;
+            } else {
+                grid.cells[lighter_idx].level = new_lighter_level;
+            }
+
+            // Add to cell above.
+            if above.is_empty() {
+                grid.cells[ai] = LiquidCell {
+                    liquid_type: lighter_cell.liquid_type,
+                    level: amount,
+                };
+            } else {
+                grid.cells[ai].level = (above.level + amount).min(MAX_LEVEL + MAX_COMPRESSION);
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

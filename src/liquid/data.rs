@@ -47,6 +47,9 @@ pub const MIN_FLOW: f32 = 0.005;
 pub const MAX_SPEED: f32 = 4.0;
 /// Base flow speed multiplier (0.0–1.0). Applied when flow > MIN_FLOW.
 pub const FLOW_SPEED: f32 = 1.0;
+/// Fraction of lighter liquid displaced upward per tick when adjacent to
+/// a denser liquid horizontally. Smooths staircase boundaries.
+pub const DISPLACEMENT_RATE: f32 = 0.15;
 
 // ---------------------------------------------------------------------------
 // Core algorithm functions (shared by system.rs and simulation.rs)
