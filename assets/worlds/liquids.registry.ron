@@ -21,6 +21,9 @@
         light_emission: (255, 120, 40),
         light_opacity: 200,
         swim_speed_factor: 0.2,
+        flicker_speed: 3.0,
+        flicker_strength: 0.3,
+        flicker_min: 0.7,
         reactions: [
             (other: "water", produce_tile: Some("stone"), consume_both: true),
             (other: "oil", produce_tile: None, consume_both: false, consume_rate: Some(0.15)),

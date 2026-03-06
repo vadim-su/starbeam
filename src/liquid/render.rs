@@ -796,6 +796,9 @@ mod tests {
             light_emission: [0, 0, 0],
             light_opacity: 0,
             swim_speed_factor: 0.5,
+            flicker_speed: 0.0,
+            flicker_strength: 0.0,
+            flicker_min: 1.0,
             reactions: vec![],
         }]);
         let mesh = build_liquid_mesh(&cells, 0, 0, 2, 8.0, &registry);

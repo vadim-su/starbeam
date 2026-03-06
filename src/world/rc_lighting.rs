@@ -512,7 +512,30 @@ fn extract_lighting_data(
                     }
                 };
                 input.density[idx] = liquid_opacity;
-                input.albedo[idx] = [0, 0, 0, 0];
+                // Set albedo from liquid color so lava bounces orange
+                // light off nearby walls via the RC bounce pass.
+                input.albedo[idx] = if liquid_opacity > 0 {
+                    let buf_x = idx % w_usize;
+                    let buf_y = idx / w_usize;
+                    let tx = new_grid_origin.x + buf_x as i32;
+                    let ty = new_grid_origin.y + buf_y as i32;
+                    let wtx = world_config.wrap_tile_x(tx);
+                    let (cx2, cy2) = crate::world::chunk::tile_to_chunk(wtx, ty, world_config.chunk_size);
+                    let (lx2, ly2) = crate::world::chunk::tile_to_local(wtx, ty, world_config.chunk_size);
+                    world_map.chunk(cx2, cy2).map_or([0, 0, 0, 0], |chunk| {
+                        let cell = chunk.liquid.get(lx2, ly2, world_config.chunk_size);
+                        liquid_registry.get(cell.liquid_type).map_or([0, 0, 0, 0], |ldef| {
+                            [
+                                (ldef.color[0] * 255.0) as u8,
+                                (ldef.color[1] * 255.0) as u8,
+                                (ldef.color[2] * 255.0) as u8,
+                                255,
+                            ]
+                        })
+                    })
+                } else {
+                    [0, 0, 0, 0]
+                };
             }
         }
 
@@ -522,6 +545,7 @@ fn extract_lighting_data(
 
     // --- Pre-extract liquid emission data for the parallel emissive pass ---
     let total = (input_w * input_h) as usize;
+    let elapsed = time.elapsed_secs();
     let mut liquid_emission: Vec<[f32; 3]> = vec![[0.0; 3]; total];
     {
         let new_grid_origin = cache.origin;
@@ -544,10 +568,18 @@ fn extract_lighting_data(
                         let e = ldef.light_emission;
                         if e != [0, 0, 0] {
                             let scale = cell.level.clamp(0.0, 1.0);
+                            let flicker = flicker_multiplier(
+                                tx,
+                                ty,
+                                elapsed,
+                                ldef.flicker_speed,
+                                ldef.flicker_strength,
+                                ldef.flicker_min,
+                            );
                             liquid_emission[idx] = [
-                                e[0] as f32 / 255.0 * scale,
-                                e[1] as f32 / 255.0 * scale,
-                                e[2] as f32 / 255.0 * scale,
+                                e[0] as f32 / 255.0 * scale * flicker,
+                                e[1] as f32 / 255.0 * scale * flicker,
+                                e[2] as f32 / 255.0 * scale * flicker,
                             ];
                         }
                     }
@@ -580,7 +612,6 @@ fn extract_lighting_data(
     input.emissive.fill([0.0; 4]);
     let w_usize = input_w as usize;
     let h_usize = input_h as usize;
-    let elapsed = time.elapsed_secs();
 
     {
         let pool = ComputeTaskPool::get();

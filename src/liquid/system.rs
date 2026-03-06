@@ -80,9 +80,14 @@ pub fn liquid_simulation_system(
         all_produced.extend(produced);
     }
 
+    // Mark RC lighting grid dirty whenever liquid moved (density/opacity
+    // changes need to propagate to the lightmap for correct shadows).
+    if steps > 0 && !dirty_liquid.0.is_empty() {
+        rc_dirty.0 = true;
+    }
+
     // Mark tile mesh entities dirty for any reaction-produced solid tiles.
     if !all_produced.is_empty() {
-        rc_dirty.0 = true;
         for &(tx, ty) in &all_produced {
             let wtx = config.wrap_tile_x(tx);
             let (cx, cy) = chunk::tile_to_chunk(wtx, ty, config.chunk_size);

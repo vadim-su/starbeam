@@ -26,8 +26,21 @@ pub struct LiquidDef {
     pub light_emission: [u8; 3],
     pub light_opacity: u8,
     pub swim_speed_factor: f32,
+    /// Light flicker animation speed (0 = no flicker).
+    #[serde(default)]
+    pub flicker_speed: f32,
+    /// Light flicker amplitude (0.0–1.0).
+    #[serde(default)]
+    pub flicker_strength: f32,
+    /// Minimum brightness during flicker (0.0–1.0). Defaults to 1.0 (no dimming).
+    #[serde(default = "default_flicker_min")]
+    pub flicker_min: f32,
     #[serde(default)]
     pub reactions: Vec<LiquidReaction>,
+}
+
+fn default_flicker_min() -> f32 {
+    1.0
 }
 
 #[derive(Resource, Default)]
