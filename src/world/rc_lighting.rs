@@ -554,13 +554,19 @@ fn extract_lighting_data(
     let elapsed = time.elapsed_secs();
     let mut liquid_emission: Vec<[f32; 3]> = vec![[0.0; 3]; total];
     {
-        let new_grid_origin = cache.origin;
         let w_usize = input_w as usize;
         for idx in 0..total {
+            let fg_id = cache.fg[idx];
+            // Only patch non-solid tiles (liquid lives in air tiles).
+            if tile_registry.is_solid(fg_id) {
+                continue;
+            }
+
             let buf_x = idx % w_usize;
             let buf_y = idx / w_usize;
-            let tx = new_grid_origin.x + buf_x as i32;
-            let ty = new_grid_origin.y + buf_y as i32;
+            // Buffer is Y-flipped: buf_y=0 is max_ty (top of grid).
+            let tx = min_tx + buf_x as i32;
+            let ty = max_ty - buf_y as i32;
             if ty < 0 || ty >= height_tiles {
                 continue;
             }
