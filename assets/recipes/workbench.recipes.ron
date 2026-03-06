@@ -1,0 +1,10 @@
+[
+    (
+        id: "stone_block_x4",
+        result: (item_id: "stone", count: 4),
+        ingredients: [(item_id: "dirt", count: 8)],
+        craft_time: 2.0,
+        station: Some("workbench"),
+        unlocked_by: Always,
+    ),
+]

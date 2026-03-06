@@ -1,15 +1,13 @@
 use bevy::prelude::*;
 
-use super::registry::RecipeRegistry;
-
-/// Crafting plugin — currently a placeholder.
-/// TODO: Load recipes from RON data files (assets/recipes/*.ron).
-/// TODO: Add crafting systems (craft_item, unlock_recipe, crafting_progress).
-/// TODO: Add crafting UI panel integration.
+/// Crafting plugin — registers crafting systems.
+/// RecipeRegistry is loaded from RON files via the asset loading pipeline
+/// (see src/registry/loading.rs).
 pub struct CraftingPlugin;
 
 impl Plugin for CraftingPlugin {
-    fn build(&self, app: &mut App) {
-        app.insert_resource(RecipeRegistry::new());
+    fn build(&self, _app: &mut App) {
+        // RecipeRegistry is inserted by the loading pipeline.
+        // Crafting tick systems will be added here in a future task.
     }
 }

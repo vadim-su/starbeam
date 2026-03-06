@@ -13,7 +13,7 @@ use bevy::prelude::*;
 
 use assets::{
     AutotileAsset, BiomeAsset, CharacterDefAsset, ItemDefAsset,
-    ObjectDefAsset, ParallaxConfigAsset, PlanetTypeAsset, TileRegistryAsset,
+    ObjectDefAsset, ParallaxConfigAsset, PlanetTypeAsset, RecipeListAsset, TileRegistryAsset,
 };
 use crate::cosmos::assets::{GenerationConfigAsset, StarTypeAsset};
 use biome::BiomeId;
@@ -73,6 +73,8 @@ impl Plugin for RegistryPlugin {
             .register_asset_loader(RonLoader::<ItemDefAsset>::new(&["item.ron"]))
             .register_asset_loader(RonLoader::<ParallaxConfigAsset>::new(&["parallax.ron"]))
             .register_asset_loader(RonLoader::<AutotileAsset>::new(&["autotile.ron"]))
+            .init_asset::<RecipeListAsset>()
+            .register_asset_loader(RonLoader::<RecipeListAsset>::new(&["recipes.ron"]))
             .init_asset::<PlanetTypeAsset>()
             .init_asset::<BiomeAsset>()
             .init_asset::<GenerationConfigAsset>()

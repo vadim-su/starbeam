@@ -5,6 +5,7 @@ use bevy::reflect::TypePath;
 use serde::Deserialize;
 
 use super::tile::TileDef;
+use crate::crafting::Recipe;
 use crate::item::definition::ItemDef;
 use crate::object::definition::ObjectDef;
 use crate::parallax::config::ParallaxLayerDef;
@@ -253,6 +254,11 @@ pub struct BiomeAsset {
     #[serde(default)]
     pub status_effects: Option<Vec<String>>,
 }
+
+/// Asset loaded from *.recipes.ron — a list of crafting recipes.
+#[derive(Asset, TypePath, Debug, Deserialize)]
+#[serde(transparent)]
+pub struct RecipeListAsset(pub Vec<Recipe>);
 
 #[cfg(test)]
 mod tests {

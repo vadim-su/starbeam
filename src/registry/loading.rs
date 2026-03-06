@@ -8,7 +8,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use super::assets::{
     AnimationDef, AutotileAsset, BiomeAsset, CharacterDefAsset, ItemDefAsset,
-    ObjectDefAsset, ParallaxConfigAsset, PlanetTypeAsset, TileRegistryAsset,
+    ObjectDefAsset, ParallaxConfigAsset, PlanetTypeAsset, RecipeListAsset, TileRegistryAsset,
 };
 use super::biome::{
     BiomeDef, BiomeId, BiomeRegistry, LayerBoundaries, LayerConfig, LayerConfigs, PlanetConfig,
@@ -45,6 +45,7 @@ pub(crate) struct LoadingAssets {
     star_types: Vec<(String, Handle<StarTypeAsset>)>,
     planet_types: Vec<(String, Handle<PlanetTypeAsset>)>,
     items: Vec<(String, Handle<ItemDefAsset>)>,
+    recipes: Vec<(String, Handle<RecipeListAsset>)>,
 }
 
 /// Intermediate resource holding autotile asset handles during loading.
@@ -139,6 +140,17 @@ pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServe
         ),
     ];
 
+    let recipes = vec![
+        (
+            "base".to_string(),
+            asset_server.load::<RecipeListAsset>("recipes/base.recipes.ron"),
+        ),
+        (
+            "workbench".to_string(),
+            asset_server.load::<RecipeListAsset>("recipes/workbench.recipes.ron"),
+        ),
+    ];
+
     commands.insert_resource(LoadingAssets {
         tiles,
         objects,
@@ -147,6 +159,7 @@ pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServe
         star_types,
         planet_types,
         items,
+        recipes,
     });
 }
 
@@ -160,6 +173,7 @@ pub(crate) fn check_loading(
     star_type_assets: Res<Assets<StarTypeAsset>>,
     planet_type_assets: Res<Assets<PlanetTypeAsset>>,
     item_assets: Res<Assets<ItemDefAsset>>,
+    recipe_assets: Res<Assets<RecipeListAsset>>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
     let (Some(tiles), Some(character)) = (
@@ -205,6 +219,15 @@ pub(crate) fn check_loading(
         return;
     }
 
+    // Wait for all recipe assets
+    let all_recipes_loaded = loading
+        .recipes
+        .iter()
+        .all(|(_, h)| recipe_assets.contains(h));
+    if !all_recipes_loaded {
+        return;
+    }
+
     // Build ObjectRegistry from loaded object.ron files (order preserved from start_loading)
     let object_defs: Vec<ObjectDef> = loading
         .objects
@@ -227,6 +250,18 @@ pub(crate) fn check_loading(
         })
         .collect();
     commands.insert_resource(ItemRegistry::from_defs(item_defs));
+
+    // Build RecipeRegistry from loaded recipe.ron files
+    let mut recipe_registry = crate::crafting::RecipeRegistry::new();
+    for (_name, handle) in &loading.recipes {
+        if let Some(asset) = recipe_assets.get(handle) {
+            for recipe in &asset.0 {
+                recipe_registry.add(recipe.clone());
+            }
+        }
+    }
+    info!("Recipe registry loaded: {} recipes", recipe_registry.len());
+    commands.insert_resource(recipe_registry);
 
     // Build resources from loaded assets
     let registry_ref = TileRegistry::from_defs(tiles.tiles.clone());
