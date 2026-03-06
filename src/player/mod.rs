@@ -6,7 +6,7 @@ use bevy::sprite_render::MeshMaterial2d;
 
 use crate::cosmos::warp::NeedsRespawn;
 use crate::inventory::{Hotbar, Inventory};
-use crate::physics::{Gravity, TileCollider};
+use crate::physics::{Gravity, Submerged, TileCollider};
 use crate::registry::biome::PlanetConfig;
 use crate::registry::player::PlayerConfig;
 use crate::registry::world::ActiveWorld;
@@ -102,6 +102,7 @@ fn spawn_player(
         Velocity::default(),
         Gravity(player_config.gravity),
         Grounded(false),
+        Submerged::default(),
         TileCollider {
             width: player_config.width,
             height: player_config.height,
