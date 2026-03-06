@@ -4,6 +4,7 @@ use crate::liquid::data::{LiquidCell, LiquidId};
 use crate::liquid::registry::LiquidRegistry;
 use crate::math::{tile_aabb, Aabb};
 use crate::object::registry::ObjectRegistry;
+use crate::registry::player::PlayerConfig;
 use crate::sets::GameSet;
 use crate::world::chunk::{self, WorldMap};
 use crate::world::ctx::WorldCtx;
@@ -111,10 +112,23 @@ impl Plugin for PhysicsPlugin {
 // ---------------------------------------------------------------------------
 
 /// Apply gravitational acceleration to all entities with `Velocity` + `Gravity`.
-pub fn apply_gravity(time: Res<Time>, mut query: Query<(&mut Velocity, &Gravity)>) {
+/// If the entity has a `Submerged` component and is swimming, gravity is reduced
+/// by the configured `swim_gravity_factor`.
+pub fn apply_gravity(
+    time: Res<Time>,
+    player_config: Option<Res<PlayerConfig>>,
+    mut query: Query<(&mut Velocity, &Gravity, Option<&Submerged>)>,
+) {
     let dt = time.delta_secs().min(MAX_DELTA_SECS);
-    for (mut vel, gravity) in &mut query {
-        vel.y -= gravity.0 * dt;
+    for (mut vel, gravity, submerged) in &mut query {
+        let gravity_factor = match submerged {
+            Some(sub) if sub.is_swimming() => player_config
+                .as_ref()
+                .map(|c| c.swim_gravity_factor)
+                .unwrap_or(0.3),
+            _ => 1.0,
+        };
+        vel.y -= gravity.0 * gravity_factor * dt;
     }
 }
 
