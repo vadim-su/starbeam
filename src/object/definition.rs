@@ -25,6 +25,7 @@ pub enum ObjectType {
     Decoration,
     Container { slots: u16 },
     LightSource,
+    CraftingStation { station_id: String },
 }
 
 fn default_solid_mask() -> Vec<bool> {
