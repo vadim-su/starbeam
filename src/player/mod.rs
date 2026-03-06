@@ -5,6 +5,7 @@ use bevy::prelude::*;
 use bevy::sprite_render::MeshMaterial2d;
 
 use crate::cosmos::warp::NeedsRespawn;
+use crate::crafting::{HandCraftState, UnlockedRecipes};
 use crate::inventory::{Hotbar, Inventory};
 use crate::liquid::registry::LiquidRegistry;
 use crate::physics::{Gravity, Submerged, TileCollider};
@@ -102,6 +103,8 @@ fn spawn_player(
             inv
         },
         Hotbar::new(),
+        HandCraftState::default(),
+        UnlockedRecipes::default(),
         Velocity::default(),
         Gravity(player_config.gravity),
         Grounded(false),
