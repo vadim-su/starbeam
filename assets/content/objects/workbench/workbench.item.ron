@@ -1,0 +1,10 @@
+(
+  id: "workbench",
+  display_name: "Workbench",
+  description: "A basic crafting station",
+  max_stack: 10,
+  rarity: Common,
+  item_type: Block,
+  icon: "item.png",
+  placeable_object: Some("workbench_object"),
+)

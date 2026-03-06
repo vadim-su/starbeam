@@ -118,6 +118,11 @@ pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServe
             asset_server
                 .load::<ObjectDefAsset>("content/objects/wooden_table/wooden_table.object.ron"),
         ),
+        (
+            "content/objects/workbench/".to_string(),
+            asset_server
+                .load::<ObjectDefAsset>("content/objects/workbench/workbench.object.ron"),
+        ),
     ];
 
     // Load item definitions from individual *.item.ron files
@@ -137,6 +142,10 @@ pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServe
         (
             "content/objects/torch/".to_string(),
             asset_server.load::<ItemDefAsset>("content/objects/torch/torch.item.ron"),
+        ),
+        (
+            "content/objects/workbench/".to_string(),
+            asset_server.load::<ItemDefAsset>("content/objects/workbench/workbench.item.ron"),
         ),
     ];
 
