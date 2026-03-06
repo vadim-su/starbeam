@@ -296,9 +296,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // If above_any (submerged by any liquid): fill stays 1.0 at top
 
     // --- Bottom edge ---
-    // Round bottom only when exposed to air AND not part of a wide pool
-    // (at least one side lacks liquid). Wide pools keep flat bottoms.
-    if !below_any && (!left_any || !right_any) {
+    // Round bottom only for isolated drops/streams (no liquid below AND
+    // no liquid on EITHER side). Tiles at pool corners keep flat bottoms.
+    if !below_any && !left_any && !right_any {
         let bot_round = max(EDGE_ROUND, comb_lvl * 0.5);
         fill *= smoothstep(0.0, bot_round, frac.y);
     }
