@@ -8,7 +8,8 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use super::assets::{
     AnimationDef, AutotileAsset, BiomeAsset, CharacterDefAsset, ItemDefAsset,
-    ObjectDefAsset, ParallaxConfigAsset, PlanetTypeAsset, RecipeListAsset, TileRegistryAsset,
+    LiquidRegistryAsset, ObjectDefAsset, ParallaxConfigAsset, PlanetTypeAsset, RecipeListAsset,
+    TileRegistryAsset,
 };
 use super::biome::{
     BiomeDef, BiomeId, BiomeRegistry, LayerBoundaries, LayerConfig, LayerConfigs, PlanetConfig,
@@ -46,6 +47,8 @@ pub(crate) struct LoadingAssets {
     planet_types: Vec<(String, Handle<PlanetTypeAsset>)>,
     items: Vec<(String, Handle<ItemDefAsset>)>,
     recipes: Vec<(String, Handle<RecipeListAsset>)>,
+    liquids: Handle<LiquidRegistryAsset>,
+    ui_theme: Handle<crate::ui::game_ui::theme::UiTheme>,
 }
 
 /// Intermediate resource holding autotile asset handles during loading.
@@ -160,6 +163,11 @@ pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServe
         ),
     ];
 
+    let liquids =
+        asset_server.load::<LiquidRegistryAsset>("worlds/liquids.liquid.ron");
+    let ui_theme =
+        asset_server.load::<crate::ui::game_ui::theme::UiTheme>("ui.theme.ron");
+
     commands.insert_resource(LoadingAssets {
         tiles,
         objects,
@@ -169,6 +177,8 @@ pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServe
         planet_types,
         items,
         recipes,
+        liquids,
+        ui_theme,
     });
 }
 
@@ -183,6 +193,8 @@ pub(crate) fn check_loading(
     planet_type_assets: Res<Assets<PlanetTypeAsset>>,
     item_assets: Res<Assets<ItemDefAsset>>,
     recipe_assets: Res<Assets<RecipeListAsset>>,
+    liquid_assets: Res<Assets<LiquidRegistryAsset>>,
+    ui_theme_assets: Res<Assets<crate::ui::game_ui::theme::UiTheme>>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
     let (Some(tiles), Some(character)) = (
@@ -237,6 +249,16 @@ pub(crate) fn check_loading(
         return;
     }
 
+    // Wait for liquid registry
+    if !liquid_assets.contains(&loading.liquids) {
+        return;
+    }
+
+    // Wait for UI theme
+    if !ui_theme_assets.contains(&loading.ui_theme) {
+        return;
+    }
+
     // Build ObjectRegistry from loaded object.ron files (order preserved from start_loading)
     let object_defs: Vec<ObjectDef> = loading
         .objects
@@ -275,24 +297,16 @@ pub(crate) fn check_loading(
     // Build resources from loaded assets
     let registry_ref = TileRegistry::from_defs(tiles.tiles.clone());
 
-    // Load liquid registry from RON
-    let liquid_registry = match std::fs::read_to_string("assets/worlds/liquids.registry.ron") {
-        Ok(ron_str) => {
-            match ron::from_str::<Vec<crate::liquid::registry::LiquidDef>>(&ron_str) {
-                Ok(defs) => crate::liquid::registry::LiquidRegistry::from_defs(defs),
-                Err(e) => {
-                    bevy::log::warn!("Failed to parse liquids.registry.ron: {e}");
-                    crate::liquid::registry::LiquidRegistry::default()
-                }
-            }
-        }
-        Err(e) => {
-            bevy::log::warn!("Failed to read liquids.registry.ron: {e}");
-            crate::liquid::registry::LiquidRegistry::default()
-        }
-    };
+    // Build liquid registry from loaded asset
+    let liquid_asset = liquid_assets.get(&loading.liquids).unwrap();
+    let liquid_registry =
+        crate::liquid::registry::LiquidRegistry::from_defs(liquid_asset.0.clone());
     bevy::log::info!("Liquid registry loaded: {} defs", liquid_registry.defs.len());
     commands.insert_resource(liquid_registry);
+
+    // Insert UI theme from loaded asset
+    let ui_theme = ui_theme_assets.get(&loading.ui_theme).unwrap().clone();
+    commands.insert_resource(ui_theme);
 
     commands.insert_resource(registry_ref);
     commands.insert_resource(ObjectRegistry::from_defs(object_defs));
@@ -391,6 +405,10 @@ pub(crate) fn check_loading(
         tiles: loading.tiles.clone(),
         objects: loading.objects.clone(),
         character: loading.character.clone(),
+        items: loading.items.clone(),
+        recipes: loading.recipes.clone(),
+        liquids: loading.liquids.clone(),
+        ui_theme: loading.ui_theme.clone(),
     });
 
     // Find the planet type handle we already loaded for the biome pipeline

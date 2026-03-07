@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::reflect::TypePath;
 use serde::Deserialize;
 
 /// Parsed hex color wrapper for RON deserialization.
@@ -85,7 +86,7 @@ pub struct TooltipConfig {
 }
 
 /// Root UI theme loaded from RON.
-#[derive(Debug, Clone, Deserialize, Resource)]
+#[derive(Asset, TypePath, Debug, Clone, Deserialize, Resource)]
 pub struct UiTheme {
     pub base_path: String,
     pub font_size: f32,
@@ -93,13 +94,6 @@ pub struct UiTheme {
     pub hotbar: HotbarConfig,
     pub inventory_screen: InventoryScreenConfig,
     pub tooltip: TooltipConfig,
-}
-
-impl UiTheme {
-    pub fn load() -> Self {
-        let ron_str = include_str!("../../../assets/ui.ron");
-        ron::from_str(ron_str).expect("Failed to parse ui.ron")
-    }
 }
 
 #[cfg(test)]

@@ -5,8 +5,8 @@ use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
 
 use super::assets::{
-    BiomeAsset, CharacterDefAsset, ObjectDefAsset, ParallaxConfigAsset, PlanetTypeAsset,
-    TileRegistryAsset,
+    BiomeAsset, CharacterDefAsset, ItemDefAsset, LiquidRegistryAsset, ObjectDefAsset,
+    ParallaxConfigAsset, PlanetTypeAsset, RecipeListAsset, TileRegistryAsset,
 };
 use super::biome::{
     BiomeDef, BiomeId, BiomeRegistry, LayerBoundaries, LayerConfig, LayerConfigs, PlanetConfig,
@@ -241,6 +241,108 @@ pub(crate) fn hot_reload_biome_parallax(
                     break;
                 }
             }
+        }
+    }
+}
+
+pub(crate) fn hot_reload_items(
+    mut events: MessageReader<AssetEvent<ItemDefAsset>>,
+    handles: Res<RegistryHandles>,
+    assets: Res<Assets<ItemDefAsset>>,
+    mut registry: ResMut<crate::item::registry::ItemRegistry>,
+) {
+    let mut changed = false;
+    for event in events.read() {
+        if let AssetEvent::Modified { id } = event
+            && handles.items.iter().any(|(_, h)| *id == h.id())
+        {
+            changed = true;
+        }
+    }
+    if !changed {
+        return;
+    }
+    // Rebuild entire item registry from all individual item assets
+    let defs: Vec<_> = handles
+        .items
+        .iter()
+        .filter_map(|(base_path, handle)| {
+            assets.get(handle).map(|a| a.to_item_def(base_path))
+        })
+        .collect();
+    if defs.len() == handles.items.len() {
+        *registry = crate::item::registry::ItemRegistry::from_defs(defs);
+        info!("Hot-reloaded ItemRegistry ({} items)", registry.len());
+    }
+}
+
+pub(crate) fn hot_reload_recipes(
+    mut events: MessageReader<AssetEvent<RecipeListAsset>>,
+    handles: Res<RegistryHandles>,
+    assets: Res<Assets<RecipeListAsset>>,
+    mut registry: ResMut<crate::crafting::RecipeRegistry>,
+) {
+    let mut changed = false;
+    for event in events.read() {
+        if let AssetEvent::Modified { id } = event
+            && handles.recipes.iter().any(|(_, h)| *id == h.id())
+        {
+            changed = true;
+        }
+    }
+    if !changed {
+        return;
+    }
+    // Rebuild entire recipe registry from all recipe list assets
+    let mut new_registry = crate::crafting::RecipeRegistry::new();
+    for (_name, handle) in &handles.recipes {
+        if let Some(asset) = assets.get(handle) {
+            for recipe in &asset.0 {
+                new_registry.add(recipe.clone());
+            }
+        }
+    }
+    info!(
+        "Hot-reloaded RecipeRegistry ({} recipes)",
+        new_registry.len()
+    );
+    *registry = new_registry;
+}
+
+pub(crate) fn hot_reload_liquids(
+    mut events: MessageReader<AssetEvent<LiquidRegistryAsset>>,
+    handles: Res<RegistryHandles>,
+    assets: Res<Assets<LiquidRegistryAsset>>,
+    mut registry: ResMut<crate::liquid::registry::LiquidRegistry>,
+) {
+    for event in events.read() {
+        if let AssetEvent::Modified { id } = event
+            && *id == handles.liquids.id()
+            && let Some(asset) = assets.get(&handles.liquids)
+        {
+            *registry =
+                crate::liquid::registry::LiquidRegistry::from_defs(asset.0.clone());
+            info!(
+                "Hot-reloaded LiquidRegistry ({} defs)",
+                registry.defs.len()
+            );
+        }
+    }
+}
+
+pub(crate) fn hot_reload_ui_theme(
+    mut events: MessageReader<AssetEvent<crate::ui::game_ui::theme::UiTheme>>,
+    handles: Res<RegistryHandles>,
+    assets: Res<Assets<crate::ui::game_ui::theme::UiTheme>>,
+    mut theme: ResMut<crate::ui::game_ui::theme::UiTheme>,
+) {
+    for event in events.read() {
+        if let AssetEvent::Modified { id } = event
+            && *id == handles.ui_theme.id()
+            && let Some(asset) = assets.get(&handles.ui_theme)
+        {
+            *theme = asset.clone();
+            info!("Hot-reloaded UiTheme");
         }
     }
 }

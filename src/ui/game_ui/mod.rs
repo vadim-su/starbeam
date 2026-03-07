@@ -91,11 +91,12 @@ pub struct GameUiPlugin;
 
 impl Plugin for GameUiPlugin {
     fn build(&self, app: &mut App) {
+        // UiTheme is loaded via the asset system during the Loading phase
+        // and hot-reloaded in real-time by hot_reload_ui_theme.
         app.add_plugins(crafting_panel::CraftingUiPlugin)
             .init_resource::<DragState>()
             .init_resource::<HoveredSlot>()
             .init_resource::<InventoryScreenState>()
-            .insert_resource(UiTheme::load())
             .add_systems(
                 OnEnter(AppState::InGame),
                 (

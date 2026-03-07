@@ -261,6 +261,11 @@ pub struct BiomeAsset {
 #[serde(transparent)]
 pub struct RecipeListAsset(pub Vec<Recipe>);
 
+/// Asset loaded from *.liquid.ron — liquid definitions.
+#[derive(Asset, TypePath, Debug, Deserialize)]
+#[serde(transparent)]
+pub struct LiquidRegistryAsset(pub Vec<crate::liquid::registry::LiquidDef>);
+
 #[cfg(test)]
 mod tests {
     use super::*;

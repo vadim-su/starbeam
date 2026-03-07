@@ -12,14 +12,16 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 
 use assets::{
-    AutotileAsset, BiomeAsset, CharacterDefAsset, ItemDefAsset,
+    AutotileAsset, BiomeAsset, CharacterDefAsset, ItemDefAsset, LiquidRegistryAsset,
     ObjectDefAsset, ParallaxConfigAsset, PlanetTypeAsset, RecipeListAsset, TileRegistryAsset,
 };
 use crate::cosmos::assets::{GenerationConfigAsset, StarTypeAsset};
+use crate::ui::game_ui::theme::UiTheme;
 use biome::BiomeId;
 use hot_reload::{
-    hot_reload_biome_parallax, hot_reload_biomes, hot_reload_character, hot_reload_objects,
-    hot_reload_planet_type, hot_reload_tiles,
+    hot_reload_biome_parallax, hot_reload_biomes, hot_reload_character, hot_reload_items,
+    hot_reload_liquids, hot_reload_objects, hot_reload_planet_type, hot_reload_recipes,
+    hot_reload_tiles, hot_reload_ui_theme,
 };
 use loader::RonLoader;
 use loading::{
@@ -36,7 +38,10 @@ pub struct RegistryHandles {
     /// (base_path, handle) pairs for per-object assets; order matters (index 0 = ObjectId::NONE).
     pub objects: Vec<(String, Handle<ObjectDefAsset>)>,
     pub character: Handle<CharacterDefAsset>,
-    // world_config removed — ActiveWorld is now generated, not loaded from file
+    pub items: Vec<(String, Handle<ItemDefAsset>)>,
+    pub recipes: Vec<(String, Handle<RecipeListAsset>)>,
+    pub liquids: Handle<LiquidRegistryAsset>,
+    pub ui_theme: Handle<UiTheme>,
 }
 
 /// Application state: MainMenu shows title screen, Loading waits for assets, InGame runs gameplay.
@@ -67,12 +72,16 @@ impl Plugin for RegistryPlugin {
             .init_asset::<ItemDefAsset>()
             .init_asset::<ParallaxConfigAsset>()
             .init_asset::<AutotileAsset>()
+            .init_asset::<LiquidRegistryAsset>()
+            .init_asset::<UiTheme>()
             .register_asset_loader(RonLoader::<TileRegistryAsset>::new(&["registry.ron"]))
             .register_asset_loader(RonLoader::<ObjectDefAsset>::new(&["object.ron"]))
             .register_asset_loader(RonLoader::<CharacterDefAsset>::new(&["character.ron"]))
             .register_asset_loader(RonLoader::<ItemDefAsset>::new(&["item.ron"]))
             .register_asset_loader(RonLoader::<ParallaxConfigAsset>::new(&["parallax.ron"]))
             .register_asset_loader(RonLoader::<AutotileAsset>::new(&["autotile.ron"]))
+            .register_asset_loader(RonLoader::<LiquidRegistryAsset>::new(&["liquid.ron"]))
+            .register_asset_loader(RonLoader::<UiTheme>::new(&["theme.ron"]))
             .init_asset::<RecipeListAsset>()
             .register_asset_loader(RonLoader::<RecipeListAsset>::new(&["recipes.ron"]))
             .init_asset::<PlanetTypeAsset>()
@@ -103,6 +112,10 @@ impl Plugin for RegistryPlugin {
                     hot_reload_biomes,
                     hot_reload_planet_type,
                     hot_reload_biome_parallax,
+                    hot_reload_items,
+                    hot_reload_recipes,
+                    hot_reload_liquids,
+                    hot_reload_ui_theme,
                 )
                     .run_if(in_state(AppState::InGame)),
             );
