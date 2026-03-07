@@ -78,14 +78,21 @@ impl Plugin for CraftingUiPlugin {
         app.init_resource::<CraftingUiState>().add_systems(
             Update,
             (
+                // Phase 1: spawn / despawn the panel root (deferred commands).
                 manage_crafting_panel,
-                update_recipe_list,
-                update_detail_panel,
-                handle_craft_button_click,
-                handle_close_button_click,
-                handle_recipe_button_click,
-                update_progress_bar,
+                // Flush so the panel entities are available to later systems.
+                ApplyDeferred,
+                // Phase 2: populate / refresh panel contents + handle input.
+                (
+                    update_recipe_list,
+                    update_detail_panel,
+                    handle_craft_button_click,
+                    handle_close_button_click,
+                    handle_recipe_button_click,
+                    update_progress_bar,
+                ),
             )
+                .chain()
                 .run_if(in_state(AppState::InGame)),
         );
     }
@@ -143,14 +150,17 @@ fn update_recipe_list(
     open_station: Res<OpenStation>,
     hand_craft_open: Res<HandCraftOpen>,
     recipe_registry: Res<RecipeRegistry>,
-    player_query: Query<(&Inventory, &UnlockedRecipes), With<Player>>,
+    player_query: Query<(Ref<Inventory>, &UnlockedRecipes), With<Player>>,
     station_query: Query<&CraftingStation>,
     list_query: Query<(Entity, Option<&Children>), With<RecipeListContainer>>,
     ui_state: Res<CraftingUiState>,
     theme: Res<UiTheme>,
 ) {
-    // Only update when resources change
-    if !open_station.is_changed() && !hand_craft_open.is_changed() && !ui_state.is_changed() {
+    // Don't touch children if the panel is about to be despawned — the root
+    // despawn already handles recursive cleanup and issuing duplicate despawn
+    // commands on the same children produces "entity is invalid" warnings.
+    let should_be_open = open_station.0.is_some() || hand_craft_open.0;
+    if !should_be_open {
         return;
     }
 
@@ -158,9 +168,22 @@ fn update_recipe_list(
         return;
     };
 
-    let Ok((inventory, unlocked)) = player_query.single() else {
+    let Ok((inventory_ref, unlocked)) = player_query.single() else {
         return;
     };
+
+    // Update when resources change, inventory changes, OR container is empty (just spawned).
+    let is_empty = children.is_none_or(|c| c.is_empty());
+    if !is_empty
+        && !open_station.is_changed()
+        && !hand_craft_open.is_changed()
+        && !ui_state.is_changed()
+        && !inventory_ref.is_changed()
+    {
+        return;
+    }
+
+    let inventory: &Inventory = &*inventory_ref;
 
     // Determine station filter
     let station_id: Option<String> = if let Some(station_entity) = open_station.0 {
@@ -260,13 +283,24 @@ fn update_detail_panel(
     ui_state: Res<CraftingUiState>,
     recipe_registry: Res<RecipeRegistry>,
     item_registry: Res<ItemRegistry>,
-    player_query: Query<(&Inventory, Option<&HandCraftState>), With<Player>>,
+    player_query: Query<(Ref<Inventory>, Option<&HandCraftState>), With<Player>>,
     open_station: Res<OpenStation>,
+    hand_craft_open: Res<HandCraftOpen>,
     station_query: Query<&CraftingStation>,
     detail_query: Query<(Entity, Option<&Children>), With<DetailPanel>>,
     theme: Res<UiTheme>,
 ) {
-    if !ui_state.is_changed() && !open_station.is_changed() {
+    // Don't touch children if the panel is about to be despawned (see update_recipe_list).
+    let should_be_open = open_station.0.is_some() || hand_craft_open.0;
+    if !should_be_open {
+        return;
+    }
+
+    let Ok((inventory_ref, hand_craft_state)) = player_query.single() else {
+        return;
+    };
+
+    if !ui_state.is_changed() && !open_station.is_changed() && !inventory_ref.is_changed() {
         return;
     }
 
@@ -307,9 +341,7 @@ fn update_detail_panel(
         return;
     };
 
-    let Ok((inventory, hand_craft_state)) = player_query.single() else {
-        return;
-    };
+    let inventory: &Inventory = &*inventory_ref;
 
     // Check if currently crafting
     let active_craft: Option<&ActiveCraft> = if let Some(station_entity) = open_station.0 {
