@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use bevy::sprite_render::MeshMaterial2d;
 
 use crate::physics::{Grounded, Submerged, Velocity};
-use crate::player::parts::{CharacterPart, PartType};
+use crate::player::parts::{ArmAiming, CharacterPart, PartType};
 use crate::player::Player;
 use crate::registry::loading::CharacterAnimConfig;
 use crate::registry::player::PlayerConfig;
@@ -155,6 +155,7 @@ pub fn animate_player(
         &CharacterPart,
         &MeshMaterial2d<LitSpriteMaterial>,
         &mut Transform,
+        Option<&ArmAiming>,
     )>,
 ) {
     for (mut anim, velocity, grounded, submerged, children) in &mut player_query {
@@ -222,9 +223,19 @@ pub fn animate_player(
         // Update all child part sprites
         if frame_changed {
             for child in children.iter() {
-                let Ok((part, mat_handle, _)) = part_query.get(child) else {
+                let Ok((part, mat_handle, _, aim)) = part_query.get(child) else {
                     continue;
                 };
+                // Skip frame update if this arm is actively aiming (use idle frame 0)
+                if aim.is_some_and(|a| a.active) {
+                    let frames = animations.frames_for(part.0, AnimationKind::Idle);
+                    if !frames.is_empty() {
+                        if let Some(mat) = materials.get_mut(&mat_handle.0) {
+                            mat.sprite = frames[0].clone();
+                        }
+                    }
+                    continue;
+                }
                 let frames = animations.frames_for(part.0, anim.kind);
                 if !frames.is_empty() {
                     let idx = anim.frame.min(frames.len() - 1);
@@ -237,9 +248,13 @@ pub fn animate_player(
 
         // Update facing on all children
         for child in children.iter() {
-            let Ok((_, _, mut transform)) = part_query.get_mut(child) else {
+            let Ok((_, _, mut transform, aim)) = part_query.get_mut(child) else {
                 continue;
             };
+            // Skip facing override for aiming arms (aiming system handles their transform)
+            if aim.is_some_and(|a| a.active) {
+                continue;
+            }
             let abs_scale_x = transform.scale.x.abs();
             transform.scale.x = if anim.facing_right {
                 abs_scale_x

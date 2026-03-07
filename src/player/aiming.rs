@@ -3,7 +3,7 @@ use bevy::window::PrimaryWindow;
 
 use crate::inventory::Hotbar;
 use crate::player::animation::AnimationState;
-use crate::player::parts::{ArmAiming, CharacterPart, PartType};
+use crate::player::parts::{ArmAiming, CharacterPart};
 use crate::player::Player;
 
 /// Pivot offset: shoulder position relative to sprite center (pixels).
@@ -53,7 +53,7 @@ pub fn arm_aiming_system(
 
         // Update arm children
         for child in children.iter() {
-            let Ok((part, mut aim, mut transform)) = arm_query.get_mut(child) else {
+            let Ok((_part, mut aim, mut transform)) = arm_query.get_mut(child) else {
                 continue;
             };
 

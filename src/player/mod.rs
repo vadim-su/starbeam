@@ -44,7 +44,11 @@ impl Plugin for PlayerPlugin {
         )
         .add_systems(
             Update,
-            (movement::player_input, animation::animate_player)
+            (
+                movement::player_input,
+                aiming::arm_aiming_system,
+                animation::animate_player,
+            )
                 .chain()
                 .in_set(GameSet::Physics),
         )
