@@ -7,6 +7,7 @@ pub mod inventory;
 pub mod slot_sync;
 pub mod theme;
 pub mod tooltip;
+pub mod window;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::picking::prelude::*;
@@ -19,6 +20,7 @@ use crate::registry::AppState;
 pub use components::*;
 pub use icon_registry::*;
 pub use theme::*;
+pub use window::{GameWindow, WindowBody, WindowCloseButton, WindowConfig, WindowEntities};
 
 /// Handles for slot frame textures.
 #[derive(Resource)]
@@ -116,13 +118,15 @@ impl Plugin for GameUiPlugin {
                     toggle_inventory,
                     drag_drop::update_drag_position,
                     tooltip::update_tooltip,
+                    window::close_topmost_on_esc,
+                    window::handle_window_close_button,
                 )
                     .run_if(in_state(AppState::InGame)),
             );
     }
 }
 
-/// Toggle inventory screen on E or I key press.
+/// Toggle inventory screen on I key press.
 fn toggle_inventory(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut state: ResMut<InventoryScreenState>,

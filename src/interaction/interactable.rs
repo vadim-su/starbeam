@@ -80,25 +80,13 @@ pub fn detect_nearby_interactable(
 }
 
 /// Handle E key: toggle station UI. Handle C key: toggle hand-craft UI.
-/// Handle Escape: close any open crafting UI.
+/// ESC-close is handled by the unified window system in `window.rs`.
 pub fn handle_interaction_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     nearby: Res<NearbyInteractable>,
     mut open_station: ResMut<OpenStation>,
     mut hand_craft_open: ResMut<HandCraftOpen>,
 ) {
-    // Escape closes everything
-    if keyboard.just_pressed(KeyCode::Escape) {
-        if open_station.0.is_some() {
-            open_station.0 = None;
-            return;
-        }
-        if hand_craft_open.0 {
-            hand_craft_open.0 = false;
-            return;
-        }
-    }
-
     // E key: toggle station interaction
     if keyboard.just_pressed(KeyCode::KeyE) {
         // If a station is open, close it

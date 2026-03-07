@@ -2,6 +2,7 @@
 //!
 //! Spawned/despawned reactively based on `OpenStation` and `HandCraftOpen` resources.
 //! Supports both station-based crafting and hand-crafting.
+//! Uses the unified window system for dragging, close button and ESC-close.
 
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
@@ -16,6 +17,7 @@ use crate::player::Player;
 use crate::registry::AppState;
 
 use super::theme::UiTheme;
+use super::window::{self, GameWindow, WindowConfig};
 
 // ── Resources ──
 
@@ -61,14 +63,6 @@ pub struct ProgressBarFill;
 #[derive(Component)]
 pub struct CraftButton;
 
-/// Title text at the top of the panel (station name or "Hand Crafting").
-#[derive(Component)]
-pub struct PanelTitle;
-
-/// Close button (X) in the panel header.
-#[derive(Component)]
-pub struct CloseButton;
-
 // ── Plugin ──
 
 pub struct CraftingUiPlugin;
@@ -87,7 +81,6 @@ impl Plugin for CraftingUiPlugin {
                     update_recipe_list,
                     update_detail_panel,
                     handle_craft_button_click,
-                    handle_close_button_click,
                     handle_recipe_button_click,
                     update_progress_bar,
                 ),
@@ -104,7 +97,6 @@ const PANEL_WIDTH: f32 = 500.0;
 const PANEL_HEIGHT: f32 = 350.0;
 const PANEL_PADDING: f32 = 12.0;
 const RECIPE_LIST_WIDTH: f32 = 180.0;
-const HEADER_HEIGHT: f32 = 32.0;
 const PROGRESS_BAR_HEIGHT: f32 = 16.0;
 
 // ── Systems ──
@@ -596,20 +588,6 @@ fn handle_craft_button_click(
     }
 }
 
-/// Handle close button click.
-fn handle_close_button_click(
-    close_btn_query: Query<&Interaction, (Changed<Interaction>, With<CloseButton>)>,
-    mut open_station: ResMut<OpenStation>,
-    mut hand_craft_open: ResMut<HandCraftOpen>,
-) {
-    for interaction in &close_btn_query {
-        if *interaction == Interaction::Pressed {
-            open_station.0 = None;
-            hand_craft_open.0 = false;
-        }
-    }
-}
-
 /// Update progress bar fill width each frame.
 fn update_progress_bar(
     open_station: Res<OpenStation>,
@@ -642,7 +620,7 @@ fn update_progress_bar(
 
 // ── Spawn helpers ──
 
-/// Format a station_id into a display name (e.g. "workbench" → "Workbench").
+/// Format a station_id into a display name (e.g. "workbench" -> "Workbench").
 fn format_station_name(station_id: &str) -> String {
     let mut chars = station_id.chars();
     match chars.next() {
@@ -651,190 +629,112 @@ fn format_station_name(station_id: &str) -> String {
     }
 }
 
-/// Spawn the crafting panel UI hierarchy.
+/// Spawn the crafting panel UI hierarchy using the unified window frame.
 fn spawn_crafting_panel(commands: &mut Commands, theme: &UiTheme, title: &str) {
     let colors = &theme.colors;
-    let bg_dark = Color::from(colors.bg_dark.clone());
     let bg_medium = Color::from(colors.bg_medium.clone());
     let border_color = Color::from(colors.border.clone());
-    let text_color = Color::from(colors.text.clone());
     let text_dim = Color::from(colors.text_dim.clone());
 
-    commands
-        .spawn((
-            CraftingPanelRoot,
+    // Spawn unified window frame.
+    let entities = window::spawn_window_frame(
+        commands,
+        theme,
+        &WindowConfig {
+            title,
+            width: PANEL_WIDTH,
+            height: PANEL_HEIGHT,
+            padding: PANEL_PADDING,
+        },
+        GameWindow::Crafting,
+    );
+
+    // Mark the root so existing systems can find it.
+    commands.entity(entities.root).insert(CraftingPanelRoot);
+
+    // Configure the body layout.
+    commands.entity(entities.body).insert(Node {
+        flex_direction: FlexDirection::Row,
+        column_gap: Val::Px(8.0),
+        flex_grow: 1.0,
+        width: Val::Percent(100.0),
+        ..default()
+    });
+
+    // ── Body contents ──
+    commands.entity(entities.body).with_children(|body| {
+        // ── Left: Recipe list ──
+        body.spawn((
             Node {
-                position_type: PositionType::Absolute,
-                width: Val::Px(PANEL_WIDTH),
-                height: Val::Px(PANEL_HEIGHT),
-                left: Val::Percent(50.0),
-                top: Val::Percent(50.0),
-                margin: UiRect::new(
-                    Val::Px(-PANEL_WIDTH / 2.0),
-                    Val::Auto,
-                    Val::Px(-PANEL_HEIGHT / 2.0),
-                    Val::Auto,
-                ),
+                width: Val::Px(RECIPE_LIST_WIDTH),
+                height: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
-                padding: UiRect::all(Val::Px(PANEL_PADDING)),
-                border: UiRect::all(Val::Px(2.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                padding: UiRect::all(Val::Px(4.0)),
+                overflow: Overflow::clip_y(),
                 ..default()
             },
-            BackgroundColor(bg_dark),
+            BackgroundColor(bg_medium),
             BorderColor::all(border_color),
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
+            Pickable::IGNORE,
         ))
-        .with_children(|root| {
-            // ── Header row: title + close button ──
-            root.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(HEADER_HEIGHT),
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::SpaceBetween,
-                    align_items: AlignItems::Center,
-                    margin: UiRect::bottom(Val::Px(8.0)),
-                    padding: UiRect::horizontal(Val::Px(4.0)),
-                    border: UiRect::bottom(Val::Px(1.0)),
+        .with_children(|list_wrapper| {
+            // Header
+            list_wrapper.spawn((
+                Text::new("Recipes"),
+                TextFont {
+                    font_size: 11.0,
                     ..default()
                 },
-                BorderColor::all(border_color),
-                Pickable::IGNORE,
-            ))
-            .with_children(|header| {
-                // Title
-                header.spawn((
-                    PanelTitle,
-                    Text::new(title),
-                    TextFont {
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(text_color),
-                    Pickable::IGNORE,
-                ));
-
-                // Close button
-                header
-                    .spawn((
-                        CloseButton,
-                        Button,
-                        Node {
-                            width: Val::Px(24.0),
-                            height: Val::Px(24.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            border: UiRect::all(Val::Px(1.0)),
-                            ..default()
-                        },
-                        BackgroundColor(bg_medium),
-                        BorderColor::all(border_color),
-                        Pickable {
-                            should_block_lower: true,
-                            is_hoverable: true,
-                        },
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("X"),
-                            TextFont {
-                                font_size: 12.0,
-                                ..default()
-                            },
-                            TextColor(text_color),
-                            Pickable::IGNORE,
-                        ));
-                    });
-            });
-
-            // ── Body: recipe list (left) + detail panel (right) ──
-            root.spawn((
+                TextColor(text_dim),
                 Node {
+                    margin: UiRect::bottom(Val::Px(4.0)),
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ));
+
+            // Scrollable recipe list container
+            list_wrapper.spawn((
+                RecipeListContainer,
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(2.0),
                     width: Val::Percent(100.0),
                     flex_grow: 1.0,
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(8.0),
                     ..default()
                 },
                 Pickable::IGNORE,
-            ))
-            .with_children(|body| {
-                // ── Left: Recipe list ──
-                body.spawn((
-                    Node {
-                        width: Val::Px(RECIPE_LIST_WIDTH),
-                        height: Val::Percent(100.0),
-                        flex_direction: FlexDirection::Column,
-                        border: UiRect::all(Val::Px(1.0)),
-                        padding: UiRect::all(Val::Px(4.0)),
-                        overflow: Overflow::clip_y(),
-                        ..default()
-                    },
-                    BackgroundColor(bg_medium),
-                    BorderColor::all(border_color),
-                    Pickable::IGNORE,
-                ))
-                .with_children(|list_wrapper| {
-                    // Header
-                    list_wrapper.spawn((
-                        Text::new("Recipes"),
-                        TextFont {
-                            font_size: 11.0,
-                            ..default()
-                        },
-                        TextColor(text_dim),
-                        Node {
-                            margin: UiRect::bottom(Val::Px(4.0)),
-                            ..default()
-                        },
-                        Pickable::IGNORE,
-                    ));
-
-                    // Scrollable recipe list container
-                    list_wrapper.spawn((
-                        RecipeListContainer,
-                        Node {
-                            flex_direction: FlexDirection::Column,
-                            row_gap: Val::Px(2.0),
-                            width: Val::Percent(100.0),
-                            flex_grow: 1.0,
-                            ..default()
-                        },
-                        Pickable::IGNORE,
-                    ));
-                });
-
-                // ── Right: Detail panel ──
-                body.spawn((
-                    DetailPanel,
-                    Node {
-                        flex_grow: 1.0,
-                        height: Val::Percent(100.0),
-                        flex_direction: FlexDirection::Column,
-                        border: UiRect::all(Val::Px(1.0)),
-                        padding: UiRect::all(Val::Px(8.0)),
-                        overflow: Overflow::clip_y(),
-                        ..default()
-                    },
-                    BackgroundColor(bg_medium),
-                    BorderColor::all(border_color),
-                    Pickable::IGNORE,
-                ))
-                .with_children(|detail| {
-                    // Placeholder text
-                    detail.spawn((
-                        Text::new("Select a recipe"),
-                        TextFont {
-                            font_size: 12.0,
-                            ..default()
-                        },
-                        TextColor(text_dim),
-                        Pickable::IGNORE,
-                    ));
-                });
-            });
+            ));
         });
+
+        // ── Right: Detail panel ──
+        body.spawn((
+            DetailPanel,
+            Node {
+                flex_grow: 1.0,
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                border: UiRect::all(Val::Px(1.0)),
+                padding: UiRect::all(Val::Px(8.0)),
+                overflow: Overflow::clip_y(),
+                ..default()
+            },
+            BackgroundColor(bg_medium),
+            BorderColor::all(border_color),
+            Pickable::IGNORE,
+        ))
+        .with_children(|detail| {
+            // Placeholder text
+            detail.spawn((
+                Text::new("Select a recipe"),
+                TextFont {
+                    font_size: 12.0,
+                    ..default()
+                },
+                TextColor(text_dim),
+                Pickable::IGNORE,
+            ));
+        });
+    });
 }
