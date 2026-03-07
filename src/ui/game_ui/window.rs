@@ -5,7 +5,7 @@
 //! root and body entity IDs, so it can insert extra components and add children
 //! to the body.
 
-use bevy::picking::events::Drag;
+use bevy::picking::events::{Drag, Press};
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
 
@@ -15,7 +15,14 @@ use crate::interaction::interactable::{HandCraftOpen, OpenStation};
 
 const HEADER_HEIGHT: f32 = 28.0;
 
-// ── Components ──
+// ── Components / Resources ──
+
+/// Tracks which window currently has focus (last clicked).
+///
+/// ESC will close the focused window first; if no focused window is visible,
+/// falls back to the highest-priority visible window.
+#[derive(Resource, Default)]
+pub struct FocusedWindow(pub Option<Entity>);
 
 /// Marker identifying a unified game window and its kind.
 ///
@@ -93,12 +100,14 @@ pub fn spawn_window_frame(
             },
             BackgroundColor(bg_dark),
             BorderColor::all(border_color),
+            ZIndex(0),
             Pickable {
                 should_block_lower: true,
                 is_hoverable: true,
             },
         ))
         .observe(on_window_drag)
+        .observe(on_window_focus)
         .id();
 
     // ── Header ──
@@ -211,44 +220,85 @@ fn on_window_drag(
     }
 }
 
+/// Observer: give focus to a window when it is clicked.
+///
+/// Raises the clicked window's `ZIndex` above all other windows and records it
+/// in the [`FocusedWindow`] resource so that ESC closes it first.
+fn on_window_focus(
+    trigger: On<Pointer<Press>>,
+    mut focused: ResMut<FocusedWindow>,
+    mut query: Query<&mut ZIndex, With<GameWindow>>,
+) {
+    let clicked = trigger.event_target();
+    focused.0 = Some(clicked);
+
+    // Lower every window, then raise the one that was clicked.
+    for mut z in query.iter_mut() {
+        *z = ZIndex(0);
+    }
+    if let Ok(mut z) = query.get_mut(clicked) {
+        *z = ZIndex(1);
+    }
+}
+
 // ── Systems ──
 
 /// Close the topmost visible window when ESC is pressed.
 ///
-/// Priority: Crafting > Inventory. In the future this can be replaced with
-/// focus-order tracking.
+/// Closes the [`FocusedWindow`] first (last window the user clicked).
+/// Falls back to priority order (Crafting > Inventory) when no focused window
+/// is currently visible.
 pub fn close_topmost_on_esc(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut windows: Query<(Entity, &GameWindow, &mut Visibility)>,
     mut inv_state: ResMut<InventoryScreenState>,
     mut open_station: ResMut<OpenStation>,
     mut hand_craft_open: ResMut<HandCraftOpen>,
+    focused: Res<FocusedWindow>,
 ) {
     if !keyboard.just_pressed(KeyCode::Escape) {
         return;
     }
 
-    // Find the highest-priority visible window.
-    let mut target: Option<(Entity, u8)> = None;
-    for (entity, window, vis) in windows.iter() {
-        if *vis == Visibility::Hidden {
-            continue;
-        }
-        let priority = match window {
-            GameWindow::Crafting => 2,
-            GameWindow::Inventory => 1,
-        };
-        if target.is_none() || priority > target.unwrap().1 {
-            target = Some((entity, priority));
-        }
-    }
+    // Prefer the focused window if it still exists and is visible.
+    let focused_target = focused.0.and_then(|e| {
+        windows
+            .get(e)
+            .ok()
+            .filter(|(_, _, vis)| **vis != Visibility::Hidden)
+            .map(|(entity, _, _)| entity)
+    });
 
-    let Some((entity, _)) = target else {
+    // Fall back to highest-priority visible window.
+    let target = focused_target.or_else(|| {
+        let mut best: Option<(Entity, u8)> = None;
+        for (entity, window, vis) in windows.iter() {
+            if *vis == Visibility::Hidden {
+                continue;
+            }
+            let priority = match window {
+                GameWindow::Crafting => 2,
+                GameWindow::Inventory => 1,
+            };
+            if best.is_none() || priority > best.unwrap().1 {
+                best = Some((entity, priority));
+            }
+        }
+        best.map(|(e, _)| e)
+    });
+
+    let Some(entity) = target else {
         return;
     };
 
     if let Ok((_, window, mut vis)) = windows.get_mut(entity) {
-        close_window(*window, &mut vis, &mut inv_state, &mut open_station, &mut hand_craft_open);
+        close_window(
+            *window,
+            &mut vis,
+            &mut inv_state,
+            &mut open_station,
+            &mut hand_craft_open,
+        );
     }
 }
 

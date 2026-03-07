@@ -13,9 +13,6 @@ use super::spawn_slot_icon_children;
 use super::theme::UiTheme;
 use super::window::{self, GameWindow, WindowConfig};
 
-/// Extra header height added by the window frame.
-const WINDOW_HEADER_EXTRA: f32 = 36.0;
-
 /// Spawn the inventory screen (hidden by default).
 pub fn spawn_inventory_screen(commands: &mut Commands, theme: &UiTheme) {
     let config = &theme.inventory_screen;
@@ -24,6 +21,26 @@ pub fn spawn_inventory_screen(commands: &mut Commands, theme: &UiTheme) {
     let bg_medium = Color::from(colors.bg_medium.clone());
     let border_color = Color::from(colors.border.clone());
 
+    // Compute the window height from actual content dimensions so the layout
+    // never overflows the window border regardless of theme values.
+    //
+    // Left column (equipment): 8 slots stacked vertically.
+    let eq_count: usize = 8;
+    let eq_h =
+        eq_count as f32 * config.equipment.slot_size + (eq_count - 1) as f32 * config.equipment.gap;
+    // Right column: main bag grid + 8px gap + material bag grid.
+    let main_h = config.main_bag.rows as f32 * config.main_bag.slot_size
+        + (config.main_bag.rows.saturating_sub(1)) as f32 * config.main_bag.gap;
+    let mat_h = config.material_bag.rows as f32 * config.material_bag.slot_size
+        + (config.material_bag.rows.saturating_sub(1)) as f32 * config.material_bag.gap;
+    let right_h = main_h + 8.0 + mat_h;
+
+    let body_h = eq_h.max(right_h);
+    // Window overhead (border-box):
+    //   padding top(cfg) + border top(2) + header(28) + header-margin(4)
+    //   + padding bottom(cfg) + border bottom(2)  = cfg.padding×2 + 36
+    let window_h = body_h + config.padding * 2.0 + 36.0;
+
     // Spawn unified window frame.
     let entities = window::spawn_window_frame(
         commands,
@@ -31,7 +48,7 @@ pub fn spawn_inventory_screen(commands: &mut Commands, theme: &UiTheme) {
         &WindowConfig {
             title: "Inventory",
             width: config.width,
-            height: config.height + WINDOW_HEADER_EXTRA,
+            height: window_h,
             padding: config.padding,
         },
         GameWindow::Inventory,

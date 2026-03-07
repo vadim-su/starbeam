@@ -20,7 +20,9 @@ use crate::registry::AppState;
 pub use components::*;
 pub use icon_registry::*;
 pub use theme::*;
-pub use window::{GameWindow, WindowBody, WindowCloseButton, WindowConfig, WindowEntities};
+pub use window::{
+    FocusedWindow, GameWindow, WindowBody, WindowCloseButton, WindowConfig, WindowEntities,
+};
 
 /// Handles for slot frame textures.
 #[derive(Resource)]
@@ -99,6 +101,7 @@ impl Plugin for GameUiPlugin {
             .init_resource::<DragState>()
             .init_resource::<HoveredSlot>()
             .init_resource::<InventoryScreenState>()
+            .init_resource::<FocusedWindow>()
             .add_systems(
                 OnEnter(AppState::InGame),
                 (
