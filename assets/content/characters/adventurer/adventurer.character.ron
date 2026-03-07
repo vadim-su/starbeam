@@ -39,4 +39,12 @@
       fps: 12.0,
     ),
   },
+
+  parts: Some((
+    body: (
+      sprite_dir: "sprites",
+      frame_size: (44, 44),
+      offset: (0.0, 0.0),
+    ),
+  )),
 )

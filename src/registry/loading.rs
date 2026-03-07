@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use super::assets::{
-    AnimationDef, AutotileAsset, BiomeAsset, CharacterDefAsset, ItemDefAsset,
+    AnimationDef, AutotileAsset, BiomeAsset, CharacterDefAsset, CharacterPartsDef, ItemDefAsset,
     LiquidRegistryAsset, ObjectDefAsset, ParallaxConfigAsset, PlanetTypeAsset, RecipeListAsset,
     TileRegistryAsset,
 };
@@ -73,6 +73,7 @@ pub struct CharacterAnimConfig {
     pub sprite_size: (u32, u32),
     pub animations: std::collections::HashMap<String, AnimationDef>,
     pub base_path: String,
+    pub parts: Option<CharacterPartsDef>,
 }
 
 pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServer>) {
@@ -343,6 +344,7 @@ pub(crate) fn check_loading(
         sprite_size: character.sprite_size,
         animations: character.animations.clone(),
         base_path: "content/characters/adventurer/".to_string(),
+        parts: character.parts.clone(),
     });
 
     // --- Procedural system generation ---

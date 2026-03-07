@@ -58,6 +58,8 @@ pub struct CharacterDefAsset {
     pub swim_drag: f32,
     pub sprite_size: (u32, u32),
     pub animations: HashMap<String, AnimationDef>,
+    #[serde(default)]
+    pub parts: Option<CharacterPartsDef>,
 }
 
 /// A single animation within a CharacterDefAsset.
@@ -65,6 +67,31 @@ pub struct CharacterDefAsset {
 pub struct AnimationDef {
     pub frames: Vec<String>,
     pub fps: f32,
+}
+
+/// Per-part sprite configuration within a character.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PartDef {
+    /// Relative path to the sprite directory (within the character folder).
+    /// Contains animation subdirectories matching the character's animation names.
+    pub sprite_dir: String,
+    /// Pixel size of each frame for this part.
+    pub frame_size: (u32, u32),
+    /// Pixel offset from the parent entity's origin.
+    #[serde(default)]
+    pub offset: (f32, f32),
+}
+
+/// All body parts for a modular character.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CharacterPartsDef {
+    pub body: PartDef,
+    #[serde(default)]
+    pub head: Option<PartDef>,
+    #[serde(default)]
+    pub front_arm: Option<PartDef>,
+    #[serde(default)]
+    pub back_arm: Option<PartDef>,
 }
 
 /// Asset loaded from item.ron — a single item definition.
@@ -306,6 +333,9 @@ mod tests {
         assert!(asset.animations.contains_key("running"));
         assert!(asset.animations.contains_key("jumping"));
         assert_eq!(asset.sprite_size, (44, 44));
+        assert!(asset.parts.is_some());
+        let parts = asset.parts.as_ref().unwrap();
+        assert_eq!(parts.body.frame_size, (44, 44));
     }
 
     #[test]
