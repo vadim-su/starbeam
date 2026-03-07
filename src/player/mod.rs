@@ -1,5 +1,6 @@
 pub mod animation;
 pub mod movement;
+pub mod parts;
 
 use bevy::prelude::*;
 use bevy::sprite_render::MeshMaterial2d;
