@@ -1,5 +1,6 @@
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
+use bevy::ui::widget::ImageNode;
 
 use super::components::*;
 use super::components::{on_slot_hover, on_slot_unhover};
@@ -10,7 +11,7 @@ use crate::inventory::Hotbar;
 use crate::player::Player;
 
 /// Spawn the hotbar UI at the bottom of the screen.
-pub fn spawn_hotbar(commands: &mut Commands, theme: &UiTheme) {
+pub fn spawn_hotbar(commands: &mut Commands, theme: &UiTheme, asset_server: &AssetServer) {
     let config = &theme.hotbar;
     let colors = &theme.colors;
 
@@ -41,6 +42,16 @@ pub fn spawn_hotbar(commands: &mut Commands, theme: &UiTheme) {
             Pickable::IGNORE,
         ))
         .with_children(|parent| {
+            let slot_image = config.slot_texture.as_ref().map(|sc| {
+                let slicer = TextureSlicer {
+                    border: BorderRect::all(sc.border),
+                    center_scale_mode: SliceScaleMode::Stretch,
+                    sides_scale_mode: SliceScaleMode::Stretch,
+                    max_corner_scale: 1.0,
+                };
+                (asset_server.load::<Image>(&sc.texture), slicer)
+            });
+
             for i in 0..config.slots {
                 let slot_size = config.slot_size;
                 let border_width = config.border_width;
@@ -49,22 +60,39 @@ pub fn spawn_hotbar(commands: &mut Commands, theme: &UiTheme) {
                 let text_dim = colors.text_dim.clone();
 
                 // Slot container (no UiSlot — only hand children have it)
-                parent
+                let mut slot_cmd = parent
                     .spawn((
                         Node {
                             width: Val::Px(slot_size),
                             height: Val::Px(slot_size),
-                            border: UiRect::all(Val::Px(border_width)),
+                            border: if slot_image.is_some() {
+                                UiRect::ZERO
+                            } else {
+                                UiRect::all(Val::Px(border_width))
+                            },
                             flex_direction: FlexDirection::Row,
                             ..default()
                         },
-                        BackgroundColor(Color::from(bg_medium)),
-                        BorderColor::all(Color::from(border_color)),
                         Pickable {
                             should_block_lower: false,
                             is_hoverable: true,
                         },
-                    ))
+                    ));
+
+                if let Some((ref handle, ref slicer)) = slot_image {
+                    slot_cmd.insert(ImageNode {
+                        image: handle.clone(),
+                        image_mode: NodeImageMode::Sliced(slicer.clone()),
+                        ..default()
+                    });
+                } else {
+                    slot_cmd.insert((
+                        BackgroundColor(Color::from(bg_medium)),
+                        BorderColor::all(Color::from(border_color)),
+                    ));
+                }
+
+                slot_cmd
                     .observe(handle_drop)
                     .with_children(|slot_parent| {
                         // Left hand half

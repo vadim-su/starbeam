@@ -23,6 +23,10 @@
         anchor: "BottomCenter",
         margin_bottom: 16.0,
         border_width: 2.0,
+        slot_texture: Some((
+            texture: "textures/ui/slot.png",
+            border: 8.0,
+        )),
     ),
     
     inventory_screen: (
@@ -56,4 +60,8 @@
         max_width: 200.0,
         border_width: 1.0,
     ),
+    panel_texture: Some((
+        texture: "textures/ui/panel.png",
+        border: 16.0,
+    )),
 )

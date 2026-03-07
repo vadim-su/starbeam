@@ -154,12 +154,13 @@ fn spawn_game_ui(
     mut commands: Commands,
     theme: Res<UiTheme>,
     existing: Query<Entity, With<InventoryScreen>>,
+    asset_server: Res<AssetServer>,
 ) {
     if !existing.is_empty() {
         return;
     }
-    hotbar::spawn_hotbar(&mut commands, &theme);
-    inventory::spawn_inventory_screen(&mut commands, &theme);
+    hotbar::spawn_hotbar(&mut commands, &theme, &asset_server);
+    inventory::spawn_inventory_screen(&mut commands, &theme, &asset_server);
 }
 
 /// Initialize slot frame textures.

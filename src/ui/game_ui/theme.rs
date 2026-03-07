@@ -38,6 +38,13 @@ pub struct UiColors {
     pub rarity_legendary: HexColor,
 }
 
+/// 9-slice texture configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SliceConfig {
+    pub texture: String,
+    pub border: f32,
+}
+
 /// Hotbar configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct HotbarConfig {
@@ -47,6 +54,7 @@ pub struct HotbarConfig {
     pub anchor: String, // "BottomCenter" for now
     pub margin_bottom: f32,
     pub border_width: f32,
+    pub slot_texture: Option<SliceConfig>,
 }
 
 /// Equipment configuration.
@@ -94,6 +102,7 @@ pub struct UiTheme {
     pub hotbar: HotbarConfig,
     pub inventory_screen: InventoryScreenConfig,
     pub tooltip: TooltipConfig,
+    pub panel_texture: Option<SliceConfig>,
 }
 
 #[cfg(test)]

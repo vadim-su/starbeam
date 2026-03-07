@@ -14,7 +14,7 @@ use super::theme::UiTheme;
 use super::window::{self, GameWindow, WindowConfig};
 
 /// Spawn the inventory screen (hidden by default).
-pub fn spawn_inventory_screen(commands: &mut Commands, theme: &UiTheme) {
+pub fn spawn_inventory_screen(commands: &mut Commands, theme: &UiTheme, asset_server: &AssetServer) {
     let config = &theme.inventory_screen;
     let colors = &theme.colors;
 
@@ -52,6 +52,7 @@ pub fn spawn_inventory_screen(commands: &mut Commands, theme: &UiTheme) {
             padding: config.padding,
         },
         GameWindow::Inventory,
+        asset_server,
     );
 
     // Mark the root so existing systems can find it; start hidden.

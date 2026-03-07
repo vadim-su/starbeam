@@ -110,6 +110,7 @@ fn manage_crafting_panel(
     station_query: Query<&CraftingStation>,
     theme: Res<UiTheme>,
     mut ui_state: ResMut<CraftingUiState>,
+    asset_server: Res<AssetServer>,
 ) {
     let should_be_open = open_station.0.is_some() || hand_craft_open.0;
     let panel_exists = !panel_query.is_empty();
@@ -127,7 +128,7 @@ fn manage_crafting_panel(
         };
 
         ui_state.selected_recipe_id = None;
-        spawn_crafting_panel(&mut commands, &theme, &title);
+        spawn_crafting_panel(&mut commands, &theme, &title, &asset_server);
     } else if !should_be_open && panel_exists {
         for entity in &panel_query {
             commands.entity(entity).despawn();
@@ -630,7 +631,7 @@ fn format_station_name(station_id: &str) -> String {
 }
 
 /// Spawn the crafting panel UI hierarchy using the unified window frame.
-fn spawn_crafting_panel(commands: &mut Commands, theme: &UiTheme, title: &str) {
+fn spawn_crafting_panel(commands: &mut Commands, theme: &UiTheme, title: &str, asset_server: &AssetServer) {
     let colors = &theme.colors;
     let bg_medium = Color::from(colors.bg_medium.clone());
     let border_color = Color::from(colors.border.clone());
@@ -647,6 +648,7 @@ fn spawn_crafting_panel(commands: &mut Commands, theme: &UiTheme, title: &str) {
             padding: PANEL_PADDING,
         },
         GameWindow::Crafting,
+        asset_server,
     );
 
     // Mark the root so existing systems can find it.

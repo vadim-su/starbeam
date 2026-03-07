@@ -8,6 +8,7 @@
 use bevy::picking::events::{Drag, Press};
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
+use bevy::ui::widget::ImageNode;
 
 use super::components::{DragState, InventoryScreenState};
 use super::theme::UiTheme;
@@ -70,6 +71,7 @@ pub fn spawn_window_frame(
     theme: &UiTheme,
     config: &WindowConfig,
     window_kind: GameWindow,
+    asset_server: &AssetServer,
 ) -> WindowEntities {
     let colors = &theme.colors;
     let bg_dark = Color::from(colors.bg_dark.clone());
@@ -77,35 +79,61 @@ pub fn spawn_window_frame(
     let border_color = Color::from(colors.border.clone());
     let text_color = Color::from(colors.text.clone());
 
+    let panel_image = theme.panel_texture.as_ref().map(|sc| {
+        let slicer = TextureSlicer {
+            border: BorderRect::all(sc.border),
+            center_scale_mode: SliceScaleMode::Stretch,
+            sides_scale_mode: SliceScaleMode::Stretch,
+            max_corner_scale: 1.0,
+        };
+        (asset_server.load::<Image>(&sc.texture), slicer)
+    });
+
     // ── Root ──
-    let root_id = commands
-        .spawn((
-            window_kind,
-            Node {
-                position_type: PositionType::Absolute,
-                width: Val::Px(config.width),
-                height: Val::Px(config.height),
-                left: Val::Percent(50.0),
-                top: Val::Percent(50.0),
-                margin: UiRect::new(
-                    Val::Px(-config.width / 2.0),
-                    Val::Auto,
-                    Val::Px(-config.height / 2.0),
-                    Val::Auto,
-                ),
-                flex_direction: FlexDirection::Column,
-                padding: UiRect::all(Val::Px(config.padding)),
-                border: UiRect::all(Val::Px(2.0)),
-                ..default()
+    let mut root_cmd = commands.spawn((
+        window_kind,
+        Node {
+            position_type: PositionType::Absolute,
+            width: Val::Px(config.width),
+            height: Val::Px(config.height),
+            left: Val::Percent(50.0),
+            top: Val::Percent(50.0),
+            margin: UiRect::new(
+                Val::Px(-config.width / 2.0),
+                Val::Auto,
+                Val::Px(-config.height / 2.0),
+                Val::Auto,
+            ),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(Val::Px(config.padding)),
+            border: if panel_image.is_some() {
+                UiRect::ZERO
+            } else {
+                UiRect::all(Val::Px(2.0))
             },
+            ..default()
+        },
+        ZIndex(0),
+        Pickable {
+            should_block_lower: true,
+            is_hoverable: true,
+        },
+    ));
+
+    if let Some((ref handle, ref slicer)) = panel_image {
+        root_cmd.insert(ImageNode {
+            image: handle.clone(),
+            image_mode: NodeImageMode::Sliced(slicer.clone()),
+            ..default()
+        });
+    } else {
+        root_cmd.insert((
             BackgroundColor(bg_dark),
             BorderColor::all(border_color),
-            ZIndex(0),
-            Pickable {
-                should_block_lower: true,
-                is_hoverable: true,
-            },
-        ))
+        ));
+    }
+
+    let root_id = root_cmd
         .observe(on_window_drag)
         .observe(on_window_focus)
         .id();
