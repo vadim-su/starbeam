@@ -1,3 +1,4 @@
+pub mod aiming;
 pub mod animation;
 pub mod movement;
 pub mod parts;
