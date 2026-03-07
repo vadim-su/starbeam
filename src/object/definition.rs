@@ -29,7 +29,7 @@ pub enum ObjectType {
 }
 
 fn default_solid_mask() -> Vec<bool> {
-    vec![true]
+    Vec::new()
 }
 
 fn default_light_emission() -> [u8; 3] {
@@ -142,11 +142,15 @@ impl ObjectDef {
     }
 
     /// Validate that solid_mask length matches size.
-    /// Logs an error and pads/truncates the mask instead of panicking.
+    /// If solid_mask is empty (omitted in RON), fills with `false` (fully passable).
+    /// If non-empty but wrong length, logs error and pads/truncates.
     /// Also auto-fills `drops` from `auto_item` when drops is empty.
     pub fn validate(&mut self) {
         let expected = (self.size.0 * self.size.1) as usize;
-        if self.solid_mask.len() != expected {
+        if self.solid_mask.is_empty() {
+            // Omitted → fully passable
+            self.solid_mask = vec![false; expected];
+        } else if self.solid_mask.len() != expected {
             error!(
                 "ObjectDef '{}': solid_mask len {} != size {}x{} = {}, auto-correcting",
                 self.id,

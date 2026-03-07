@@ -1,15 +1,8 @@
 (
   id: "tree_object",
   display_name: "Tree",
-  size: (3, 5),
+  size: (5, 13),
   sprite: "tree.png",
-  solid_mask: [
-    false, false, false,
-    false, false, false,
-    false, false, false,
-    false, false, false,
-    false, false, false,
-  ],
   placement: Floor,
   object_type: Decoration,
   background: true,

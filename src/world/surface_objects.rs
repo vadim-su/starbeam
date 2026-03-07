@@ -2,16 +2,15 @@
 //! freshly generated chunks. Uses a deterministic per-column hash so results
 //! are reproducible and independent of chunk load order.
 
-use crate::object::definition::ObjectId;
 use crate::object::placed::{ObjectState, OccupancyRef, PlacedObject};
 use crate::object::registry::ObjectRegistry;
 use crate::registry::tile::TileId;
-use crate::world::chunk::{ChunkData, Layer};
+use crate::world::chunk::ChunkData;
 use crate::world::ctx::WorldCtxRef;
 use crate::world::terrain_gen::surface_height;
 
 /// Minimum spacing between trees (in tiles).
-const TREE_MIN_SPACING: i32 = 6;
+const TREE_MIN_SPACING: i32 = 8;
 
 /// Deterministic hash for a world column. Returns a value in 0..256.
 fn column_hash(tile_x: i32, seed: u32) -> u32 {
@@ -67,8 +66,8 @@ pub fn populate_surface_objects(
 
         // Deterministic: does this column get a tree?
         let hash = column_hash(world_x, ctx.config.seed);
-        // ~18% chance (46/256)
-        if hash >= 46 {
+        // ~30% chance (77/256) — further filtered by terrain checks
+        if hash >= 77 {
             continue;
         }
 
@@ -79,7 +78,7 @@ pub fn populate_surface_objects(
             }
         }
 
-        // Find surface height at this x
+        // Find surface height at the anchor column
         let surface_y = surface_height(
             ctx.noise_cache,
             world_x,
@@ -88,18 +87,13 @@ pub fn populate_surface_objects(
             ctx.planet_config.layers.surface.terrain_amplitude,
         );
 
-        // Anchor is at (world_x, surface_y + 1) — one tile above the surface
-        let anchor_y = surface_y + 1;
-        let local_y = anchor_y - base_y;
-
-        // Check if entire tree fits vertically in this chunk
-        if local_y < 0 || (local_y as u32 + tree_h) > chunk_size {
-            continue;
-        }
-
-        // Verify anchor tiles: surface must be solid below all anchor columns
+        // Verify anchor tiles: surface must be roughly level (±1 tile) under
+        // the tree footprint. Use the minimum surface height as the anchor so
+        // the trunk base always sits on solid ground.
+        let mut min_sh = surface_y;
+        let mut max_sh = surface_y;
         let mut floor_ok = true;
-        for dx in 0..tree_w as i32 {
+        for dx in 1..tree_w as i32 {
             let tx = world_x + dx;
             let wrapped_tx = ctx.config.wrap_tile_x(tx);
             let sh = surface_height(
@@ -109,13 +103,23 @@ pub fn populate_surface_objects(
                 ctx.planet_config.layers.surface.terrain_frequency,
                 ctx.planet_config.layers.surface.terrain_amplitude,
             );
-            // Surface must be at the same height (flat ground)
-            if sh != surface_y {
+            min_sh = min_sh.min(sh);
+            max_sh = max_sh.max(sh);
+            if max_sh - min_sh > 1 {
                 floor_ok = false;
                 break;
             }
         }
         if !floor_ok {
+            continue;
+        }
+
+        // Re-anchor at the lowest surface point so trunk base is on ground
+        let anchor_y = min_sh + 1;
+        let local_y = anchor_y - base_y;
+
+        // Check if entire tree fits vertically in this chunk
+        if local_y < 0 || (local_y as u32 + tree_h) > chunk_size {
             continue;
         }
 
@@ -174,8 +178,8 @@ pub fn populate_surface_objects(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::object::definition::ObjectId;
     use crate::test_helpers::fixtures;
-    use crate::world::chunk::WorldMap;
     use crate::world::terrain_gen::generate_chunk_tiles;
 
     fn test_object_registry_with_tree() -> ObjectRegistry {
@@ -204,9 +208,9 @@ mod tests {
             ObjectDef {
                 id: "tree_object".into(),
                 display_name: "Tree".into(),
-                size: (3, 5),
+                size: (5, 13),
                 sprite: "objects/tree.png".into(),
-                solid_mask: vec![false; 15],
+                solid_mask: vec![false; 65],
                 placement: PlacementRule::Floor,
                 light_emission: [0, 0, 0],
                 object_type: ObjectType::Decoration,
