@@ -94,6 +94,20 @@ pub struct CharacterPartsDef {
     pub back_arm: Option<PartDef>,
 }
 
+impl CharacterPartsDef {
+    /// Look up the config for a given part type.
+    /// Body always returns `Some`; others may be absent.
+    pub fn config_for(&self, part: crate::player::parts::PartType) -> Option<&PartDef> {
+        use crate::player::parts::PartType;
+        match part {
+            PartType::Body => Some(&self.body),
+            PartType::Head => self.head.as_ref(),
+            PartType::FrontArm => self.front_arm.as_ref(),
+            PartType::BackArm => self.back_arm.as_ref(),
+        }
+    }
+}
+
 /// Asset loaded from item.ron — a single item definition.
 #[derive(Asset, TypePath, Debug, Deserialize)]
 pub struct ItemDefAsset {

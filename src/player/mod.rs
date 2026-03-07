@@ -136,27 +136,9 @@ fn spawn_player(
                 fallback_lm.0.clone()
             };
 
-            let (fw, fh) = if let Some(ref parts_def) = anim_config.parts {
-                match part_type {
-                    PartType::Body => parts_def.body.frame_size,
-                    PartType::Head => parts_def.head.as_ref().map(|p| p.frame_size).unwrap_or(anim_config.sprite_size),
-                    PartType::FrontArm => parts_def.front_arm.as_ref().map(|p| p.frame_size).unwrap_or(anim_config.sprite_size),
-                    PartType::BackArm => parts_def.back_arm.as_ref().map(|p| p.frame_size).unwrap_or(anim_config.sprite_size),
-                }
-            } else {
-                anim_config.sprite_size
-            };
-
-            let (ox, oy) = if let Some(ref parts_def) = anim_config.parts {
-                match part_type {
-                    PartType::Body => parts_def.body.offset,
-                    PartType::Head => parts_def.head.as_ref().map(|p| p.offset).unwrap_or((0.0, 0.0)),
-                    PartType::FrontArm => parts_def.front_arm.as_ref().map(|p| p.offset).unwrap_or((0.0, 0.0)),
-                    PartType::BackArm => parts_def.back_arm.as_ref().map(|p| p.offset).unwrap_or((0.0, 0.0)),
-                }
-            } else {
-                (0.0, 0.0)
-            };
+            let part_cfg = anim_config.parts.as_ref().and_then(|p| p.config_for(part_type));
+            let (fw, fh) = part_cfg.map(|c| c.frame_size).unwrap_or(anim_config.sprite_size);
+            let (ox, oy) = part_cfg.map(|c| c.offset).unwrap_or((0.0, 0.0));
 
             let material = lit_materials.add(LitSpriteMaterial {
                 sprite: sprite_handle,
