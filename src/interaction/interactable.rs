@@ -39,10 +39,19 @@ pub fn detect_nearby_interactable(
     let mut closest: Option<(Entity, f32)> = None;
 
     for (entity, station_tf) in &station_query {
+        // Distance to nearest edge of the object AABB, not its center.
+        // Transform.scale stores (width_px, height_px, 1.0) for objects.
+        let half_w = station_tf.scale.x / 2.0;
+        let half_h = station_tf.scale.y / 2.0;
+
         let dx = (player_tf.translation.x - station_tf.translation.x).abs();
         let dx = dx.min(world_width - dx); // wrap-aware
         let dy = (player_tf.translation.y - station_tf.translation.y).abs();
-        let dist = (dx * dx + dy * dy).sqrt();
+
+        // Signed distance to AABB edge (negative = inside)
+        let edge_dx = (dx - half_w).max(0.0);
+        let edge_dy = (dy - half_h).max(0.0);
+        let dist = (edge_dx * edge_dx + edge_dy * edge_dy).sqrt();
 
         if dist <= range_px {
             if closest.is_none() || dist < closest.unwrap().1 {
