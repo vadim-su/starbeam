@@ -1,7 +1,10 @@
+use std::collections::HashMap;
+
 use bevy::prelude::*;
 use bevy::sprite_render::MeshMaterial2d;
 
 use crate::physics::{Grounded, Submerged, Velocity};
+use crate::player::parts::PartType;
 use crate::player::{Player, PLAYER_SPRITE_SIZE};
 use crate::registry::loading::CharacterAnimConfig;
 use crate::registry::player::PlayerConfig;
@@ -9,12 +12,32 @@ use crate::world::lit_sprite::LitSpriteMaterial;
 
 const VELOCITY_DEADZONE: f32 = 0.1;
 
-/// Loaded animation frame handles, built from CharacterAnimConfig data.
-#[derive(Resource)]
-pub struct CharacterAnimations {
+/// Animation frames for a single body part.
+#[derive(Debug, Default)]
+pub struct PartAnimFrames {
     pub idle: Vec<Handle<Image>>,
     pub running: Vec<Handle<Image>>,
     pub jumping: Vec<Handle<Image>>,
+}
+
+/// Loaded animation frame handles for all body parts.
+#[derive(Resource)]
+pub struct CharacterAnimations {
+    pub parts: HashMap<PartType, PartAnimFrames>,
+}
+
+impl CharacterAnimations {
+    /// Get frames for a specific part and animation kind.
+    pub fn frames_for(&self, part: PartType, kind: AnimationKind) -> &[Handle<Image>] {
+        self.parts
+            .get(&part)
+            .map(|p| match kind {
+                AnimationKind::Idle => p.idle.as_slice(),
+                AnimationKind::Running => p.running.as_slice(),
+                AnimationKind::Jumping | AnimationKind::Swimming => p.jumping.as_slice(),
+            })
+            .unwrap_or(&[])
+    }
 }
 
 /// Current animation state on the player entity.
@@ -42,26 +65,68 @@ pub fn load_character_animations(
     anim_config: Res<CharacterAnimConfig>,
 ) {
     let base = &anim_config.base_path;
+    let mut parts_map = HashMap::new();
 
-    // Helper: resolve frame paths relative to the character's base directory
-    let load_frames = |anim_name: &str| -> Vec<Handle<Image>> {
-        anim_config
-            .animations
-            .get(anim_name)
-            .map(|def| {
-                def.frames
-                    .iter()
-                    .map(|frame| asset_server.load(format!("{base}{frame}")))
-                    .collect()
-            })
-            .unwrap_or_default()
+    let load_part = |sprite_dir: &str| -> PartAnimFrames {
+        let load_anim = |anim_name: &str| -> Vec<Handle<Image>> {
+            anim_config
+                .animations
+                .get(anim_name)
+                .map(|def| {
+                    def.frames
+                        .iter()
+                        .map(|frame| {
+                            let part_frame =
+                                frame.replacen("sprites/", &format!("{sprite_dir}/"), 1);
+                            asset_server.load(format!("{base}{part_frame}"))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        PartAnimFrames {
+            idle: load_anim("staying"),
+            running: load_anim("running"),
+            jumping: load_anim("jumping"),
+        }
     };
 
-    commands.insert_resource(CharacterAnimations {
-        idle: load_frames("staying"),
-        running: load_frames("running"),
-        jumping: load_frames("jumping"),
-    });
+    if let Some(ref parts_def) = anim_config.parts {
+        parts_map.insert(PartType::Body, load_part(&parts_def.body.sprite_dir));
+        if let Some(ref head) = parts_def.head {
+            parts_map.insert(PartType::Head, load_part(&head.sprite_dir));
+        }
+        if let Some(ref front_arm) = parts_def.front_arm {
+            parts_map.insert(PartType::FrontArm, load_part(&front_arm.sprite_dir));
+        }
+        if let Some(ref back_arm) = parts_def.back_arm {
+            parts_map.insert(PartType::BackArm, load_part(&back_arm.sprite_dir));
+        }
+    } else {
+        // Legacy mode: load all frames under Body
+        let load_frames = |anim_name: &str| -> Vec<Handle<Image>> {
+            anim_config
+                .animations
+                .get(anim_name)
+                .map(|def| {
+                    def.frames
+                        .iter()
+                        .map(|frame| asset_server.load(format!("{base}{frame}")))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        parts_map.insert(
+            PartType::Body,
+            PartAnimFrames {
+                idle: load_frames("staying"),
+                running: load_frames("running"),
+                jumping: load_frames("jumping"),
+            },
+        );
+    }
+
+    commands.insert_resource(CharacterAnimations { parts: parts_map });
 }
 
 /// Advance animation frames and switch states based on velocity.
@@ -105,7 +170,7 @@ pub fn animate_player(
             anim.kind = new_kind;
             anim.frame = 0;
             anim.timer.reset();
-            let frames = frames_for_kind(&animations, anim.kind);
+            let frames = animations.frames_for(PartType::Body, anim.kind);
             if !frames.is_empty() {
                 if let Some(mat) = materials.get_mut(&mat_handle.0) {
                     mat.sprite = frames[0].clone();
@@ -133,7 +198,7 @@ pub fn animate_player(
                 // Velocity-based frame selection (not timer-based).
                 // Rising (vel.y > 0): frames 0..half (first half)
                 // Falling (vel.y <= 0): frames half..end (second half)
-                let frames = &animations.jumping;
+                let frames = animations.frames_for(PartType::Body, anim.kind);
                 if !frames.is_empty() {
                     let half = frames.len() / 2; // 3 for 7 frames
                     let jump_vel = player_config.jump_velocity;
@@ -157,7 +222,7 @@ pub fn animate_player(
                 // Timer-based cycling for Idle and Running
                 anim.timer.tick(time.delta());
                 if anim.timer.just_finished() {
-                    let frames = frames_for_kind(&animations, anim.kind);
+                    let frames = animations.frames_for(PartType::Body, anim.kind);
                     if !frames.is_empty() {
                         anim.frame = (anim.frame + 1) % frames.len();
                         if let Some(mat) = materials.get_mut(&mat_handle.0) {
@@ -167,14 +232,5 @@ pub fn animate_player(
                 }
             }
         }
-    }
-}
-
-fn frames_for_kind(animations: &CharacterAnimations, kind: AnimationKind) -> &[Handle<Image>] {
-    match kind {
-        AnimationKind::Idle => &animations.idle,
-        AnimationKind::Running => &animations.running,
-        AnimationKind::Jumping => &animations.jumping,
-        AnimationKind::Swimming => &animations.jumping, // placeholder until swimming sprites exist
     }
 }

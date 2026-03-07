@@ -22,6 +22,7 @@ use crate::world::terrain_gen::TerrainNoiseCache;
 pub use crate::physics::{Grounded, Velocity};
 
 use animation::{AnimationKind, AnimationState, CharacterAnimations};
+use parts::PartType;
 
 #[derive(Component)]
 pub struct Player;
@@ -88,7 +89,11 @@ fn spawn_player(
         (surface_y + 5) as f32 * world_config.tile_size + player_config.height / 2.0;
 
     let material = lit_materials.add(LitSpriteMaterial {
-        sprite: animations.idle[0].clone(),
+        sprite: animations
+            .frames_for(PartType::Body, AnimationKind::Idle)
+            .first()
+            .cloned()
+            .unwrap_or_else(|| fallback_lm.0.clone()),
         lightmap: fallback_lm.0.clone(),
         lightmap_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
         sprite_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
