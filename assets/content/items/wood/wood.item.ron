@@ -1,0 +1,9 @@
+(
+  id: "wood",
+  display_name: "Wood",
+  description: "A piece of wood harvested from a tree.",
+  max_stack: 999,
+  rarity: Common,
+  item_type: Material,
+  icon: Some("item.png"),
+)

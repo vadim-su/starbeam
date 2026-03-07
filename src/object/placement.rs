@@ -263,6 +263,7 @@ mod tests {
                 flicker_strength: 0.0,
                 flicker_min: 1.0,
                 auto_item: None,
+                background: false,
             },
             ObjectDef {
                 id: "barrel".into(),
@@ -281,6 +282,7 @@ mod tests {
                 flicker_strength: 0.0,
                 flicker_min: 1.0,
                 auto_item: None,
+                background: false,
             },
             ObjectDef {
                 id: "torch".into(),
@@ -299,6 +301,7 @@ mod tests {
                 flicker_strength: 0.0,
                 flicker_min: 1.0,
                 auto_item: None,
+                background: false,
             },
             ObjectDef {
                 id: "chest".into(),
@@ -317,6 +320,7 @@ mod tests {
                 flicker_strength: 0.0,
                 flicker_min: 1.0,
                 auto_item: None,
+                background: false,
             },
             // Index 4: FloorOrWall placement
             ObjectDef {
@@ -336,6 +340,7 @@ mod tests {
                 flicker_strength: 0.0,
                 flicker_min: 1.0,
                 auto_item: None,
+                background: false,
             },
         ])
     }

@@ -63,8 +63,10 @@ pub fn spawn_objects_for_chunk(
         let offset_x = (def.size.0 as f32 - 1.0) * tile_size / 2.0;
         let offset_y = (def.size.1 as f32 - 1.0) * tile_size / 2.0;
 
-        // Z = 0.5 (between fg tiles at 0.0 and dropped items at 1.0)
-        let z = 0.5;
+        // Background objects (trees, etc.) render behind the player, between
+        // bg tiles (z=-1) and fg tiles (z=0). Foreground objects sit between
+        // fg tiles (z=0) and dropped items (z=1).
+        let z = if def.background { -0.5 } else { 0.5 };
 
         let mut entity_cmd = commands.spawn((
             PlacedObjectEntity {

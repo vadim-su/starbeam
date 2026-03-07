@@ -23,6 +23,7 @@ use crate::world::autotile::{compute_bitmask, AutotileRegistry};
 use crate::world::ctx::{WorldCtx, WorldCtxRef};
 use crate::world::lit_sprite::{LitSpriteMaterial, SharedLitQuad};
 use crate::world::mesh_builder::{build_chunk_mesh, MeshBuildBuffers};
+use crate::world::surface_objects;
 use crate::world::terrain_gen;
 use crate::world::tile_renderer::SharedTileMaterial;
 
@@ -690,6 +691,19 @@ pub fn chunk_loading_system(
                 cy,
             );
             if let Some(ref obj_reg) = object_registry {
+                // Populate surface decorations (trees) on freshly generated chunks.
+                // Fresh chunks have no objects; persisted chunks already have theirs.
+                let data_cx = ctx_ref.config.wrap_chunk_x(display_cx);
+                if let Some(chunk) = world_map.chunks.get(&(data_cx, cy)) {
+                    if chunk.objects.is_empty() {
+                        // Need mutable access — re-borrow
+                        if let Some(chunk_mut) = world_map.chunks.get_mut(&(data_cx, cy)) {
+                            surface_objects::populate_surface_objects(
+                                chunk_mut, data_cx, cy, &ctx_ref, obj_reg,
+                            );
+                        }
+                    }
+                }
                 spawn_objects_for_chunk(
                     &mut commands,
                     &world_map,
@@ -948,6 +962,7 @@ mod tests {
                 flicker_strength: 0.0,
                 flicker_min: 1.0,
                 auto_item: None,
+                background: false,
             },
             ObjectDef {
                 id: "barrel".into(),
@@ -966,6 +981,7 @@ mod tests {
                 flicker_strength: 0.0,
                 flicker_min: 1.0,
                 auto_item: None,
+                background: false,
             },
             ObjectDef {
                 id: "torch".into(),
@@ -984,6 +1000,7 @@ mod tests {
                 flicker_strength: 0.0,
                 flicker_min: 1.0,
                 auto_item: None,
+                background: false,
             },
         ])
     }

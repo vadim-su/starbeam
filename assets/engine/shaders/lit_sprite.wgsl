@@ -54,6 +54,29 @@ struct SpriteUvRect {
 // brightness. Think of it as looking through tinted glass.
 @group(2) @binding(6) var<uniform> submerge_tint: vec4<f32>;
 
+// Interaction highlight: (r, g, b, strength).
+// When active, transparent pixels adjacent to opaque ones glow with (r,g,b)
+// creating a back-lit outline effect.
+@group(2) @binding(7) var<uniform> highlight: vec4<f32>;
+
+// Check if any neighboring texel (4-directional, 1px offset) is opaque.
+fn has_opaque_neighbor(uv: vec2<f32>, texel: vec2<f32>) -> bool {
+    let offsets = array<vec2<f32>, 4>(
+        vec2<f32>( 1.0,  0.0),
+        vec2<f32>(-1.0,  0.0),
+        vec2<f32>( 0.0,  1.0),
+        vec2<f32>( 0.0, -1.0),
+    );
+    for (var i = 0u; i < 4u; i++) {
+        let neighbor_uv = uv + offsets[i] * texel;
+        let a = textureSample(sprite_texture, sprite_sampler, neighbor_uv).a;
+        if a > 0.1 {
+            return true;
+        }
+    }
+    return false;
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // Handle flipped UVs from negative Transform.scale.x (flip_x).
@@ -63,6 +86,21 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let uv = base_uv * sprite_rect.scale + sprite_rect.offset;
 
     let color = textureSample(sprite_texture, sprite_sampler, uv);
+
+    // Outline highlight: transparent pixels next to opaque ones glow.
+    if highlight.w > 0.0 && color.a < 0.01 {
+        let tex_size = vec2<f32>(textureDimensions(sprite_texture));
+        let texel = sprite_rect.scale / tex_size;
+
+        if has_opaque_neighbor(uv, texel) {
+            // Scale outline brightness by the lightmap so it stays dim in darkness.
+            let lightmap_uv = in.world_pos * lm_xform.scale + lm_xform.offset;
+            let light = textureSample(lightmap_texture, lightmap_sampler, lightmap_uv).rgb;
+            let outline_brightness = max(light.r, max(light.g, light.b));
+            return vec4<f32>(highlight.xyz * outline_brightness, highlight.w);
+        }
+    }
+
     if color.a < 0.01 {
         discard;
     }

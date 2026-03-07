@@ -1,0 +1,19 @@
+(
+  id: "tree_object",
+  display_name: "Tree",
+  size: (3, 5),
+  sprite: "tree.png",
+  solid_mask: [
+    false, false, false,
+    false, false, false,
+    false, false, false,
+    false, false, false,
+    false, false, false,
+  ],
+  placement: Floor,
+  object_type: Decoration,
+  background: true,
+  drops: [
+    (item_id: "wood", min: 3, max: 5),
+  ],
+)

@@ -19,6 +19,7 @@ impl Plugin for InteractionPlugin {
                     block_action::block_interaction_system,
                     interactable::detect_nearby_interactable,
                     interactable::handle_interaction_input,
+                    interactable::update_interactable_highlight,
                 )
                     .in_set(GameSet::Input),
             );

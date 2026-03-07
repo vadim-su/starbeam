@@ -8,6 +8,7 @@ pub mod lit_sprite;
 pub mod mesh_builder;
 pub mod rc_lighting;
 pub mod rc_pipeline;
+pub mod surface_objects;
 pub mod terrain_gen;
 pub mod tile_renderer;
 

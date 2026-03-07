@@ -68,6 +68,7 @@ mod tests {
                 flicker_strength: 0.0,
                 flicker_min: 1.0,
                 auto_item: None,
+                background: false,
             },
             ObjectDef {
                 id: "chest".into(),
@@ -86,6 +87,7 @@ mod tests {
                 flicker_strength: 0.0,
                 flicker_min: 1.0,
                 auto_item: None,
+                background: false,
             },
         ])
     }

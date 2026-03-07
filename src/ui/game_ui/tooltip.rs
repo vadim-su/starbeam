@@ -7,8 +7,15 @@ use super::theme::UiTheme;
 use crate::inventory::Inventory;
 use crate::player::Player;
 
-/// Spawn tooltip entity (singleton).
-pub fn spawn_tooltip(mut commands: Commands, theme: Res<UiTheme>) {
+/// Spawn tooltip entity (singleton). Skips if already exists.
+pub fn spawn_tooltip(
+    mut commands: Commands,
+    theme: Res<UiTheme>,
+    existing: Query<Entity, With<UiTooltip>>,
+) {
+    if !existing.is_empty() {
+        return;
+    }
     let colors = &theme.colors;
     let padding = theme.tooltip.padding;
 

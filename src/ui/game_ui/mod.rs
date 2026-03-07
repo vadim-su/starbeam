@@ -142,7 +142,15 @@ fn toggle_inventory(
 }
 
 /// Spawn all game UI elements (hotbar, inventory screen).
-fn spawn_game_ui(mut commands: Commands, theme: Res<UiTheme>) {
+/// Skips spawning if UI already exists (e.g. after planet warp re-enters InGame).
+fn spawn_game_ui(
+    mut commands: Commands,
+    theme: Res<UiTheme>,
+    existing: Query<Entity, With<InventoryScreen>>,
+) {
+    if !existing.is_empty() {
+        return;
+    }
     hotbar::spawn_hotbar(&mut commands, &theme);
     inventory::spawn_inventory_screen(&mut commands, &theme);
 }

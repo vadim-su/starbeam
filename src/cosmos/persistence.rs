@@ -213,6 +213,7 @@ pub fn respawn_saved_dropped_items(
             lightmap_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
             sprite_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
             submerge_tint: Vec4::ZERO,
+            highlight: Vec4::ZERO,
         });
 
         commands.spawn((

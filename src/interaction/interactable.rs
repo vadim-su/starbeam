@@ -1,8 +1,11 @@
 use bevy::prelude::*;
+use bevy::sprite_render::MeshMaterial2d;
 
 use crate::crafting::CraftingStation;
+use crate::physics::TileCollider;
 use crate::player::Player;
 use crate::registry::world::ActiveWorld;
+use crate::world::lit_sprite::LitSpriteMaterial;
 
 /// Resource: the nearest interactable entity within range, if any.
 #[derive(Resource, Default)]
@@ -18,16 +21,21 @@ pub struct OpenStation(pub Option<Entity>);
 #[derive(Resource, Default)]
 pub struct HandCraftOpen(pub bool);
 
-const INTERACTION_RANGE: f32 = 3.0; // tiles
+const INTERACTION_RANGE: f32 = 1.5; // tiles from the nearest object edge
 
 /// Each frame, find the nearest CraftingStation within range of the player.
+///
+/// Distance is measured between the edges of the player's collision box and the
+/// station's AABB — not from the player's center point. This prevents the
+/// highlight from activating when the player *looks* far away (the large sprite
+/// is offset from the small collision box).
 pub fn detect_nearby_interactable(
     mut nearby: ResMut<NearbyInteractable>,
-    player_query: Query<&Transform, With<Player>>,
+    player_query: Query<(&Transform, &TileCollider), With<Player>>,
     station_query: Query<(Entity, &Transform), With<CraftingStation>>,
     world_config: Res<ActiveWorld>,
 ) {
-    let Ok(player_tf) = player_query.single() else {
+    let Ok((player_tf, player_col)) = player_query.single() else {
         nearby.entity = None;
         return;
     };
@@ -36,21 +44,29 @@ pub fn detect_nearby_interactable(
     let world_width = world_config.width_tiles as f32 * tile_size;
     let range_px = INTERACTION_RANGE * tile_size;
 
+    // Player collision half-extents
+    let player_half_w = player_col.width / 2.0;
+    let player_half_h = player_col.height / 2.0;
+
     let mut closest: Option<(Entity, f32)> = None;
 
     for (entity, station_tf) in &station_query {
-        // Distance to nearest edge of the object AABB, not its center.
+        // Station AABB half-extents.
         // Transform.scale stores (width_px, height_px, 1.0) for objects.
-        let half_w = station_tf.scale.x / 2.0;
-        let half_h = station_tf.scale.y / 2.0;
+        let station_half_w = station_tf.scale.x / 2.0;
+        let station_half_h = station_tf.scale.y / 2.0;
 
-        let dx = (player_tf.translation.x - station_tf.translation.x).abs();
-        let dx = dx.min(world_width - dx); // wrap-aware
+        // Wrap-aware horizontal distance: normalize to [0, world_width) first,
+        // then pick the shorter path around the cylinder.
+        let mut dx = (player_tf.translation.x - station_tf.translation.x).abs() % world_width;
+        if dx > world_width / 2.0 {
+            dx = world_width - dx;
+        }
         let dy = (player_tf.translation.y - station_tf.translation.y).abs();
 
-        // Signed distance to AABB edge (negative = inside)
-        let edge_dx = (dx - half_w).max(0.0);
-        let edge_dy = (dy - half_h).max(0.0);
+        // Edge-to-edge distance between both AABBs (negative = overlapping)
+        let edge_dx = (dx - player_half_w - station_half_w).max(0.0);
+        let edge_dy = (dy - player_half_h - station_half_h).max(0.0);
         let dist = (edge_dx * edge_dx + edge_dy * edge_dy).sqrt();
 
         if dist <= range_px {
@@ -109,6 +125,35 @@ pub fn handle_interaction_input(
             // Close station UI if open
             open_station.0 = None;
             hand_craft_open.0 = true;
+        }
+    }
+}
+
+/// Outline color for the nearest interactable object (soft white contour).
+const HIGHLIGHT_COLOR: Vec4 = Vec4::new(1.0, 1.0, 1.0, 0.25);
+
+/// Set highlight on the nearest interactable entity, clear on others.
+pub fn update_interactable_highlight(
+    nearby: Res<NearbyInteractable>,
+    station_query: Query<&MeshMaterial2d<LitSpriteMaterial>, With<CraftingStation>>,
+    mut materials: ResMut<Assets<LitSpriteMaterial>>,
+) {
+    if !nearby.is_changed() {
+        return;
+    }
+
+    // Clear highlight on ALL station materials, then set on the active one.
+    for mat_handle in &station_query {
+        if let Some(mat) = materials.get_mut(&mat_handle.0) {
+            mat.highlight = Vec4::ZERO;
+        }
+    }
+
+    if let Some(entity) = nearby.entity {
+        if let Ok(mat_handle) = station_query.get(entity) {
+            if let Some(mat) = materials.get_mut(&mat_handle.0) {
+                mat.highlight = HIGHLIGHT_COLOR;
+            }
         }
     }
 }

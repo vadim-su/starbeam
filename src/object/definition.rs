@@ -106,6 +106,10 @@ pub struct ObjectDef {
     /// and the object's `drops` will auto-include this item (if drops is empty).
     #[serde(default)]
     pub auto_item: Option<AutoItemConfig>,
+    /// Background objects render behind the player (z=-0.5) and are fully
+    /// passable. Used for trees and other decorations that sit on the bg layer.
+    #[serde(default)]
+    pub background: bool,
 }
 
 impl ObjectDef {
@@ -201,6 +205,7 @@ mod tests {
             flicker_strength: 0.0,
             flicker_min: 1.0,
             auto_item: None,
+            background: false,
         }
     }
 
