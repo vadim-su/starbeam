@@ -11,6 +11,7 @@ use crate::inventory::{Hotbar, Inventory};
 use crate::liquid::registry::LiquidRegistry;
 use crate::physics::{Gravity, Submerged, TileCollider};
 use crate::registry::biome::PlanetConfig;
+use crate::registry::loading::CharacterAnimConfig;
 use crate::registry::player::PlayerConfig;
 use crate::registry::world::ActiveWorld;
 use crate::registry::AppState;
@@ -22,7 +23,7 @@ use crate::world::terrain_gen::TerrainNoiseCache;
 pub use crate::physics::{Grounded, Velocity};
 
 use animation::{AnimationKind, AnimationState, CharacterAnimations};
-use parts::PartType;
+use parts::{CharacterPart, PartType};
 
 #[derive(Component)]
 pub struct Player;
@@ -61,12 +62,12 @@ fn spawn_player(
     planet_config: Res<PlanetConfig>,
     noise_cache: Res<TerrainNoiseCache>,
     animations: Res<CharacterAnimations>,
+    anim_config: Res<CharacterAnimConfig>,
     quad: Option<Res<SharedLitQuad>>,
     fallback_lm: Res<FallbackLightmap>,
     mut lit_materials: ResMut<Assets<LitSpriteMaterial>>,
     existing_player: Query<Entity, With<Player>>,
 ) {
-    // Skip if player already exists (e.g. after warp — respawn_player handles repositioning)
     if existing_player.iter().next().is_some() {
         return;
     }
@@ -88,22 +89,20 @@ fn spawn_player(
     let spawn_pixel_y =
         (surface_y + 5) as f32 * world_config.tile_size + player_config.height / 2.0;
 
-    let material = lit_materials.add(LitSpriteMaterial {
-        sprite: animations
-            .frames_for(PartType::Body, AnimationKind::Idle)
-            .first()
-            .cloned()
-            .unwrap_or_else(|| fallback_lm.0.clone()),
-        lightmap: fallback_lm.0.clone(),
-        lightmap_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
-        sprite_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
-        submerge_tint: Vec4::ZERO,
-        highlight: Vec4::ZERO,
-    });
+    // Determine which parts to spawn
+    let parts_to_spawn: Vec<PartType> = if anim_config.parts.is_some() {
+        PartType::ALL
+            .iter()
+            .copied()
+            .filter(|pt| animations.parts.contains_key(pt))
+            .collect()
+    } else {
+        vec![PartType::Body]
+    };
 
-    commands.spawn((
+    // Spawn parent entity (physics + inventory, NO rendering components)
+    let mut parent = commands.spawn((
         Player,
-        LitSprite,
         {
             let mut inv = Inventory::new();
             inv.try_add_item("torch", 10, 999, crate::inventory::BagTarget::Main);
@@ -127,14 +126,60 @@ fn spawn_player(
             timer: Timer::from_seconds(0.15, TimerMode::Repeating),
             facing_right: true,
         },
-        Mesh2d(quad.0.clone()),
-        MeshMaterial2d(material),
-        Transform::from_xyz(spawn_pixel_x, spawn_pixel_y, 1.0).with_scale(Vec3::new(
-            PLAYER_SPRITE_SIZE,
-            PLAYER_SPRITE_SIZE,
-            1.0,
-        )),
+        Transform::from_xyz(spawn_pixel_x, spawn_pixel_y, 1.0),
     ));
+
+    // Spawn child entities for each body part
+    parent.with_children(|builder| {
+        for &part_type in &parts_to_spawn {
+            let frames = animations.frames_for(part_type, AnimationKind::Idle);
+            let sprite_handle = if !frames.is_empty() {
+                frames[0].clone()
+            } else {
+                fallback_lm.0.clone()
+            };
+
+            let (fw, fh) = if let Some(ref parts_def) = anim_config.parts {
+                match part_type {
+                    PartType::Body => parts_def.body.frame_size,
+                    PartType::Head => parts_def.head.as_ref().map(|p| p.frame_size).unwrap_or(anim_config.sprite_size),
+                    PartType::FrontArm => parts_def.front_arm.as_ref().map(|p| p.frame_size).unwrap_or(anim_config.sprite_size),
+                    PartType::BackArm => parts_def.back_arm.as_ref().map(|p| p.frame_size).unwrap_or(anim_config.sprite_size),
+                }
+            } else {
+                anim_config.sprite_size
+            };
+
+            let (ox, oy) = if let Some(ref parts_def) = anim_config.parts {
+                match part_type {
+                    PartType::Body => parts_def.body.offset,
+                    PartType::Head => parts_def.head.as_ref().map(|p| p.offset).unwrap_or((0.0, 0.0)),
+                    PartType::FrontArm => parts_def.front_arm.as_ref().map(|p| p.offset).unwrap_or((0.0, 0.0)),
+                    PartType::BackArm => parts_def.back_arm.as_ref().map(|p| p.offset).unwrap_or((0.0, 0.0)),
+                }
+            } else {
+                (0.0, 0.0)
+            };
+
+            let material = lit_materials.add(LitSpriteMaterial {
+                sprite: sprite_handle,
+                lightmap: fallback_lm.0.clone(),
+                lightmap_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
+                sprite_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
+                submerge_tint: Vec4::ZERO,
+                highlight: Vec4::ZERO,
+            });
+
+            builder.spawn((
+                CharacterPart(part_type),
+                LitSprite,
+                Mesh2d(quad.0.clone()),
+                MeshMaterial2d(material),
+                Transform::from_xyz(ox, oy, part_type.z_offset())
+                    .with_scale(Vec3::new(fw as f32, fh as f32, 1.0)),
+            ));
+        }
+    });
 }
 
 /// After a warp, teleport the existing player to the new world's surface.
