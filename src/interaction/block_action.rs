@@ -3,8 +3,10 @@ use bevy::sprite_render::MeshMaterial2d;
 use bevy::window::PrimaryWindow;
 
 use crate::cosmos::persistence::{DirtyChunks, DROPPED_ITEM_LIFETIME_SECS};
+use crate::crafting::CraftingStation;
 use crate::inventory::{Hotbar, Inventory};
 use crate::item::{calculate_drops, DropDef, DroppedItem, ItemRegistry, SpawnParams};
+use crate::object::definition::ObjectType;
 use crate::object::placement::{can_place_object, get_object_at, place_object, remove_object};
 use crate::object::plugin::{ObjectAnimation, ObjectSpriteMaterials};
 use crate::object::registry::ObjectRegistry;
@@ -294,6 +296,16 @@ pub fn block_interaction_system(
                                             )),
                                             Visibility::default(),
                                         ));
+
+                                    // Add CraftingStation component for crafting station objects
+                                    if let ObjectType::CraftingStation { ref station_id } =
+                                        def.object_type
+                                    {
+                                        entity_cmd.insert(CraftingStation {
+                                            station_id: station_id.clone(),
+                                            active_craft: None,
+                                        });
+                                    }
 
                                     if let Some(ref sprites) = object_sprites {
                                         if let Some(template_handle) =
