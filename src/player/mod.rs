@@ -28,9 +28,6 @@ use parts::{CharacterPart, PartType};
 #[derive(Component)]
 pub struct Player;
 
-/// Player sprite pixel dimensions (44×44 adventurer frames).
-const PLAYER_SPRITE_SIZE: f32 = 44.0;
-
 pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
@@ -233,28 +230,32 @@ pub(crate) fn respawn_player_on_warp(
 fn update_submerge_tint(
     liquid_registry: Res<LiquidRegistry>,
     mut materials: ResMut<Assets<LitSpriteMaterial>>,
-    query: Query<(&Submerged, &MeshMaterial2d<LitSpriteMaterial>), With<Player>>,
+    player_query: Query<(&Submerged, &Children), With<Player>>,
+    part_query: Query<&MeshMaterial2d<LitSpriteMaterial>, With<CharacterPart>>,
 ) {
-    for (sub, mat_handle) in &query {
-        let Some(mat) = materials.get_mut(&mat_handle.0) else {
-            continue;
+    for (sub, children) in &player_query {
+        let tint = if sub.ratio < 0.01 || sub.liquid_id.is_none() {
+            Vec4::ZERO
+        } else {
+            let color = liquid_registry
+                .get(sub.liquid_id)
+                .map(|d| d.color)
+                .unwrap_or([0.0; 4]);
+            let max_c = color[0].max(color[1]).max(color[2]).max(0.01);
+            let tint_r = color[0] / max_c;
+            let tint_g = color[1] / max_c;
+            let tint_b = color[2] / max_c;
+            let strength = (sub.ratio * color[3]).min(0.5);
+            Vec4::new(tint_r, tint_g, tint_b, strength)
         };
-        if sub.ratio < 0.01 || sub.liquid_id.is_none() {
-            mat.submerge_tint = Vec4::ZERO;
-            continue;
+
+        for child in children.iter() {
+            let Ok(mat_handle) = part_query.get(child) else {
+                continue;
+            };
+            if let Some(mat) = materials.get_mut(&mat_handle.0) {
+                mat.submerge_tint = tint;
+            }
         }
-        let color = liquid_registry
-            .get(sub.liquid_id)
-            .map(|d| d.color)
-            .unwrap_or([0.0; 4]);
-        // Normalize liquid color to unit brightness so the tint shifts hue
-        // without overall darkening. E.g. water (0.2, 0.4, 0.8) → (0.25, 0.5, 1.0).
-        let max_c = color[0].max(color[1]).max(color[2]).max(0.01);
-        let tint_r = color[0] / max_c;
-        let tint_g = color[1] / max_c;
-        let tint_b = color[2] / max_c;
-        // Strength scales with submersion ratio. Capped to keep the effect subtle.
-        let strength = (sub.ratio * color[3]).min(0.5);
-        mat.submerge_tint = Vec4::new(tint_r, tint_g, tint_b, strength);
     }
 }
