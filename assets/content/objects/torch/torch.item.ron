@@ -5,6 +5,6 @@
   max_stack: 999,
   rarity: Common,
   item_type: Block,
-  icon: "item.png",
+  icon: Some("item.png"),
   placeable_object: Some("torch_object"),
 )

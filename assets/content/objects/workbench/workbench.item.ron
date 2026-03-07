@@ -5,6 +5,6 @@
   max_stack: 10,
   rarity: Common,
   item_type: Block,
-  icon: "item.png",
+  // icon: defaults to the object sprite (workbench.png) when omitted.
   placeable_object: Some("workbench_object"),
 )

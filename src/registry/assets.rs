@@ -79,7 +79,8 @@ pub struct ItemDefAsset {
     pub rarity: crate::item::definition::Rarity,
     #[serde(default)]
     pub item_type: crate::item::definition::ItemType,
-    pub icon: String,
+    #[serde(default)]
+    pub icon: Option<String>,
     #[serde(default)]
     pub placeable: Option<String>,
     #[serde(default)]
@@ -101,7 +102,7 @@ impl ItemDefAsset {
             max_stack: self.max_stack,
             rarity: self.rarity,
             item_type: self.item_type,
-            icon: format!("{}{}", base_path, self.icon),
+            icon: self.icon.as_ref().map(|i| format!("{}{}", base_path, i)),
             placeable: self.placeable.clone(),
             placeable_object: self.placeable_object.clone(),
             equipment_slot: self.equipment_slot,

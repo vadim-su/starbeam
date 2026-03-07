@@ -63,7 +63,9 @@ pub struct ItemDef {
     pub rarity: Rarity,
     #[serde(default)]
     pub item_type: ItemType,
-    pub icon: String,
+    /// Explicit icon path. If `None`, the UI falls back to the object sprite
+    /// for items with `placeable_object` (Starbound-style).
+    pub icon: Option<String>,
     pub placeable: Option<String>,
     /// If set, placing this item creates an object (not a tile) in the world.
     #[serde(default)]
@@ -106,7 +108,7 @@ mod tests {
             max_stack: 999,
             rarity: Rarity::Common,
             item_type: ItemType::Block,
-            icon: "items/dirt.png".into(),
+            icon: Some("items/dirt.png".into()),
             placeable: Some("dirt".into()),
             placeable_object: None,
             equipment_slot: None,

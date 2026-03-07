@@ -152,18 +152,38 @@ fn init_slot_frames(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 }
 
 /// Load item icons using paths from ItemDef.icon.
+/// When `icon` is `None` and the item has `placeable_object`, the object's
+/// sprite is used as the inventory icon (Starbound-style fallback).
 fn load_item_icons(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     item_registry: Res<crate::item::ItemRegistry>,
+    object_registry: Res<crate::object::registry::ObjectRegistry>,
 ) {
     let mut icon_registry = ItemIconRegistry::new();
 
     for i in 0..item_registry.len() {
         let id = crate::item::ItemId(i as u16);
         let def = item_registry.get(id);
-        let handle: Handle<Image> = asset_server.load(&def.icon);
-        icon_registry.register(id, handle);
+
+        let icon_path: Option<String> = def.icon.clone().or_else(|| {
+            // Fallback: use the placed object's sprite as the icon.
+            def.placeable_object.as_deref().and_then(|obj_name| {
+                object_registry
+                    .by_name(obj_name)
+                    .map(|oid| object_registry.get(oid).sprite.clone())
+            })
+        });
+
+        if let Some(path) = icon_path {
+            let handle: Handle<Image> = asset_server.load(&path);
+            icon_registry.register(id, handle);
+        } else {
+            warn!(
+                "Item '{}' has no icon and no placeable_object fallback",
+                def.id
+            );
+        }
     }
 
     commands.insert_resource(icon_registry);
