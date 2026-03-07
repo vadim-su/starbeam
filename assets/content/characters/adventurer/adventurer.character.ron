@@ -11,30 +11,39 @@
   swim_gravity_factor: 0.3,
   swim_drag: 0.15,
 
-  sprite_size: (44, 44),
+  sprite_size: (48, 48),
   animations: {
     "staying": (
-      frames: ["sprites/staying/frame_000.png"],
-      fps: 1.0,
+      frames: [
+        "sprites/body/staying/frame_000.png",
+        "sprites/body/staying/frame_001.png",
+        "sprites/body/staying/frame_002.png",
+        "sprites/body/staying/frame_003.png",
+      ],
+      fps: 4.0,
     ),
     "running": (
       frames: [
-        "sprites/running/frame_000.png",
-        "sprites/running/frame_001.png",
-        "sprites/running/frame_002.png",
-        "sprites/running/frame_003.png",
+        "sprites/body/running/frame_000.png",
+        "sprites/body/running/frame_001.png",
+        "sprites/body/running/frame_002.png",
+        "sprites/body/running/frame_003.png",
+        "sprites/body/running/frame_004.png",
+        "sprites/body/running/frame_005.png",
       ],
       fps: 10.0,
     ),
     "jumping": (
       frames: [
-        "sprites/jumping/frame_000.png",
-        "sprites/jumping/frame_001.png",
-        "sprites/jumping/frame_002.png",
-        "sprites/jumping/frame_003.png",
-        "sprites/jumping/frame_004.png",
-        "sprites/jumping/frame_005.png",
-        "sprites/jumping/frame_006.png",
+        "sprites/body/jumping/frame_000.png",
+        "sprites/body/jumping/frame_001.png",
+        "sprites/body/jumping/frame_002.png",
+        "sprites/body/jumping/frame_003.png",
+        "sprites/body/jumping/frame_004.png",
+        "sprites/body/jumping/frame_005.png",
+        "sprites/body/jumping/frame_006.png",
+        "sprites/body/jumping/frame_007.png",
+        "sprites/body/jumping/frame_008.png",
       ],
       fps: 12.0,
     ),
@@ -42,9 +51,24 @@
 
   parts: Some((
     body: (
-      sprite_dir: "sprites",
-      frame_size: (44, 44),
+      sprite_dir: "sprites/body",
+      frame_size: (48, 48),
       offset: (0.0, 0.0),
     ),
+    head: Some((
+      sprite_dir: "sprites/head",
+      frame_size: (48, 48),
+      offset: (0.0, 0.0),
+    )),
+    front_arm: Some((
+      sprite_dir: "sprites/front_arm",
+      frame_size: (48, 48),
+      offset: (0.0, 0.0),
+    )),
+    back_arm: Some((
+      sprite_dir: "sprites/back_arm",
+      frame_size: (48, 48),
+      offset: (0.0, 0.0),
+    )),
   )),
 )

@@ -346,10 +346,10 @@ mod tests {
         assert!(asset.animations.contains_key("staying"));
         assert!(asset.animations.contains_key("running"));
         assert!(asset.animations.contains_key("jumping"));
-        assert_eq!(asset.sprite_size, (44, 44));
+        assert_eq!(asset.sprite_size, (48, 48));
         assert!(asset.parts.is_some());
         let parts = asset.parts.as_ref().unwrap();
-        assert_eq!(parts.body.frame_size, (44, 44));
+        assert_eq!(parts.body.frame_size, (48, 48));
     }
 
     #[test]

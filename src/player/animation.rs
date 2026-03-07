@@ -67,7 +67,10 @@ pub fn load_character_animations(
     let base = &anim_config.base_path;
     let mut parts_map = HashMap::new();
 
-    let load_part = |sprite_dir: &str| -> PartAnimFrames {
+    // Load frames for a part by replacing the body sprite_dir prefix with the part's sprite_dir.
+    // Animations list frame paths relative to body (e.g. "sprites/body/staying/frame_000.png").
+    // For other parts we swap "sprites/body" -> "sprites/head", etc.
+    let load_part = |sprite_dir: &str, body_sprite_dir: &str| -> PartAnimFrames {
         let load_anim = |anim_name: &str| -> Vec<Handle<Image>> {
             anim_config
                 .animations
@@ -76,8 +79,7 @@ pub fn load_character_animations(
                     def.frames
                         .iter()
                         .map(|frame| {
-                            let part_frame =
-                                frame.replacen("sprites/", &format!("{sprite_dir}/"), 1);
+                            let part_frame = frame.replacen(body_sprite_dir, sprite_dir, 1);
                             asset_server.load(format!("{base}{part_frame}"))
                         })
                         .collect()
@@ -92,15 +94,16 @@ pub fn load_character_animations(
     };
 
     if let Some(ref parts_def) = anim_config.parts {
-        parts_map.insert(PartType::Body, load_part(&parts_def.body.sprite_dir));
+        let body_dir = &parts_def.body.sprite_dir;
+        parts_map.insert(PartType::Body, load_part(body_dir, body_dir));
         if let Some(ref head) = parts_def.head {
-            parts_map.insert(PartType::Head, load_part(&head.sprite_dir));
+            parts_map.insert(PartType::Head, load_part(&head.sprite_dir, body_dir));
         }
         if let Some(ref front_arm) = parts_def.front_arm {
-            parts_map.insert(PartType::FrontArm, load_part(&front_arm.sprite_dir));
+            parts_map.insert(PartType::FrontArm, load_part(&front_arm.sprite_dir, body_dir));
         }
         if let Some(ref back_arm) = parts_def.back_arm {
-            parts_map.insert(PartType::BackArm, load_part(&back_arm.sprite_dir));
+            parts_map.insert(PartType::BackArm, load_part(&back_arm.sprite_dir, body_dir));
         }
     } else {
         // Legacy mode: load all frames under Body
