@@ -32,3 +32,10 @@ impl PartType {
 /// Marker component on each body-part child entity.
 #[derive(Component)]
 pub struct CharacterPart(pub PartType);
+
+/// Marker + state for arms that can aim toward the cursor.
+#[derive(Component)]
+pub struct ArmAiming {
+    /// Whether aiming is currently active (item in hotbar slot).
+    pub active: bool,
+}

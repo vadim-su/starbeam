@@ -23,7 +23,7 @@ use crate::world::terrain_gen::TerrainNoiseCache;
 pub use crate::physics::{Grounded, Velocity};
 
 use animation::{AnimationKind, AnimationState, CharacterAnimations};
-use parts::{CharacterPart, PartType};
+use parts::{ArmAiming, CharacterPart, PartType};
 
 #[derive(Component)]
 pub struct Player;
@@ -149,7 +149,7 @@ fn spawn_player(
                 highlight: Vec4::ZERO,
             });
 
-            builder.spawn((
+            let mut entity_cmd = builder.spawn((
                 CharacterPart(part_type),
                 LitSprite,
                 Mesh2d(quad.0.clone()),
@@ -157,6 +157,10 @@ fn spawn_player(
                 Transform::from_xyz(ox, oy, part_type.z_offset())
                     .with_scale(Vec3::new(fw as f32, fh as f32, 1.0)),
             ));
+
+            if matches!(part_type, PartType::FrontArm | PartType::BackArm) {
+                entity_cmd.insert(ArmAiming { active: false });
+            }
         }
     });
 }
