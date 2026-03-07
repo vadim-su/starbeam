@@ -947,6 +947,7 @@ mod tests {
                 flicker_speed: 0.0,
                 flicker_strength: 0.0,
                 flicker_min: 1.0,
+                auto_item: None,
             },
             ObjectDef {
                 id: "barrel".into(),
@@ -964,6 +965,7 @@ mod tests {
                 flicker_speed: 0.0,
                 flicker_strength: 0.0,
                 flicker_min: 1.0,
+                auto_item: None,
             },
             ObjectDef {
                 id: "torch".into(),
@@ -981,6 +983,7 @@ mod tests {
                 flicker_speed: 0.0,
                 flicker_strength: 0.0,
                 flicker_min: 1.0,
+                auto_item: None,
             },
         ])
     }

@@ -6,4 +6,9 @@
   solid_mask: [true, false, true, false, false, false],
   placement: Floor,
   object_type: Decoration,
+  auto_item: Some((
+    description: "A sturdy wooden table.",
+    max_stack: 10,
+    item_type: Block,
+  )),
 )

@@ -80,7 +80,9 @@ pub(crate) fn hot_reload_objects(
     mut events: MessageReader<AssetEvent<ObjectDefAsset>>,
     handles: Res<RegistryHandles>,
     assets: Res<Assets<ObjectDefAsset>>,
+    item_assets: Res<Assets<ItemDefAsset>>,
     mut registry: ResMut<ObjectRegistry>,
+    mut item_registry: ResMut<crate::item::registry::ItemRegistry>,
 ) {
     let mut changed = false;
     for event in events.read() {
@@ -106,6 +108,28 @@ pub(crate) fn hot_reload_objects(
         info!(
             "Hot-reloaded ObjectRegistry ({} objects)",
             registry.len()
+        );
+
+        // Rebuild ItemRegistry: explicit .item.ron items + auto-generated from objects
+        let mut item_defs: Vec<_> = handles
+            .items
+            .iter()
+            .filter_map(|(base_path, handle)| {
+                item_assets.get(handle).map(|a| a.to_item_def(base_path))
+            })
+            .collect();
+        for (base_path, handle) in &handles.objects {
+            if let Some(asset) = assets.get(handle) {
+                let def = asset.to_object_def(base_path);
+                if let Some(item_def) = def.generate_item_def(base_path) {
+                    item_defs.push(item_def);
+                }
+            }
+        }
+        *item_registry = crate::item::registry::ItemRegistry::from_defs(item_defs);
+        info!(
+            "Hot-reloaded ItemRegistry from objects ({} items)",
+            item_registry.len()
         );
     }
 }

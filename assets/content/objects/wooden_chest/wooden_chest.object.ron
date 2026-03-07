@@ -6,4 +6,9 @@
   solid_mask: [true, true],
   placement: Floor,
   object_type: Container( slots: 16 ),
+  auto_item: Some((
+    description: "A wooden chest for storing items.",
+    max_stack: 10,
+    item_type: Block,
+  )),
 )

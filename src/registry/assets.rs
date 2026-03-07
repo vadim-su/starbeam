@@ -282,6 +282,15 @@ mod tests {
         // Verify sprite path resolution
         let def = asset.to_object_def("content/objects/torch/");
         assert_eq!(def.sprite, "content/objects/torch/torch.png");
+        // Verify auto_item is parsed
+        let auto = def.auto_item.as_ref().expect("torch should have auto_item");
+        assert_eq!(auto.max_stack, 999);
+        assert_eq!(auto.description, "A simple torch that emits warm light.");
+        // Verify auto-generated item uses item_id override
+        let item = def.generate_item_def("content/objects/torch/").unwrap();
+        assert_eq!(item.id, "torch");
+        assert_eq!(item.placeable_object, Some("torch_object".into()));
+        assert_eq!(item.icon, Some("content/objects/torch/item.png".into()));
     }
 
     #[test]

@@ -128,7 +128,9 @@ pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServe
         ),
     ];
 
-    // Load item definitions from individual *.item.ron files
+    // Load item definitions from individual *.item.ron files.
+    // Objects with `auto_item` config don't need separate .item.ron files —
+    // their items are auto-generated during check_loading.
     let items = vec![
         (
             "content/tiles/dirt/".to_string(),
@@ -141,14 +143,6 @@ pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServe
         (
             "content/tiles/grass/".to_string(),
             asset_server.load::<ItemDefAsset>("content/tiles/grass/grass.item.ron"),
-        ),
-        (
-            "content/objects/torch/".to_string(),
-            asset_server.load::<ItemDefAsset>("content/objects/torch/torch.item.ron"),
-        ),
-        (
-            "content/objects/workbench/".to_string(),
-            asset_server.load::<ItemDefAsset>("content/objects/workbench/workbench.item.ron"),
         ),
     ];
 
@@ -270,8 +264,8 @@ pub(crate) fn check_loading(
         })
         .collect();
 
-    // Build ItemRegistry from loaded item.ron files
-    let item_defs: Vec<ItemDef> = loading
+    // Build ItemRegistry from loaded item.ron files + auto-generated items from objects
+    let mut item_defs: Vec<ItemDef> = loading
         .items
         .iter()
         .filter_map(|(base_path, handle)| {
@@ -280,6 +274,18 @@ pub(crate) fn check_loading(
                 .map(|asset| asset.to_item_def(base_path))
         })
         .collect();
+
+    // Generate ItemDefs from objects with auto_item config
+    for (base_path, handle) in &loading.objects {
+        if let Some(asset) = object_assets.get(handle) {
+            let def = asset.to_object_def(base_path);
+            if let Some(item_def) = def.generate_item_def(base_path) {
+                info!("Auto-generated item '{}' from object '{}'", item_def.id, def.id);
+                item_defs.push(item_def);
+            }
+        }
+    }
+
     commands.insert_resource(ItemRegistry::from_defs(item_defs));
 
     // Build RecipeRegistry from loaded recipe.ron files

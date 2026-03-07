@@ -11,8 +11,8 @@ pub struct ObjectRegistry {
 }
 
 impl ObjectRegistry {
-    pub fn from_defs(defs: Vec<ObjectDef>) -> Self {
-        for def in &defs {
+    pub fn from_defs(mut defs: Vec<ObjectDef>) -> Self {
+        for def in &mut defs {
             def.validate();
         }
         let name_to_id = defs
@@ -67,6 +67,7 @@ mod tests {
                 flicker_speed: 0.0,
                 flicker_strength: 0.0,
                 flicker_min: 1.0,
+                auto_item: None,
             },
             ObjectDef {
                 id: "chest".into(),
@@ -84,6 +85,7 @@ mod tests {
                 flicker_speed: 0.0,
                 flicker_strength: 0.0,
                 flicker_min: 1.0,
+                auto_item: None,
             },
         ])
     }
