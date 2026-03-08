@@ -154,6 +154,14 @@ pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServe
             "content/items/wood/".to_string(),
             asset_server.load::<ItemDefAsset>("content/items/wood/wood.item.ron"),
         ),
+        (
+            "content/items/blueprint_wooden_sword/".to_string(),
+            asset_server.load::<ItemDefAsset>("content/items/blueprint_wooden_sword/blueprint_wooden_sword.item.ron"),
+        ),
+        (
+            "content/items/blueprint_stone_pickaxe/".to_string(),
+            asset_server.load::<ItemDefAsset>("content/items/blueprint_stone_pickaxe/blueprint_stone_pickaxe.item.ron"),
+        ),
     ];
 
     let recipes = vec![

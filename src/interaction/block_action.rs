@@ -24,6 +24,8 @@ use crate::world::lit_sprite::{
 };
 use crate::world::rc_lighting::RcGridDirty;
 
+use super::use_item::ItemUsedThisFrame;
+
 /// Dropped item display size in pixels (icons are 16×16).
 const DROPPED_ITEM_SIZE: f32 = 16.0;
 /// Fallback size for items without an icon.
@@ -115,13 +117,18 @@ pub fn block_interaction_system(
     object_params: (
         Query<(Entity, &PlacedObjectEntity)>,
         Option<ResMut<crate::liquid::LiquidSimState>>,
+        Res<ItemUsedThisFrame>,
     ),
 ) {
-    let (object_entities, mut liquid_sim) = object_params;
+    let (object_entities, mut liquid_sim, item_used) = object_params;
     let (fallback_lm, fallback_img, mut rc_dirty, mut dirty_chunks) = fallbacks;
     let left_click = mouse.just_pressed(MouseButton::Left);
     let right_click = mouse.just_pressed(MouseButton::Right);
     if !left_click && !right_click {
+        return;
+    }
+
+    if right_click && item_used.0 {
         return;
     }
 

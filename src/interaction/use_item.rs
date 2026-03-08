@@ -6,12 +6,20 @@ use crate::item::ItemRegistry;
 use crate::item::definition::ItemType;
 use crate::player::Player;
 
+/// Signals that `use_item_system` consumed an item this frame (e.g. a blueprint),
+/// so other right-click systems can skip their processing.
+#[derive(Resource, Default)]
+pub struct ItemUsedThisFrame(pub bool);
+
 /// Consumes blueprint items from the active hotbar slot on right-click.
 pub fn use_item_system(
     mouse: Res<ButtonInput<MouseButton>>,
     mut player_query: Query<(&Hotbar, &mut Inventory, &mut UnlockedRecipes), With<Player>>,
     item_registry: Res<ItemRegistry>,
+    mut item_used: ResMut<ItemUsedThisFrame>,
 ) {
+    item_used.0 = false;
+
     if !mouse.just_pressed(MouseButton::Right) {
         return;
     }
@@ -45,6 +53,7 @@ pub fn use_item_system(
     // Unlock the recipe (even if already unlocked)
     unlocked.blueprints.insert(recipe_id.clone());
     inventory.remove_item(item_id, 1);
+    item_used.0 = true;
 
     info!("Blueprint used: unlocked recipe '{}'", recipe_id);
 }
