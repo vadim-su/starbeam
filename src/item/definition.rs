@@ -19,6 +19,7 @@ pub enum ItemType {
     Armor,
     Consumable,
     Material,
+    Blueprint,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
@@ -72,6 +73,9 @@ pub struct ItemDef {
     pub placeable_object: Option<String>,
     pub equipment_slot: Option<EquipmentSlot>,
     pub stats: Option<ItemStats>,
+    /// If set, using this item unlocks the named recipe in UnlockedRecipes.
+    #[serde(default)]
+    pub blueprint_recipe: Option<String>,
 }
 
 fn default_drop_min() -> u16 {
@@ -113,6 +117,7 @@ mod tests {
             placeable_object: None,
             equipment_slot: None,
             stats: None,
+            blueprint_recipe: None,
         };
 
         assert_eq!(item.id, "dirt");

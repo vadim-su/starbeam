@@ -72,6 +72,7 @@ mod tests {
                 placeable_object: None,
                 equipment_slot: None,
                 stats: None,
+                blueprint_recipe: None,
             },
             ItemDef {
                 id: "stone".into(),
@@ -85,6 +86,7 @@ mod tests {
                 placeable_object: None,
                 equipment_slot: None,
                 stats: None,
+                blueprint_recipe: None,
             },
         ])
     }
