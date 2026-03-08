@@ -132,6 +132,7 @@ impl Plugin for GameUiPlugin {
                 Update,
                 (
                     chat::chat_input_system,
+                    chat::chat_scroll_system,
                     chat::chat_render_messages,
                 )
                     .run_if(in_state(AppState::InGame)),

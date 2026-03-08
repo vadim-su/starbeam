@@ -1,4 +1,5 @@
 use bevy::input::keyboard::{Key, KeyboardInput};
+use bevy::input::mouse::MouseWheel;
 use bevy::input::ButtonState;
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
@@ -214,6 +215,23 @@ fn deactivate_chat(
     }
     for mut bg in bg_query.iter_mut() {
         *bg = BackgroundColor(Color::NONE);
+    }
+}
+
+/// Handles mouse wheel scrolling when chat is active.
+pub fn chat_scroll_system(
+    mut chat_state: ResMut<ChatState>,
+    mut scroll_events: MessageReader<MouseWheel>,
+) {
+    if !chat_state.is_active {
+        return;
+    }
+
+    for event in scroll_events.read() {
+        let delta = event.y.signum() as i32;
+        chat_state.scroll_offset = (chat_state.scroll_offset + delta)
+            .max(0)
+            .min(chat_state.messages.len().saturating_sub(1) as i32);
     }
 }
 
