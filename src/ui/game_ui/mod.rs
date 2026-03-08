@@ -135,6 +135,7 @@ impl Plugin for GameUiPlugin {
                     chat::chat_scroll_system,
                     chat::chat_render_messages,
                 )
+                    .in_set(crate::sets::GameSet::Ui)
                     .run_if(in_state(AppState::InGame)),
             );
     }

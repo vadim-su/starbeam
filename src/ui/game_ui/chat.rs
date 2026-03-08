@@ -235,7 +235,17 @@ pub fn chat_scroll_system(
     }
 }
 
-/// Renders chat messages each frame, applying fade for inactive mode.
+/// Tracks last render state to avoid unnecessary entity churn.
+#[derive(Resource, Default)]
+pub struct ChatRenderState {
+    pub last_message_count: usize,
+    pub was_active: bool,
+    /// Timestamp of the oldest visible message (for fade tracking).
+    pub needs_fade_update: bool,
+}
+
+/// Renders chat messages, rebuilding entities only when state changes.
+/// In inactive mode, also updates when messages are fading.
 pub fn chat_render_messages(
     mut commands: Commands,
     existing: Query<Entity, With<ChatMessageText>>,
@@ -243,7 +253,34 @@ pub fn chat_render_messages(
     chat_state: Res<ChatState>,
     theme: Res<UiTheme>,
     time: Res<Time>,
+    mut render_state: Local<ChatRenderState>,
 ) {
+    let chat = &theme.chat;
+    let now = time.elapsed_secs_f64();
+
+    // Check if we need to rebuild
+    let active_changed = render_state.was_active != chat_state.is_active;
+    let messages_changed = render_state.last_message_count != chat_state.messages.len();
+    let state_changed = chat_state.is_changed();
+
+    // In inactive mode, check if any visible message is still fading
+    let has_fading = if !chat_state.is_active {
+        let start = chat_state.messages.len().saturating_sub(chat.visible_lines);
+        chat_state.messages[start..].iter().any(|msg| {
+            let age = (now - msg.timestamp) as f32;
+            age >= chat.fade_delay_secs && age < chat.fade_delay_secs + chat.fade_duration_secs
+        })
+    } else {
+        false
+    };
+
+    if !active_changed && !messages_changed && !state_changed && !has_fading {
+        return;
+    }
+
+    render_state.was_active = chat_state.is_active;
+    render_state.last_message_count = chat_state.messages.len();
+
     // Despawn all existing message text entities
     for entity in &existing {
         commands.entity(entity).despawn();
@@ -253,23 +290,20 @@ pub fn chat_render_messages(
         return;
     };
 
-    let chat = &theme.chat;
-    let now = time.elapsed_secs_f64();
-
-    // Determine which messages to show
     let messages = &chat_state.messages;
+
+    // In active mode: show a window of messages, scroll_offset shifts the window up
+    // In inactive mode: show last visible_lines
     let slice = if chat_state.is_active {
-        // Show all (respecting scroll_offset)
         let end = (messages.len() as i32 - chat_state.scroll_offset).max(0) as usize;
-        &messages[..end]
+        let start = end.saturating_sub(chat.visible_lines * 4); // show more in active mode
+        &messages[start..end]
     } else {
-        // Show only last visible_lines messages
         let start = messages.len().saturating_sub(chat.visible_lines);
         &messages[start..]
     };
 
     for (i, msg) in slice.iter().enumerate() {
-        // Build prefix
         let prefix = match &msg.category {
             MessageCategory::System => "[System] ".to_string(),
             MessageCategory::Dialog { speaker } => format!("[{}] ", speaker),
@@ -277,7 +311,6 @@ pub fn chat_render_messages(
             MessageCategory::PlayerChat => "[You] ".to_string(),
         };
 
-        // Get color from theme
         let base_color: Color = match &msg.category {
             MessageCategory::System => chat.system_color.clone().into(),
             MessageCategory::Dialog { .. } => chat.dialog_color.clone().into(),
@@ -285,7 +318,6 @@ pub fn chat_render_messages(
             MessageCategory::PlayerChat => chat.player_color.clone().into(),
         };
 
-        // Calculate alpha
         let alpha = if chat_state.is_active {
             1.0_f32
         } else {
@@ -297,7 +329,6 @@ pub fn chat_render_messages(
             }
         };
 
-        // Skip fully faded messages in inactive mode
         if !chat_state.is_active && alpha <= 0.0 {
             continue;
         }
