@@ -1,3 +1,4 @@
+pub mod chat;
 pub mod components;
 pub mod crafting_panel;
 pub mod drag_drop;
@@ -161,6 +162,7 @@ fn spawn_game_ui(
     }
     hotbar::spawn_hotbar(&mut commands, &theme, &asset_server);
     inventory::spawn_inventory_screen(&mut commands, &theme, &asset_server);
+    chat::spawn_chat(&mut commands, &theme);
 }
 
 /// Initialize slot frame textures.
