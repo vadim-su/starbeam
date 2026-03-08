@@ -667,10 +667,16 @@ pub fn chunk_loading_system(
 
     add_chunks_around(cam_chunk_x);
 
-    if cam_chunk_x < load_radius {
-        add_chunks_around(cam_chunk_x + world_chunks);
-    } else if cam_chunk_x >= world_chunks - load_radius {
-        add_chunks_around(cam_chunk_x - world_chunks);
+    if ctx_ref.config.wrap_x {
+        // For wrapping worlds, load duplicate chunks on the other side of the seam
+        if cam_chunk_x < load_radius {
+            add_chunks_around(cam_chunk_x + world_chunks);
+        } else if cam_chunk_x >= world_chunks - load_radius {
+            add_chunks_around(cam_chunk_x - world_chunks);
+        }
+    } else {
+        // For non-wrapping worlds, discard chunks outside [0, world_chunks)
+        desired.retain(|&(cx, _)| cx >= 0 && cx < world_chunks);
     }
 
     for &(display_cx, cy) in &desired {

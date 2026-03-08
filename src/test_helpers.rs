@@ -27,6 +27,7 @@ pub mod fixtures {
             chunk_load_radius: 3,
             seed: 42,
             planet_type: "garden".into(),
+            wrap_x: true,
         }
     }
 

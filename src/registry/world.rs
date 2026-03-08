@@ -16,6 +16,7 @@ pub struct ActiveWorld {
     pub chunk_load_radius: i32,
     pub seed: u32, // TEMPORARY — kept for BiomeMap/TerrainNoiseCache compat
     pub planet_type: String,
+    pub wrap_x: bool,
 }
 
 impl ActiveWorld {
@@ -28,11 +29,19 @@ impl ActiveWorld {
     }
 
     pub fn wrap_tile_x(&self, tile_x: i32) -> i32 {
-        tile_x.rem_euclid(self.width_tiles)
+        if self.wrap_x {
+            tile_x.rem_euclid(self.width_tiles)
+        } else {
+            tile_x
+        }
     }
 
     pub fn wrap_chunk_x(&self, chunk_x: i32) -> i32 {
-        chunk_x.rem_euclid(self.width_chunks())
+        if self.wrap_x {
+            chunk_x.rem_euclid(self.width_chunks())
+        } else {
+            chunk_x
+        }
     }
 
     pub fn world_pixel_width(&self) -> f32 {
@@ -62,6 +71,7 @@ mod tests {
             chunk_load_radius: 3,
             seed: 42,
             planet_type: "garden".into(),
+            wrap_x: true,
         }
     }
 
@@ -103,5 +113,29 @@ mod tests {
     fn world_pixel_width() {
         let c = test_config();
         assert_eq!(c.world_pixel_width(), 2048.0 * 32.0);
+    }
+
+    #[test]
+    fn wrap_tile_x_disabled() {
+        let mut c = test_config();
+        c.wrap_x = false;
+        assert_eq!(c.wrap_tile_x(-1), -1);
+        assert_eq!(c.wrap_tile_x(2048), 2048);
+    }
+
+    #[test]
+    fn wrap_tile_x_enabled() {
+        let mut c = test_config();
+        c.wrap_x = true;
+        assert_eq!(c.wrap_tile_x(-1), 2047);
+        assert_eq!(c.wrap_tile_x(2048), 0);
+    }
+
+    #[test]
+    fn wrap_chunk_x_disabled() {
+        let mut c = test_config();
+        c.wrap_x = false;
+        assert_eq!(c.wrap_chunk_x(-1), -1);
+        assert_eq!(c.wrap_chunk_x(64), 64);
     }
 }

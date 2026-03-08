@@ -35,11 +35,17 @@ pub fn surface_height(
     let perlin = &noise.surface;
     let base = SURFACE_BASE * wc.height_tiles as f64;
 
-    let angle = tile_x as f64 / wc.width_tiles as f64 * 2.0 * std::f64::consts::PI;
-    let radius = wc.width_tiles as f64 * frequency / (2.0 * std::f64::consts::PI);
-    let nx = radius * angle.cos();
-    let ny = radius * angle.sin();
-    let noise_val = perlin.get([nx, ny]);
+    let noise_val = if wc.wrap_x {
+        // Cylindrical noise: maps tile_x onto a circle so left/right edges match
+        let angle = tile_x as f64 / wc.width_tiles as f64 * 2.0 * std::f64::consts::PI;
+        let radius = wc.width_tiles as f64 * frequency / (2.0 * std::f64::consts::PI);
+        let nx = radius * angle.cos();
+        let ny = radius * angle.sin();
+        perlin.get([nx, ny])
+    } else {
+        // Flat noise: no wrapping, tile_x extends freely
+        perlin.get([tile_x as f64 * frequency, 0.0])
+    };
 
     (base + noise_val * amplitude) as i32
 }
@@ -51,6 +57,11 @@ pub fn generate_tile(tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> TileId {
     let planet_config = ctx.planet_config;
 
     if tile_y < 0 || tile_y >= wc.height_tiles {
+        return TileId::AIR;
+    }
+
+    // For non-wrapping worlds, tiles outside [0, width) are air
+    if !wc.wrap_x && (tile_x < 0 || tile_x >= wc.width_tiles) {
         return TileId::AIR;
     }
 
@@ -122,13 +133,21 @@ pub fn generate_tile(tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> TileId {
         WorldLayer::DeepUnderground => planet_config.layers.deep_underground.terrain_frequency,
         WorldLayer::Core => planet_config.layers.core.terrain_frequency,
     };
-    let angle = tile_x as f64 / wc.width_tiles as f64 * 2.0 * std::f64::consts::PI;
-    let radius = wc.width_tiles as f64 * layer_freq / (2.0 * std::f64::consts::PI);
-    let cave_val = cave_perlin.get([
-        radius * angle.cos(),
-        radius * angle.sin(),
-        tile_y as f64 * layer_freq,
-    ]);
+    let cave_val = if wc.wrap_x {
+        let angle = tile_x as f64 / wc.width_tiles as f64 * 2.0 * std::f64::consts::PI;
+        let radius = wc.width_tiles as f64 * layer_freq / (2.0 * std::f64::consts::PI);
+        cave_perlin.get([
+            radius * angle.cos(),
+            radius * angle.sin(),
+            tile_y as f64 * layer_freq,
+        ])
+    } else {
+        cave_perlin.get([
+            tile_x as f64 * layer_freq,
+            tile_y as f64 * layer_freq,
+            0.0,
+        ])
+    };
     if cave_val.abs() < biome.cave_threshold {
         TileId::AIR
     } else {
@@ -141,6 +160,11 @@ pub fn generate_tile(tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> TileId {
 pub fn generate_bg_tile(tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> TileId {
     let wc = ctx.config;
     if tile_y < 0 || tile_y >= wc.height_tiles {
+        return TileId::AIR;
+    }
+
+    // For non-wrapping worlds, tiles outside [0, width) are air
+    if !wc.wrap_x && (tile_x < 0 || tile_x >= wc.width_tiles) {
         return TileId::AIR;
     }
 

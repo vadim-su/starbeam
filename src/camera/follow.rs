@@ -31,6 +31,13 @@ pub fn camera_follow_player(
     let mut target = player_transform.translation;
     target.y = target.y.clamp(half_h, (world_h - half_h).max(half_h));
 
+    // Clamp camera X for non-wrapping worlds so it doesn't scroll past edges
+    if !world_config.wrap_x {
+        let half_w = window.width() / 2.0 * proj_scale;
+        let world_w = world_config.world_pixel_width();
+        target.x = target.x.clamp(half_w, (world_w - half_w).max(half_w));
+    }
+
     // Snap camera to pixel grid to prevent subpixel texture shimmer.
     // One screen pixel = proj_scale world units.
     let pixel = proj_scale;
