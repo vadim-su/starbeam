@@ -37,6 +37,10 @@ pub struct LitSpriteMaterial {
     /// Default (0,0,0,0) = no highlight.
     #[uniform(7)]
     pub highlight: Vec4,
+    /// Multiplicative color tint: (r, g, b, a). Applied to sprite color before lighting.
+    /// Default (1,1,1,1) = no tint. Use darker values to simulate depth/shadow.
+    #[uniform(8)]
+    pub tint: Vec4,
 }
 
 impl Material2d for LitSpriteMaterial {

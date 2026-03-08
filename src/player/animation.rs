@@ -38,6 +38,20 @@ impl CharacterAnimations {
             })
             .unwrap_or(&[])
     }
+
+    /// Max frame count across all parts for a given animation kind.
+    /// Used as the master frame count for animation advancement.
+    pub fn max_frame_count(&self, kind: AnimationKind) -> usize {
+        self.parts
+            .values()
+            .map(|p| match kind {
+                AnimationKind::Idle => p.idle.len(),
+                AnimationKind::Running => p.running.len(),
+                AnimationKind::Jumping | AnimationKind::Swimming => p.jumping.len(),
+            })
+            .max()
+            .unwrap_or(0)
+    }
 }
 
 /// Current animation state on the player entity.
@@ -47,6 +61,10 @@ pub struct AnimationState {
     pub frame: usize,
     pub timer: Timer,
     pub facing_right: bool,
+    /// True when moving in the opposite direction of facing (running backwards).
+    pub running_backwards: bool,
+    /// When true, the aiming system controls facing direction (cursor-based).
+    pub facing_locked: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
@@ -67,24 +85,51 @@ pub fn load_character_animations(
     let base = &anim_config.base_path;
     let mut parts_map = HashMap::new();
 
-    // Load frames for a part by replacing the body sprite_dir prefix with the part's sprite_dir.
-    // Animations list frame paths relative to body (e.g. "sprites/body/staying/frame_000.png").
-    // For other parts we swap "sprites/body" -> "sprites/head", etc.
+    // Discover frame files from a directory on disk (sorted by name).
+    let scan_frames = |sprite_dir: &str, anim_name: &str| -> Vec<String> {
+        let dir = format!("assets/{base}{sprite_dir}/{anim_name}");
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return Vec::new();
+        };
+        let mut files: Vec<String> = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .is_some_and(|ext| ext == "png")
+            })
+            .map(|e| {
+                format!(
+                    "{sprite_dir}/{anim_name}/{}",
+                    e.file_name().to_string_lossy()
+                )
+            })
+            .collect();
+        files.sort();
+        files
+    };
+
+    // Load frames for a part. If AnimationDef has explicit frames, use those
+    // (replacing body_sprite_dir with this part's sprite_dir). Otherwise,
+    // auto-scan the part's directory for frame_*.png files.
     let load_part = |sprite_dir: &str, body_sprite_dir: &str| -> PartAnimFrames {
         let load_anim = |anim_name: &str| -> Vec<Handle<Image>> {
-            anim_config
+            let frames: Vec<String> = anim_config
                 .animations
                 .get(anim_name)
+                .filter(|def| !def.frames.is_empty())
                 .map(|def| {
                     def.frames
                         .iter()
-                        .map(|frame| {
-                            let part_frame = frame.replacen(body_sprite_dir, sprite_dir, 1);
-                            asset_server.load(format!("{base}{part_frame}"))
-                        })
+                        .map(|frame| frame.replacen(body_sprite_dir, sprite_dir, 1))
                         .collect()
                 })
-                .unwrap_or_default()
+                .unwrap_or_else(|| scan_frames(sprite_dir, anim_name));
+
+            frames
+                .iter()
+                .map(|frame| asset_server.load(format!("{base}{frame}")))
+                .collect()
         };
         PartAnimFrames {
             idle: load_anim("staying"),
@@ -99,11 +144,14 @@ pub fn load_character_animations(
         if let Some(ref head) = parts_def.head {
             parts_map.insert(PartType::Head, load_part(&head.sprite_dir, body_dir));
         }
-        if let Some(ref front_arm) = parts_def.front_arm {
-            parts_map.insert(PartType::FrontArm, load_part(&front_arm.sprite_dir, body_dir));
+        if let Some(ref legs) = parts_def.legs {
+            parts_map.insert(PartType::Legs, load_part(&legs.sprite_dir, body_dir));
         }
-        if let Some(ref back_arm) = parts_def.back_arm {
-            parts_map.insert(PartType::BackArm, load_part(&back_arm.sprite_dir, body_dir));
+        if let Some(ref hand_right) = parts_def.hand_right {
+            parts_map.insert(PartType::FrontArm, load_part(&hand_right.sprite_dir, body_dir));
+        }
+        if let Some(ref hand_left) = parts_def.hand_left {
+            parts_map.insert(PartType::BackArm, load_part(&hand_left.sprite_dir, body_dir));
         }
     } else {
         // Legacy mode: load all frames under Body
@@ -180,38 +228,53 @@ pub fn animate_player(
             anim.timer.reset();
         }
 
-        // Update facing direction
-        if velocity.x > VELOCITY_DEADZONE {
-            anim.facing_right = true;
+        // Detect running backwards: moving opposite to facing direction.
+        // Facing is set by aiming system (cursor position); if not aiming,
+        // fall back to velocity-based facing.
+        if !anim.facing_locked {
+            if velocity.x > VELOCITY_DEADZONE {
+                anim.facing_right = true;
+            }
+            if velocity.x < -VELOCITY_DEADZONE {
+                anim.facing_right = false;
+            }
         }
-        if velocity.x < -VELOCITY_DEADZONE {
-            anim.facing_right = false;
-        }
+        anim.running_backwards = if anim.kind == AnimationKind::Running {
+            (anim.facing_right && velocity.x < -VELOCITY_DEADZONE)
+                || (!anim.facing_right && velocity.x > VELOCITY_DEADZONE)
+        } else {
+            false
+        };
 
         // Frame advancement depends on animation kind
         let mut new_frame = anim.frame;
+        let total_frames = animations.max_frame_count(anim.kind);
         match anim.kind {
             AnimationKind::Jumping | AnimationKind::Swimming => {
-                let body_frames = animations.frames_for(PartType::Body, anim.kind);
-                if !body_frames.is_empty() {
-                    let half = body_frames.len() / 2;
+                if total_frames > 0 {
+                    let half = total_frames / 2;
                     let jump_vel = player_config.jump_velocity;
                     new_frame = if velocity.y > 0.0 {
                         let t = 1.0 - (velocity.y / jump_vel).clamp(0.0, 1.0);
                         (t * half as f32) as usize
                     } else {
                         let t = (-velocity.y / jump_vel).clamp(0.0, 1.0);
-                        half + (t * (body_frames.len() - 1 - half) as f32) as usize
+                        half + (t * (total_frames - 1 - half) as f32) as usize
                     };
-                    new_frame = new_frame.min(body_frames.len() - 1);
+                    new_frame = new_frame.min(total_frames - 1);
                 }
             }
             _ => {
                 anim.timer.tick(time.delta());
-                if anim.timer.just_finished() {
-                    let body_frames = animations.frames_for(PartType::Body, anim.kind);
-                    if !body_frames.is_empty() {
-                        new_frame = (anim.frame + 1) % body_frames.len();
+                if anim.timer.just_finished() && total_frames > 0 {
+                    if anim.running_backwards {
+                        new_frame = if anim.frame == 0 {
+                            total_frames - 1
+                        } else {
+                            anim.frame - 1
+                        };
+                    } else {
+                        new_frame = (anim.frame + 1) % total_frames;
                     }
                 }
             }

@@ -71,6 +71,7 @@ pub struct LoadingBiomeAssets {
 #[derive(Resource, Debug, Clone)]
 pub struct CharacterAnimConfig {
     pub sprite_size: (u32, u32),
+    pub render_scale: f32,
     pub animations: std::collections::HashMap<String, AnimationDef>,
     pub base_path: String,
     pub parts: Option<CharacterPartsDef>,
@@ -79,7 +80,7 @@ pub struct CharacterAnimConfig {
 pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServer>) {
     let tiles = asset_server.load::<TileRegistryAsset>("worlds/tiles.registry.ron");
     let character = asset_server
-        .load::<CharacterDefAsset>("content/characters/adventurer/adventurer.character.ron");
+        .load::<CharacterDefAsset>("content/characters/char/char.character.ron");
 
     // Load cosmos generation assets
     let generation_config = asset_server.load::<GenerationConfigAsset>("worlds/generation.ron");
@@ -342,8 +343,9 @@ pub(crate) fn check_loading(
     // Store character animation data for the animation system
     commands.insert_resource(CharacterAnimConfig {
         sprite_size: character.sprite_size,
+        render_scale: character.render_scale,
         animations: character.animations.clone(),
-        base_path: "content/characters/adventurer/".to_string(),
+        base_path: "content/characters/char/".to_string(),
         parts: character.parts.clone(),
     });
 

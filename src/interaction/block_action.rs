@@ -59,6 +59,7 @@ fn spawn_tile_drops(
             sprite_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
             submerge_tint: Vec4::ZERO,
             highlight: Vec4::ZERO,
+            tint: Vec4::ONE,
         });
 
         let vel = params.velocity();

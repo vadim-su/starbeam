@@ -127,8 +127,11 @@ fn spawn_player(
             frame: 0,
             timer: Timer::from_seconds(0.15, TimerMode::Repeating),
             facing_right: true,
+            running_backwards: false,
+            facing_locked: false,
         },
         Transform::from_xyz(spawn_pixel_x, spawn_pixel_y, 1.0),
+        Visibility::default(),
     ));
 
     // Spawn child entities for each body part
@@ -144,6 +147,14 @@ fn spawn_player(
             let part_cfg = anim_config.parts.as_ref().and_then(|p| p.config_for(part_type));
             let (fw, fh) = part_cfg.map(|c| c.frame_size).unwrap_or(anim_config.sprite_size);
             let (ox, oy) = part_cfg.map(|c| c.offset).unwrap_or((0.0, 0.0));
+            let scale = anim_config.render_scale;
+
+            // BackArm gets a darker tint to simulate depth
+            let tint = if part_type == PartType::BackArm {
+                Vec4::new(0.6, 0.6, 0.6, 1.0)
+            } else {
+                Vec4::ONE
+            };
 
             let material = lit_materials.add(LitSpriteMaterial {
                 sprite: sprite_handle,
@@ -152,6 +163,7 @@ fn spawn_player(
                 sprite_uv_rect: Vec4::new(1.0, 1.0, 0.0, 0.0),
                 submerge_tint: Vec4::ZERO,
                 highlight: Vec4::ZERO,
+                tint,
             });
 
             let mut entity_cmd = builder.spawn((
@@ -159,12 +171,24 @@ fn spawn_player(
                 LitSprite,
                 Mesh2d(quad.0.clone()),
                 MeshMaterial2d(material),
-                Transform::from_xyz(ox, oy, part_type.z_offset())
-                    .with_scale(Vec3::new(fw as f32, fh as f32, 1.0)),
+                Transform::from_xyz(ox * scale, oy * scale, part_type.z_offset())
+                    .with_scale(Vec3::new(fw as f32 * scale, fh as f32 * scale, 1.0)),
             ));
 
-            if matches!(part_type, PartType::FrontArm | PartType::BackArm) {
-                entity_cmd.insert(ArmAiming { active: false });
+            if part_type.is_arm() {
+                let pivot = part_cfg
+                    .and_then(|c| c.pivot)
+                    .map(|(x, y)| Vec2::new(x, y) * scale)
+                    .unwrap_or(Vec2::new(0.0, 5.0 * scale));
+                let default_angle = part_cfg
+                    .and_then(|c| c.default_angle)
+                    .unwrap_or(0.0)
+                    .to_radians();
+                entity_cmd.insert(ArmAiming {
+                    active: false,
+                    pivot,
+                    default_angle,
+                });
             }
         }
     });

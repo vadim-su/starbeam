@@ -57,6 +57,8 @@ pub struct CharacterDefAsset {
     #[serde(default = "default_swim_drag")]
     pub swim_drag: f32,
     pub sprite_size: (u32, u32),
+    #[serde(default = "default_render_scale")]
+    pub render_scale: f32,
     pub animations: HashMap<String, AnimationDef>,
     #[serde(default)]
     pub parts: Option<CharacterPartsDef>,
@@ -65,6 +67,7 @@ pub struct CharacterDefAsset {
 /// A single animation within a CharacterDefAsset.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AnimationDef {
+    #[serde(default)]
     pub frames: Vec<String>,
     pub fps: f32,
 }
@@ -80,6 +83,13 @@ pub struct PartDef {
     /// Pixel offset from the parent entity's origin.
     #[serde(default)]
     pub offset: (f32, f32),
+    /// Pivot point for rotation (shoulder attachment), in pixels relative to sprite center.
+    /// Used by arms for aiming rotation.
+    #[serde(default)]
+    pub pivot: Option<(f32, f32)>,
+    /// Default rotation angle in degrees when not aiming. Applied to arms at rest.
+    #[serde(default)]
+    pub default_angle: Option<f32>,
 }
 
 /// All body parts for a modular character.
@@ -89,9 +99,11 @@ pub struct CharacterPartsDef {
     #[serde(default)]
     pub head: Option<PartDef>,
     #[serde(default)]
-    pub front_arm: Option<PartDef>,
-    #[serde(default)]
-    pub back_arm: Option<PartDef>,
+    pub legs: Option<PartDef>,
+    #[serde(default, alias = "front_arm")]
+    pub hand_right: Option<PartDef>,
+    #[serde(default, alias = "back_arm")]
+    pub hand_left: Option<PartDef>,
 }
 
 impl CharacterPartsDef {
@@ -102,8 +114,9 @@ impl CharacterPartsDef {
         match part {
             PartType::Body => Some(&self.body),
             PartType::Head => self.head.as_ref(),
-            PartType::FrontArm => self.front_arm.as_ref(),
-            PartType::BackArm => self.back_arm.as_ref(),
+            PartType::Legs => self.legs.as_ref(),
+            PartType::FrontArm => self.hand_right.as_ref(),
+            PartType::BackArm => self.hand_left.as_ref(),
         }
     }
 }
@@ -173,6 +186,9 @@ fn default_swim_gravity_factor() -> f32 {
 }
 fn default_swim_drag() -> f32 {
     0.15
+}
+fn default_render_scale() -> f32 {
+    1.0
 }
 
 /// Asset loaded from *.parallax.ron

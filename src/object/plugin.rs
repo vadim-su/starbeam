@@ -83,6 +83,7 @@ fn load_object_sprites(
             sprite_uv_rect: Vec4::new(scale_x, scale_y, 0.0, 0.0),
             submerge_tint: Vec4::ZERO,
             highlight: Vec4::ZERO,
+            tint: Vec4::ONE,
         });
 
         materials.insert(id, material.clone());

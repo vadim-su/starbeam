@@ -6,10 +6,6 @@ use crate::player::animation::AnimationState;
 use crate::player::parts::{ArmAiming, CharacterPart};
 use crate::player::Player;
 
-/// Pivot offset: shoulder position relative to sprite center (pixels).
-/// 5px above center on a 48x48 canvas.
-const SHOULDER_PIVOT_Y: f32 = 5.0;
-
 /// Rotates arm children toward the mouse cursor when an item is in the active hotbar slot.
 /// Also overrides facing direction on all children based on cursor position.
 pub fn arm_aiming_system(
@@ -41,15 +37,9 @@ pub fn arm_aiming_system(
         let slot = hotbar.active_slot();
         let aiming_active = slot.left_hand.is_some() || slot.right_hand.is_some();
 
-        // Override facing direction when aiming
-        if aiming_active {
-            anim_state.facing_right = world_pos.x >= player_pos.x;
-        }
-
-        // Calculate angle from shoulder to cursor
-        let shoulder_world = Vec2::new(player_pos.x, player_pos.y + SHOULDER_PIVOT_Y);
-        let delta = world_pos - shoulder_world;
-        let angle = delta.y.atan2(delta.x);
+        // Always face cursor direction
+        anim_state.facing_right = world_pos.x >= player_pos.x;
+        anim_state.facing_locked = true;
 
         // Update arm children
         for child in children.iter() {
@@ -58,19 +48,74 @@ pub fn arm_aiming_system(
             };
 
             aim.active = aiming_active;
+            let pivot = aim.pivot;
 
             if aiming_active {
-                // Flip angle when facing left: mirror across Y axis
                 let facing_right = anim_state.facing_right;
-                let arm_angle = if facing_right {
+
+                // Calculate angle from pivot (shoulder) to cursor in world space
+                let pivot_world = Vec2::new(
+                    player_pos.x,
+                    player_pos.y + pivot.y,
+                );
+                let delta = world_pos - pivot_world;
+                let angle = delta.y.atan2(delta.x);
+
+                // Convert to arm-local angle (0 = pointing forward horizontally).
+                // When facing left, scale.x is negative which mirrors rotation visually,
+                // so we use (angle - PI) instead of (PI - angle) to keep correct direction.
+                let raw = if facing_right {
                     angle
                 } else {
-                    std::f32::consts::PI - angle
+                    angle - std::f32::consts::PI
                 };
-                transform.rotation = Quat::from_rotation_z(arm_angle);
+                // Normalize to [-PI, PI]
+                let arm_angle = if raw > std::f32::consts::PI {
+                    raw - std::f32::consts::TAU
+                } else if raw < -std::f32::consts::PI {
+                    raw + std::f32::consts::TAU
+                } else {
+                    raw
+                };
+
+                // Clamp to natural shoulder range.
+                // When facing left, scale.x flip mirrors rotation visually,
+                // so swap clamp bounds to keep consistent visual limits.
+                let (min_angle, max_angle) = if facing_right {
+                    (-15.0_f32.to_radians(), 60.0_f32.to_radians())
+                } else {
+                    (-60.0_f32.to_radians(), 15.0_f32.to_radians())
+                };
+                let clamped = arm_angle.clamp(min_angle, max_angle);
+
+                let rot = Quat::from_rotation_z(clamped);
+                transform.rotation = rot;
+
+                // Facing flip via scale.x (animate_player skips aiming arms)
+                let abs_sx = transform.scale.x.abs();
+                transform.scale.x = if facing_right { abs_sx } else { -abs_sx };
+
+                // Pivot rotation: keep shoulder fixed in parent space.
+                // Formula: T = pivot - R * pivot
+                let pivot3 = Vec3::new(pivot.x, pivot.y, 0.0);
+                let rotated_pivot = rot * pivot3;
+                transform.translation.x = pivot3.x - rotated_pivot.x;
+                transform.translation.y = pivot3.y - rotated_pivot.y;
             } else {
-                // Reset rotation when not aiming
-                transform.rotation = Quat::IDENTITY;
+                // Apply default resting angle
+                let default_rot = Quat::from_rotation_z(aim.default_angle);
+                transform.rotation = default_rot;
+
+                // Apply pivot offset for default angle
+                if aim.default_angle.abs() > 0.001 {
+                    let pivot3 = Vec3::new(pivot.x, pivot.y, 0.0);
+                    let rotated_pivot = default_rot * pivot3;
+                    transform.translation.x = pivot3.x - rotated_pivot.x;
+                    transform.translation.y = pivot3.y - rotated_pivot.y;
+                } else {
+                    transform.translation.x = 0.0;
+                    transform.translation.y = 0.0;
+                }
             }
         }
     }

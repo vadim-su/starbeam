@@ -59,6 +59,10 @@ struct SpriteUvRect {
 // creating a back-lit outline effect.
 @group(2) @binding(7) var<uniform> highlight: vec4<f32>;
 
+// Multiplicative color tint: (r, g, b, a).
+// Applied to sprite color before lighting. (1,1,1,1) = no change.
+@group(2) @binding(8) var<uniform> tint: vec4<f32>;
+
 // Check if any neighboring texel (4-directional, 1px offset) is opaque.
 fn has_opaque_neighbor(uv: vec2<f32>, texel: vec2<f32>) -> bool {
     let offsets = array<vec2<f32>, 4>(
@@ -109,7 +113,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let lightmap_uv = in.world_pos * lm_xform.scale + lm_xform.offset;
     let light = textureSample(lightmap_texture, lightmap_sampler, lightmap_uv).rgb;
 
-    var lit = color.rgb * light;
+    var lit = color.rgb * tint.rgb * light;
 
     // Submersion: multiplicative tint simulating view through liquid.
     // The tint color is normalized (max channel = 1.0), so blue channel
