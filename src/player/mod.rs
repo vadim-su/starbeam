@@ -109,6 +109,8 @@ fn spawn_player(
             let mut inv = Inventory::new();
             inv.try_add_item("torch", 10, 999, crate::inventory::BagTarget::Main);
             inv.try_add_item("workbench", 1, 10, crate::inventory::BagTarget::Main);
+            inv.try_add_item("blueprint_wooden_sword", 1, 1, crate::inventory::BagTarget::Main);
+            inv.try_add_item("blueprint_stone_pickaxe", 1, 1, crate::inventory::BagTarget::Main);
             inv
         },
         Hotbar::new(),
