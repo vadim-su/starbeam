@@ -19,10 +19,11 @@ use super::player::PlayerConfig;
 use super::tile::TileRegistry;
 use super::world::ActiveWorld;
 use super::{AppState, BiomeParallaxConfigs, RegistryHandles};
-use crate::cosmos::address::CelestialSeeds;
+use crate::cosmos::address::{CelestialAddress, CelestialSeeds};
 use crate::cosmos::assets::{GenerationConfigAsset, StarTypeAsset};
 use crate::cosmos::current::CurrentSystem;
 use crate::cosmos::generation::generate_system;
+use crate::cosmos::ship_location::GlobalBiome;
 use crate::item::definition::ItemDef;
 use crate::item::registry::ItemRegistry;
 use crate::object::definition::ObjectDef;
@@ -695,6 +696,19 @@ pub(crate) fn check_biomes_loaded(
         .iter()
         .map(|(name, handle)| (biome_registry.id_by_name(name), handle.clone()))
         .collect();
+
+    // For ship worlds, insert a GlobalBiome override so the entire world
+    // uses a single biome instead of position-based biome detection.
+    if matches!(world_config.address, CelestialAddress::Ship { .. }) {
+        let primary_id = biome_registry.id_by_name(&planet_config.primary_biome);
+        commands.insert_resource(GlobalBiome {
+            biome_id: primary_id,
+        });
+        info!(
+            "Ship world detected — inserted GlobalBiome override: {}",
+            planet_config.primary_biome
+        );
+    }
 
     // Insert all resources
     commands.insert_resource(planet_config);

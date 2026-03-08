@@ -7,8 +7,9 @@
 
 use bevy::prelude::*;
 
-use crate::cosmos::address::CelestialSeeds;
+use crate::cosmos::address::{CelestialAddress, CelestialSeeds};
 use crate::cosmos::current::CurrentSystem;
+use crate::cosmos::ship_location::{GlobalBiome, ShipLocation};
 use crate::cosmos::persistence::{
     save_current_world, DirtyChunks, PendingDroppedItems, SavedDroppedItem, Universe,
 };
@@ -133,6 +134,16 @@ pub fn handle_warp(
     world_map.chunks.clear();
     loaded_chunks.map.clear();
 
+    // Remove ship-specific resources when warping away from a ship.
+    // GlobalBiome will be re-inserted by check_biomes_loaded if the
+    // destination is also a ship world.
+    if let Some(ref aw) = active_world {
+        if matches!(aw.address, CelestialAddress::Ship { .. }) {
+            commands.remove_resource::<GlobalBiome>();
+            commands.remove_resource::<ShipLocation>();
+        }
+    }
+
     // --- 6. Compute pending dropped items for the destination world ---
     let pending_items = if let Some(save) = universe.planets.get(&body.address) {
         let elapsed = save
@@ -197,10 +208,17 @@ pub fn handle_warp(
     *rc_config = RcLightingConfig::default();
     *rc_input = RcInputData::default();
 
-    // --- 11. Mark player for respawn on new world surface ---
+    // --- 11. Track ship location when warping to a ship world ---
+    if matches!(body.address, CelestialAddress::Ship { .. }) {
+        if let Some(ref aw) = active_world {
+            commands.insert_resource(ShipLocation::Orbit(aw.address.clone()));
+        }
+    }
+
+    // --- 12. Mark player for respawn on new world surface ---
     commands.insert_resource(NeedsRespawn);
 
-    // --- 12. Transition to LoadingBiomes state ---
+    // --- 13. Transition to LoadingBiomes state ---
     next_state.set(AppState::LoadingBiomes);
 
     info!(

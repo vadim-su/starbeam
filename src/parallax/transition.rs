@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+use crate::cosmos::ship_location::GlobalBiome;
 use crate::player::Player;
 use crate::registry::biome::BiomeId;
 use crate::registry::world::ActiveWorld;
@@ -44,6 +45,7 @@ pub fn track_player_biome(
     player_query: Query<&Transform, With<Player>>,
     wc: Res<ActiveWorld>,
     biome_map: Res<BiomeMap>,
+    global_biome: Option<Res<GlobalBiome>>,
     current_biome: Option<Res<CurrentBiome>>,
     transition: Option<Res<ParallaxTransition>>,
     asset_server: Res<AssetServer>,
@@ -53,13 +55,20 @@ pub fn track_player_biome(
     let Ok(player_tf) = player_query.single() else {
         return;
     };
-    let (tile_x, _) = world_to_tile(
-        player_tf.translation.x,
-        player_tf.translation.y,
-        wc.tile_size,
-    );
-    let wrapped_x = wc.wrap_tile_x(tile_x) as u32;
-    let new_biome = biome_map.biome_at(wrapped_x);
+
+    // If a global biome override is set (e.g. ship worlds), use it
+    // instead of position-based biome lookup.
+    let new_biome = if let Some(ref global) = global_biome {
+        global.biome_id
+    } else {
+        let (tile_x, _) = world_to_tile(
+            player_tf.translation.x,
+            player_tf.translation.y,
+            wc.tile_size,
+        );
+        let wrapped_x = wc.wrap_tile_x(tile_x) as u32;
+        biome_map.biome_at(wrapped_x)
+    };
 
     // Initialize on first frame
     let Some(current) = current_biome else {
