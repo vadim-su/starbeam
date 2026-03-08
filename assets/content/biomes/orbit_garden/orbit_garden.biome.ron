@@ -1,0 +1,9 @@
+(
+    id: "orbit_garden",
+    surface_block: "stone",
+    subsurface_block: "stone",
+    subsurface_depth: 0,
+    fill_block: "stone",
+    cave_threshold: 0.0,
+    parallax: Some("content/biomes/orbit_garden/orbit_garden.parallax.ron"),
+)

@@ -1,0 +1,9 @@
+(
+    id: "orbit_barren",
+    surface_block: "stone",
+    subsurface_block: "stone",
+    subsurface_depth: 0,
+    fill_block: "stone",
+    cave_threshold: 0.0,
+    parallax: Some("content/biomes/orbit_barren/orbit_barren.parallax.ron"),
+)

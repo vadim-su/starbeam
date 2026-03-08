@@ -1,0 +1,6 @@
+(
+    layers: [
+        ( name: "stars", image: "content/biomes/deep_space/backgrounds/stars_far.png", speed_x: 0.02, speed_y: 0.02, repeat_x: true, repeat_y: true, z_order: -100.0 ),
+        ( name: "planet_surface", image: "content/biomes/orbit_barren/backgrounds/planet_surface.png", speed_x: 0.0, speed_y: 0.0, repeat_x: false, repeat_y: false, z_order: -90.0 ),
+    ],
+)
