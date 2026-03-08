@@ -122,8 +122,17 @@ impl Plugin for GameUiPlugin {
                     toggle_inventory,
                     drag_drop::update_drag_position,
                     tooltip::update_tooltip,
+                    tooltip::render_tooltip_content.after(tooltip::update_tooltip),
                     window::close_topmost_on_esc,
                     window::handle_window_close_button,
+                )
+                    .run_if(in_state(AppState::InGame)),
+            )
+            .add_systems(
+                Update,
+                (
+                    chat::chat_input_system,
+                    chat::chat_render_messages,
                 )
                     .run_if(in_state(AppState::InGame)),
             );

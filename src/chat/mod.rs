@@ -21,7 +21,7 @@ pub struct ChatMessage {
 }
 
 /// Event fired when the player enters a `/command`.
-#[derive(Event, Debug, Clone)]
+#[derive(Message, Debug, Clone)]
 pub struct ChatCommandEvent {
     pub command: String,
     pub args: Vec<String>,
@@ -86,6 +86,7 @@ pub struct ChatPlugin;
 
 impl Plugin for ChatPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(AppState::InGame), init_chat_state);
+        app.add_message::<ChatCommandEvent>()
+            .add_systems(OnEnter(AppState::InGame), init_chat_state);
     }
 }
