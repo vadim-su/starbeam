@@ -100,6 +100,24 @@ pub struct TooltipConfig {
     pub border_width: f32,
 }
 
+/// Chat panel configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ChatConfig {
+    pub max_messages: usize,
+    pub visible_lines: usize,
+    pub fade_delay_secs: f32,
+    pub fade_duration_secs: f32,
+    pub font_size: f32,
+    pub width: f32,
+    pub height: f32,
+    pub system_color: HexColor,
+    pub dialog_color: HexColor,
+    pub command_color: HexColor,
+    pub player_color: HexColor,
+    pub input_bg_color: HexColor,
+    pub active_bg_color: HexColor,
+}
+
 /// Root UI theme loaded from RON.
 #[derive(Asset, TypePath, Debug, Clone, Deserialize, Resource)]
 pub struct UiTheme {
@@ -110,6 +128,7 @@ pub struct UiTheme {
     pub inventory_screen: InventoryScreenConfig,
     pub tooltip: TooltipConfig,
     pub panel_texture: Option<SliceConfig>,
+    pub chat: ChatConfig,
 }
 
 #[cfg(test)]
