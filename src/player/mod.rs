@@ -83,17 +83,30 @@ fn spawn_player(
         return;
     };
 
-    let spawn_tile_x = 0;
-    let surface_y = terrain_gen::surface_height(
-        &noise_cache,
-        spawn_tile_x,
-        &world_config,
-        planet_config.layers.surface.terrain_frequency,
-        planet_config.layers.surface.terrain_amplitude,
+    let is_ship = matches!(
+        world_config.address,
+        crate::cosmos::address::CelestialAddress::Ship { .. }
     );
-    let spawn_pixel_x = spawn_tile_x as f32 * world_config.tile_size + world_config.tile_size / 2.0;
-    let spawn_pixel_y =
-        (surface_y + 5) as f32 * world_config.tile_size + player_config.height / 2.0;
+
+    let (spawn_pixel_x, spawn_pixel_y) = if is_ship {
+        let cx = (world_config.width_tiles / 2) as f32 * world_config.tile_size
+            + world_config.tile_size / 2.0;
+        let cy = (world_config.height_tiles / 2 + 2) as f32 * world_config.tile_size
+            + player_config.height / 2.0;
+        (cx, cy)
+    } else {
+        let spawn_tile_x = 0;
+        let surface_y = terrain_gen::surface_height(
+            &noise_cache,
+            spawn_tile_x,
+            &world_config,
+            planet_config.layers.surface.terrain_frequency,
+            planet_config.layers.surface.terrain_amplitude,
+        );
+        let px = spawn_tile_x as f32 * world_config.tile_size + world_config.tile_size / 2.0;
+        let py = (surface_y + 5) as f32 * world_config.tile_size + player_config.height / 2.0;
+        (px, py)
+    };
 
     // Determine which parts to spawn
     let parts_to_spawn: Vec<PartType> = if anim_config.parts.is_some() {
@@ -231,7 +244,24 @@ pub(crate) fn respawn_player_on_warp(
         .as_ref()
         .is_some_and(|loc| loc.planet_address == world_config.address);
 
-    let (spawn_pixel_x, spawn_pixel_y) = if use_capsule_spawn {
+    let is_ship = matches!(
+        world_config.address,
+        crate::cosmos::address::CelestialAddress::Ship { .. }
+    );
+
+    let (spawn_pixel_x, spawn_pixel_y) = if is_ship {
+        // Spawn at the center of the ship hull
+        let cx = (world_config.width_tiles / 2) as f32 * world_config.tile_size
+            + world_config.tile_size / 2.0;
+        let cy = (world_config.height_tiles / 2 + 2) as f32 * world_config.tile_size
+            + player_config.height / 2.0;
+        info!(
+            "Player spawning at ship hull center tile ({}, {})",
+            world_config.width_tiles / 2,
+            world_config.height_tiles / 2 + 2
+        );
+        (cx, cy)
+    } else if use_capsule_spawn {
         let loc = capsule_location.as_ref().unwrap();
         let px = loc.tile_x as f32 * world_config.tile_size + world_config.tile_size / 2.0;
         // Spawn a few tiles above the capsule so the player doesn't clip into it

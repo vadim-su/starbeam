@@ -23,7 +23,9 @@ use crate::cosmos::address::{CelestialAddress, CelestialSeeds};
 use crate::cosmos::assets::{GenerationConfigAsset, StarTypeAsset};
 use crate::cosmos::current::CurrentSystem;
 use crate::cosmos::generation::generate_system;
-use crate::cosmos::ship_location::GlobalBiome;
+use crate::cosmos::fuel::ShipFuel;
+use crate::cosmos::pressurization::PressureMap;
+use crate::cosmos::ship_location::{GlobalBiome, ShipLocation};
 use crate::item::definition::ItemDef;
 use crate::item::registry::ItemRegistry;
 use crate::object::definition::ObjectDef;
@@ -402,46 +404,56 @@ pub(crate) fn check_loading(
         gen_config,
     );
 
-    // Find first garden planet (or first body as fallback)
-    let body = system
+    // Find first garden planet for ship orbit reference
+    let garden_body = system
         .bodies
         .iter()
         .find(|b| b.planet_type_id == "garden")
         .or_else(|| system.bodies.first())
         .expect("system must have at least one body");
+    let orbit_address = garden_body.address.clone();
 
-    // Build ActiveWorld from generated body
-    let seeds = CelestialSeeds::derive(42, &body.address);
+    // Build ActiveWorld for the player's ship instead of a planet
+    let ship_address = CelestialAddress::Ship { owner_id: 0 };
+    let ship_planet_type = "ship".to_string();
+    let ship_width: i32 = 128;
+    let ship_height: i32 = 64;
+
+    let seeds = CelestialSeeds::derive(42, &ship_address);
     let active_world = ActiveWorld {
-        address: body.address.clone(),
+        address: ship_address,
         seeds: seeds.clone(),
-        width_tiles: body.width_tiles,
-        height_tiles: body.height_tiles,
+        width_tiles: ship_width,
+        height_tiles: ship_height,
         chunk_size: gen_config.chunk_size,
         tile_size: gen_config.tile_size,
         chunk_load_radius: gen_config.chunk_load_radius,
         seed: seeds.terrain_seed_u32(),
-        planet_type: body.planet_type_id.clone(),
-        wrap_x: body.wrap_x,
+        planet_type: ship_planet_type.clone(),
+        wrap_x: false,
     };
     commands.insert_resource(TerrainNoiseCache::new(active_world.seed));
     commands.insert_resource(active_world);
 
-    // Insert DayNightConfig from generated body
-    let day_night_config = body.day_night.clone();
-    let sum: f32 = day_night_config.phase_ratios().iter().sum();
-    assert!(
-        (sum - 1.0).abs() < 0.01,
-        "Generated day/night ratios must sum to 1.0, got {sum}"
-    );
-    info!(
-        "Generated DayNightConfig: cycle={}s, phases={:.0}/{:.0}/{:.0}/{:.0}%",
-        day_night_config.cycle_duration_secs,
-        day_night_config.dawn_ratio * 100.0,
-        day_night_config.day_ratio * 100.0,
-        day_night_config.sunset_ratio * 100.0,
-        day_night_config.night_ratio * 100.0,
-    );
+    // Ship starts in orbit around the first garden planet
+    commands.insert_resource(ShipLocation::Orbit(orbit_address.clone()));
+    commands.insert_resource(PressureMap::new_dirty());
+    commands.init_resource::<ShipFuel>();
+
+    // DayNightConfig for ship (permanent "day" lighting)
+    let day_night_config = crate::world::day_night::DayNightConfig {
+        cycle_duration_secs: 3600.0,
+        dawn_ratio: 0.0,
+        day_ratio: 1.0,
+        sunset_ratio: 0.0,
+        night_ratio: 0.0,
+        sun_colors: [[1.0, 1.0, 1.0]; 4],
+        sun_intensities: [0.8; 4],
+        ambient_mins: [0.3; 4],
+        sky_colors: [[0.0, 0.0, 0.0, 1.0]; 4],
+        danger_multipliers: [0.0; 4],
+        temperature_modifiers: [0.0; 4],
+    };
     let wt = WorldTime::from_config(&day_night_config);
     commands.insert_resource(day_night_config);
     commands.insert_resource(wt);
@@ -457,13 +469,13 @@ pub(crate) fn check_loading(
         ui_theme: loading.ui_theme.clone(),
     });
 
-    // Find the planet type handle we already loaded for the biome pipeline
+    // Load the "ship" planet type for the biome pipeline
     let planet_handle = loading
         .planet_types
         .iter()
-        .find(|(name, _)| name == &body.planet_type_id)
+        .find(|(name, _)| name == &ship_planet_type)
         .map(|(_, h)| h.clone())
-        .expect("planet type must have been loaded");
+        .expect("ship planet type must have been loaded");
     commands.insert_resource(LoadingBiomeAssets {
         planet_type: planet_handle,
         biomes: Vec::new(),
@@ -480,11 +492,10 @@ pub(crate) fn check_loading(
     });
 
     info!(
-        "Generated system: star={}, {} bodies, landing on {} (orbit {})",
+        "Generated system: star={}, {} bodies, spawning on ship (orbiting {})",
         system.star.type_id,
         system.bodies.len(),
-        body.planet_type_id,
-        body.address.orbit().unwrap_or(0),
+        orbit_address.orbit().unwrap_or(0),
     );
 
     commands.remove_resource::<LoadingAssets>();
