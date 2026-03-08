@@ -16,8 +16,9 @@ pub fn spawn_hotbar(commands: &mut Commands, theme: &UiTheme, asset_server: &Ass
     let colors = &theme.colors;
 
     // Hotbar container
+    let pair_width = config.slot_size * 2.0;
     let total_width =
-        config.slots as f32 * config.slot_size + (config.slots - 1) as f32 * config.gap;
+        config.slots as f32 * pair_width + (config.slots - 1) as f32 * config.gap;
 
     commands
         .spawn((
@@ -60,10 +61,11 @@ pub fn spawn_hotbar(commands: &mut Commands, theme: &UiTheme, asset_server: &Ass
                 let text_dim = colors.text_dim.clone();
 
                 // Slot container (no UiSlot — only hand children have it)
+                // Width = 2× slot_size so each hand half is a square.
                 let mut slot_cmd = parent
                     .spawn((
                         Node {
-                            width: Val::Px(slot_size),
+                            width: Val::Px(slot_size * 2.0),
                             height: Val::Px(slot_size),
                             border: if slot_image.is_some() {
                                 UiRect::ZERO

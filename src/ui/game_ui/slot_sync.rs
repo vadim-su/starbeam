@@ -84,14 +84,11 @@ pub fn update_slot_icons(
                     Hand::Left => slot_data.left_hand.as_deref(),
                     Hand::Right => slot_data.right_hand.as_deref(),
                 };
-                // Resolve count from inventory for hotbar references
-                item_id_opt.and_then(|id| {
+                // Resolve count from inventory for hotbar references.
+                // Return count=0 so the icon stays visible (greyed out).
+                item_id_opt.map(|id| {
                     let count = inventory.count_item(id);
-                    if count > 0 {
-                        Some((id, count.min(u16::MAX as u32) as u16))
-                    } else {
-                        None // Item no longer in inventory
-                    }
+                    (id, count.min(u16::MAX as u32) as u16)
                 })
             }
             SlotType::Equipment(_) => continue,
@@ -108,6 +105,8 @@ pub fn update_slot_icons(
                 continue;
             };
 
+            let depleted = count == 0;
+
             for child in children.iter() {
                 // Update icon or frame image
                 if let Ok((mut image_node, is_icon, is_frame)) = image_query.get_mut(child) {
@@ -115,6 +114,12 @@ pub fn update_slot_icons(
                         if let Some(handle) = icon_registry.get(item_id_typed) {
                             image_node.image = handle.clone();
                         }
+                        // Grey out depleted hotbar items
+                        image_node.color = if depleted {
+                            Color::srgba(0.3, 0.3, 0.3, 0.5)
+                        } else {
+                            Color::WHITE
+                        };
                     } else if is_frame {
                         image_node.image = slot_frames.common.clone();
                     }
