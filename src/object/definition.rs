@@ -131,7 +131,7 @@ impl ObjectDef {
             placeable_object: Some(self.id.clone()),
             equipment_slot: None,
             stats: None,
-            blueprint_recipe: None,
+            blueprint_item: None,
         })
     }
 

@@ -5,5 +5,5 @@
   max_stack: 1,
   rarity: Uncommon,
   item_type: Blueprint,
-  blueprint_recipe: Some("wooden_sword"),
+  blueprint_item: Some("wooden_sword"),
 )

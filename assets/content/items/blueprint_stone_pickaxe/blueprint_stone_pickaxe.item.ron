@@ -5,5 +5,5 @@
   max_stack: 1,
   rarity: Uncommon,
   item_type: Blueprint,
-  blueprint_recipe: Some("stone_pickaxe"),
+  blueprint_item: Some("stone_pickaxe"),
 )

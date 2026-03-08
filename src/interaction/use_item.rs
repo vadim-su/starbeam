@@ -46,14 +46,14 @@ pub fn use_item_system(
         return;
     }
 
-    let Some(ref recipe_id) = def.blueprint_recipe else {
+    let Some(ref item_id_to_unlock) = def.blueprint_item else {
         return;
     };
 
-    // Unlock the recipe (even if already unlocked)
-    unlocked.blueprints.insert(recipe_id.clone());
+    // Unlock all recipes gated by Blueprint(item_id) for this item
+    unlocked.blueprints.insert(item_id_to_unlock.clone());
     inventory.remove_item(item_id, 1);
     item_used.0 = true;
 
-    info!("Blueprint used: unlocked recipe '{}'", recipe_id);
+    info!("Blueprint used: unlocked item '{}'", item_id_to_unlock);
 }

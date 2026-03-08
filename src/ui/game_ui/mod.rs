@@ -190,6 +190,13 @@ fn load_item_icons(
                     .by_name(obj_name)
                     .map(|oid| object_registry.get(oid).sprite.clone())
             })
+        }).or_else(|| {
+            // Fallback: generic blueprint icon for Blueprint items without explicit icon.
+            if def.item_type == crate::item::definition::ItemType::Blueprint {
+                Some("textures/blueprint_icon.png".to_string())
+            } else {
+                None
+            }
         });
 
         if let Some(path) = icon_path {

@@ -73,9 +73,9 @@ pub struct ItemDef {
     pub placeable_object: Option<String>,
     pub equipment_slot: Option<EquipmentSlot>,
     pub stats: Option<ItemStats>,
-    /// If set, using this item unlocks the named recipe in UnlockedRecipes.
+    /// If set, using this item unlocks all recipes gated by `Blueprint(item_id)`.
     #[serde(default)]
-    pub blueprint_recipe: Option<String>,
+    pub blueprint_item: Option<String>,
 }
 
 fn default_drop_min() -> u16 {
@@ -117,7 +117,7 @@ mod tests {
             placeable_object: None,
             equipment_slot: None,
             stats: None,
-            blueprint_recipe: None,
+            blueprint_item: None,
         };
 
         assert_eq!(item.id, "dirt");

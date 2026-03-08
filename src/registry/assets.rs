@@ -144,7 +144,7 @@ pub struct ItemDefAsset {
     #[serde(default)]
     pub stats: Option<crate::item::definition::ItemStats>,
     #[serde(default)]
-    pub blueprint_recipe: Option<String>,
+    pub blueprint_item: Option<String>,
 }
 
 impl ItemDefAsset {
@@ -163,7 +163,7 @@ impl ItemDefAsset {
             placeable_object: self.placeable_object.clone(),
             equipment_slot: self.equipment_slot,
             stats: self.stats.clone(),
-            blueprint_recipe: self.blueprint_recipe.clone(),
+            blueprint_item: self.blueprint_item.clone(),
         }
     }
 }
