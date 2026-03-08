@@ -1,6 +1,7 @@
 pub mod aiming;
 pub mod animation;
 pub mod movement;
+pub mod oxygen;
 pub mod parts;
 
 use bevy::prelude::*;
@@ -54,7 +55,8 @@ impl Plugin for PlayerPlugin {
                 .chain()
                 .in_set(GameSet::Physics),
         )
-        .add_systems(Update, update_submerge_tint.in_set(GameSet::Physics));
+        .add_systems(Update, update_submerge_tint.in_set(GameSet::Physics))
+        .add_systems(Update, oxygen::tick_oxygen.in_set(GameSet::Physics));
     }
 }
 
@@ -123,6 +125,7 @@ fn spawn_player(
         Grounded(false),
         Submerged::default(),
         InVacuum::default(),
+        oxygen::Oxygen::default(),
         TileCollider {
             width: player_config.width,
             height: player_config.height,

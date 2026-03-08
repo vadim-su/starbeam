@@ -35,6 +35,10 @@ impl Plugin for UiPlugin {
                 star_map::draw_star_map.run_if(in_state(AppState::InGame)),
             )
             .add_systems(
+                EguiPrimaryContextPass,
+                game_ui::oxygen_hud::draw_oxygen_hud.run_if(in_state(AppState::InGame)),
+            )
+            .add_systems(
                 Update,
                 (handle_warp, handle_warp_to_ship, handle_navigate)
                     .run_if(in_state(AppState::InGame)),
