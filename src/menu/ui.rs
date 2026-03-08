@@ -25,6 +25,7 @@ pub mod colors {
     // --text: #e8e8f0
     pub const TEXT: Color = Color::srgb(0.910, 0.910, 0.941);
     // --text-dim: #8888aa
+    #[allow(dead_code)]
     pub const TEXT_DIM: Color = Color::srgb(0.533, 0.533, 0.667);
 
     // Primary button: background = --accent, hover = brighter, pressed = darker

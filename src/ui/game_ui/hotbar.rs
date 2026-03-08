@@ -186,7 +186,7 @@ pub fn update_hotbar_slots(
         };
 
         // Get item_id for THIS slot (not just active slot)
-        let item_opt = if hand == Hand::Left {
+        let _item_opt = if hand == Hand::Left {
             hotbar.slots[index].left_hand.as_deref()
         } else {
             hotbar.slots[index].right_hand.as_deref()

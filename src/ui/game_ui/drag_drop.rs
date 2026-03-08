@@ -71,6 +71,7 @@ pub fn update_drag_position(
 }
 
 /// Cancel drag, return item to source.
+#[allow(dead_code)]
 pub fn cancel_drag(mut drag_state: ResMut<DragState>, mut commands: Commands) {
     if let Some(drag) = drag_state.dragging.take() {
         commands.entity(drag.drag_icon).despawn();

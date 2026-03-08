@@ -22,6 +22,7 @@ pub struct ChatMessage {
 
 /// Event fired when the player enters a `/command`.
 #[derive(Message, Debug, Clone)]
+#[allow(dead_code)]
 pub struct ChatCommandEvent {
     pub command: String,
     pub args: Vec<String>,

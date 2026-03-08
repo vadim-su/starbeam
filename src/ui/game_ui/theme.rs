@@ -24,6 +24,7 @@ impl From<HexColor> for Color {
 
 /// UI color palette.
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct UiColors {
     pub bg_dark: HexColor,
     pub bg_medium: HexColor,
@@ -47,6 +48,7 @@ pub struct SliceConfig {
 
 /// Hotbar configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct HotbarConfig {
     pub slots: usize,
     pub slot_size: f32,
@@ -82,6 +84,7 @@ pub struct BagConfig {
 
 /// Inventory screen configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct InventoryScreenConfig {
     pub anchor: String, // "Center"
     pub width: f32,
@@ -121,6 +124,7 @@ pub struct ChatConfig {
 
 /// Root UI theme loaded from RON.
 #[derive(Asset, TypePath, Debug, Clone, Deserialize, Resource)]
+#[allow(dead_code)]
 pub struct UiTheme {
     pub base_path: String,
     pub font_size: f32,

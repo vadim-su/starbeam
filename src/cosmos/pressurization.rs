@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use std::collections::{HashMap, VecDeque};
 
 use crate::cosmos::address::CelestialAddress;
-use crate::registry::tile::{TileId, TileRegistry};
+use crate::registry::tile::TileRegistry;
 use crate::registry::world::ActiveWorld;
 use crate::sets::GameSet;
 use crate::world::chunk::{world_to_tile, WorldMap};
@@ -264,6 +264,7 @@ mod tests {
         height: i32,
         chunk_size: u32,
     ) -> WorldMap {
+        use crate::registry::tile::TileId;
         use crate::world::chunk::{ChunkData, TileLayer};
         use crate::liquid::LiquidLayer;
 

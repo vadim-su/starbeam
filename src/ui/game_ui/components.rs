@@ -42,6 +42,7 @@ pub struct UiSlot {
 
 /// Information about an item being dragged.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct DragInfo {
     pub item_id: String,
     pub count: u16,

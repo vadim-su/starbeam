@@ -66,6 +66,7 @@ pub struct CharacterDefAsset {
 
 /// A single animation within a CharacterDefAsset.
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct AnimationDef {
     #[serde(default)]
     pub frames: Vec<String>,

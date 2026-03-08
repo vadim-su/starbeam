@@ -115,6 +115,7 @@ fn spawn_player(
             inv.try_add_item("workbench", 1, 10, crate::inventory::BagTarget::Main);
             inv.try_add_item("blueprint_wooden_sword", 1, 1, crate::inventory::BagTarget::Main);
             inv.try_add_item("blueprint_stone_pickaxe", 1, 1, crate::inventory::BagTarget::Main);
+            inv.try_add_item("capsule", 1, 1, crate::inventory::BagTarget::Main);
             inv
         },
         Hotbar::new(),

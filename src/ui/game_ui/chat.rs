@@ -23,6 +23,7 @@ pub struct ChatInputLine;
 
 /// Marker for a single chat message text entity.
 #[derive(Component)]
+#[allow(dead_code)]
 pub struct ChatMessageText {
     pub index: usize,
 }
@@ -248,6 +249,7 @@ pub struct ChatRenderState {
     pub last_message_count: usize,
     pub was_active: bool,
     /// Timestamp of the oldest visible message (for fade tracking).
+    #[allow(dead_code)]
     pub needs_fade_update: bool,
 }
 

@@ -68,6 +68,7 @@ impl DayNightConfig {
 
 /// Message fired when the day phase transitions.
 #[derive(Message, Debug)]
+#[allow(dead_code)]
 pub struct DayPhaseChanged {
     pub previous: DayPhase,
     pub current: DayPhase,

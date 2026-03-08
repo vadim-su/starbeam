@@ -22,9 +22,7 @@ use crate::registry::AppState;
 pub use components::*;
 pub use icon_registry::*;
 pub use theme::*;
-pub use window::{
-    FocusedWindow, GameWindow, WindowBody, WindowCloseButton, WindowConfig, WindowEntities,
-};
+pub use window::FocusedWindow;
 
 /// Handles for slot frame textures.
 #[derive(Resource)]
