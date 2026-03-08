@@ -5,7 +5,7 @@ pub mod star_map;
 use bevy::prelude::*;
 use bevy_egui::EguiPrimaryContextPass;
 
-use crate::cosmos::warp::{handle_warp, WarpToBody};
+use crate::cosmos::warp::{handle_warp, handle_warp_to_ship, WarpToBody, WarpToShip};
 use crate::registry::AppState;
 use crate::sets::GameSet;
 use game_ui::GameUiPlugin;
@@ -17,6 +17,7 @@ impl Plugin for UiPlugin {
         app.init_resource::<debug_panel::DebugUiState>()
             .init_resource::<star_map::StarMapState>()
             .add_message::<WarpToBody>()
+            .add_message::<WarpToShip>()
             .add_plugins(GameUiPlugin)
             .add_systems(
                 Update,
@@ -30,6 +31,9 @@ impl Plugin for UiPlugin {
                 EguiPrimaryContextPass,
                 star_map::draw_star_map.run_if(in_state(AppState::InGame)),
             )
-            .add_systems(Update, handle_warp.run_if(in_state(AppState::InGame)));
+            .add_systems(
+                Update,
+                (handle_warp, handle_warp_to_ship).run_if(in_state(AppState::InGame)),
+            );
     }
 }

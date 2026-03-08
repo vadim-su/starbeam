@@ -5,6 +5,7 @@ use rand::Rng;
 use super::definition::{ObjectId, ObjectType};
 use super::plugin::{ObjectAnimation, ObjectSpriteMaterials};
 use super::registry::ObjectRegistry;
+use crate::cosmos::capsule::{AirlockMarker, AutopilotMarker, CapsuleMarker};
 use crate::crafting::CraftingStation;
 use crate::world::chunk::WorldMap;
 use crate::world::lit_sprite::{LitSprite, LitSpriteMaterial, SharedLitQuad};
@@ -86,11 +87,23 @@ pub fn spawn_objects_for_chunk(
             Visibility::default(),
         ));
 
-        if let ObjectType::CraftingStation { ref station_id } = def.object_type {
-            entity_cmd.insert(CraftingStation {
-                station_id: station_id.clone(),
-                active_craft: None,
-            });
+        match def.object_type {
+            ObjectType::CraftingStation { ref station_id } => {
+                entity_cmd.insert(CraftingStation {
+                    station_id: station_id.clone(),
+                    active_craft: None,
+                });
+            }
+            ObjectType::Capsule => {
+                entity_cmd.insert(CapsuleMarker);
+            }
+            ObjectType::Airlock => {
+                entity_cmd.insert(AirlockMarker);
+            }
+            ObjectType::AutopilotConsole => {
+                entity_cmd.insert(AutopilotMarker);
+            }
+            _ => {}
         }
 
         if let (Some(sprites), Some(q)) = (object_sprites, quad) {

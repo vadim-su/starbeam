@@ -6,6 +6,7 @@ pub mod parts;
 use bevy::prelude::*;
 use bevy::sprite_render::MeshMaterial2d;
 
+use crate::cosmos::capsule::CapsuleLocation;
 use crate::cosmos::warp::NeedsRespawn;
 use crate::crafting::{HandCraftState, UnlockedRecipes};
 use crate::inventory::{Hotbar, Inventory};
@@ -209,6 +210,7 @@ pub(crate) fn respawn_player_on_warp(
     noise_cache: Res<TerrainNoiseCache>,
     player_config: Res<PlayerConfig>,
     mut player_query: Query<(&mut Transform, &mut Velocity), With<Player>>,
+    capsule_location: Option<Res<CapsuleLocation>>,
 ) {
     if needs_respawn.is_none() {
         return;
@@ -218,17 +220,34 @@ pub(crate) fn respawn_player_on_warp(
         return;
     };
 
-    let spawn_tile_x = 0;
-    let surface_y = terrain_gen::surface_height(
-        &noise_cache,
-        spawn_tile_x,
-        &world_config,
-        planet_config.layers.surface.terrain_frequency,
-        planet_config.layers.surface.terrain_amplitude,
-    );
-    let spawn_pixel_x = spawn_tile_x as f32 * world_config.tile_size + world_config.tile_size / 2.0;
-    let spawn_pixel_y =
-        (surface_y + 5) as f32 * world_config.tile_size + player_config.height / 2.0;
+    // Check if we're returning to a planet where our capsule is placed
+    let use_capsule_spawn = capsule_location
+        .as_ref()
+        .is_some_and(|loc| loc.planet_address == world_config.address);
+
+    let (spawn_pixel_x, spawn_pixel_y) = if use_capsule_spawn {
+        let loc = capsule_location.as_ref().unwrap();
+        let px = loc.tile_x as f32 * world_config.tile_size + world_config.tile_size / 2.0;
+        // Spawn a few tiles above the capsule so the player doesn't clip into it
+        let py = (loc.tile_y + 3) as f32 * world_config.tile_size + player_config.height / 2.0;
+        info!(
+            "Player respawning near capsule at tile ({}, {})",
+            loc.tile_x, loc.tile_y
+        );
+        (px, py)
+    } else {
+        let spawn_tile_x = 0;
+        let surface_y = terrain_gen::surface_height(
+            &noise_cache,
+            spawn_tile_x,
+            &world_config,
+            planet_config.layers.surface.terrain_frequency,
+            planet_config.layers.surface.terrain_amplitude,
+        );
+        let px = spawn_tile_x as f32 * world_config.tile_size + world_config.tile_size / 2.0;
+        let py = (surface_y + 5) as f32 * world_config.tile_size + player_config.height / 2.0;
+        (px, py)
+    };
 
     transform.translation.x = spawn_pixel_x;
     transform.translation.y = spawn_pixel_y;
@@ -237,8 +256,8 @@ pub(crate) fn respawn_player_on_warp(
     commands.remove_resource::<NeedsRespawn>();
 
     info!(
-        "Player respawned at tile ({}, {}) → pixel ({:.0}, {:.0})",
-        spawn_tile_x, surface_y, spawn_pixel_x, spawn_pixel_y
+        "Player respawned at pixel ({:.0}, {:.0})",
+        spawn_pixel_x, spawn_pixel_y
     );
 }
 
