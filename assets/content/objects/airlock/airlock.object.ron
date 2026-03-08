@@ -1,0 +1,14 @@
+(
+  id: "airlock",
+  display_name: "Airlock",
+  size: (2, 3),
+  sprite: "airlock.png",
+  solid_mask: [true, true, true, true, true, true],
+  placement: Floor,
+  object_type: Airlock,
+  auto_item: Some((
+    description: "Descend to planet surface",
+    max_stack: 1,
+    item_type: Block,
+  )),
+)

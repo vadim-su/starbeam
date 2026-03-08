@@ -1,0 +1,14 @@
+(
+  id: "fuel_tank",
+  display_name: "Fuel Tank",
+  size: (2, 3),
+  sprite: "fuel_tank.png",
+  solid_mask: [true, true, true, true, true, true],
+  placement: Floor,
+  object_type: FuelTank(capacity: 100.0),
+  auto_item: Some((
+    description: "Stores fuel for interplanetary travel",
+    max_stack: 1,
+    item_type: Block,
+  )),
+)

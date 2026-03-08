@@ -1,0 +1,14 @@
+(
+  id: "autopilot_console",
+  display_name: "Autopilot Console",
+  size: (2, 2),
+  sprite: "autopilot_console.png",
+  solid_mask: [true, true, true, true],
+  placement: Floor,
+  object_type: AutopilotConsole,
+  auto_item: Some((
+    description: "Navigate between celestial bodies",
+    max_stack: 1,
+    item_type: Block,
+  )),
+)

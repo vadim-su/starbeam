@@ -1,0 +1,14 @@
+(
+  id: "capsule",
+  display_name: "Launch Capsule",
+  size: (2, 3),
+  sprite: "capsule.png",
+  solid_mask: [true, true, true, true, true, true],
+  placement: Floor,
+  object_type: Capsule,
+  auto_item: Some((
+    description: "Travel between planet and ship",
+    max_stack: 1,
+    item_type: Block,
+  )),
+)

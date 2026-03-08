@@ -26,6 +26,10 @@ pub enum ObjectType {
     Container { slots: u16 },
     LightSource,
     CraftingStation { station_id: String },
+    AutopilotConsole,
+    FuelTank { capacity: f32 },
+    Airlock,
+    Capsule,
 }
 
 fn default_solid_mask() -> Vec<bool> {
@@ -316,5 +320,52 @@ mod tests {
         def.validate();
         assert_eq!(def.drops.len(), 1);
         assert_eq!(def.drops[0].item_id, "chest");
+    }
+
+    #[test]
+    fn ron_deserialize_new_object_types() {
+        let autopilot_ron = r#"(
+            id: "autopilot_console",
+            display_name: "Autopilot Console",
+            size: (2, 2),
+            sprite: "autopilot_console.png",
+            placement: Floor,
+            object_type: AutopilotConsole,
+        )"#;
+        let def: ObjectDef = ron::from_str(autopilot_ron).expect("AutopilotConsole RON");
+        assert!(matches!(def.object_type, ObjectType::AutopilotConsole));
+
+        let fuel_ron = r#"(
+            id: "fuel_tank",
+            display_name: "Fuel Tank",
+            size: (2, 3),
+            sprite: "fuel_tank.png",
+            placement: Floor,
+            object_type: FuelTank(capacity: 100.0),
+        )"#;
+        let def: ObjectDef = ron::from_str(fuel_ron).expect("FuelTank RON");
+        assert!(matches!(def.object_type, ObjectType::FuelTank { capacity } if (capacity - 100.0).abs() < f32::EPSILON));
+
+        let airlock_ron = r#"(
+            id: "airlock",
+            display_name: "Airlock",
+            size: (2, 3),
+            sprite: "airlock.png",
+            placement: Floor,
+            object_type: Airlock,
+        )"#;
+        let def: ObjectDef = ron::from_str(airlock_ron).expect("Airlock RON");
+        assert!(matches!(def.object_type, ObjectType::Airlock));
+
+        let capsule_ron = r#"(
+            id: "capsule",
+            display_name: "Launch Capsule",
+            size: (2, 3),
+            sprite: "capsule.png",
+            placement: Floor,
+            object_type: Capsule,
+        )"#;
+        let def: ObjectDef = ron::from_str(capsule_ron).expect("Capsule RON");
+        assert!(matches!(def.object_type, ObjectType::Capsule));
     }
 }
