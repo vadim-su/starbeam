@@ -1,0 +1,50 @@
+use bevy::prelude::*;
+
+use crate::crafting::UnlockedRecipes;
+use crate::inventory::{Hotbar, Inventory};
+use crate::item::ItemRegistry;
+use crate::item::definition::ItemType;
+use crate::player::Player;
+
+/// Consumes blueprint items from the active hotbar slot on right-click.
+pub fn use_item_system(
+    mouse: Res<ButtonInput<MouseButton>>,
+    mut player_query: Query<(&Hotbar, &mut Inventory, &mut UnlockedRecipes), With<Player>>,
+    item_registry: Res<ItemRegistry>,
+) {
+    if !mouse.just_pressed(MouseButton::Right) {
+        return;
+    }
+
+    let Ok((hotbar, mut inventory, mut unlocked)) = player_query.single_mut() else {
+        return;
+    };
+
+    // Check left hand of active slot
+    let Some(item_id) = hotbar.slots[hotbar.active_slot].left_hand.as_deref() else {
+        return;
+    };
+
+    if inventory.count_item(item_id) == 0 {
+        return;
+    }
+
+    let Some(def_id) = item_registry.by_name(item_id) else {
+        return;
+    };
+    let def = item_registry.get(def_id);
+
+    if def.item_type != ItemType::Blueprint {
+        return;
+    }
+
+    let Some(ref recipe_id) = def.blueprint_recipe else {
+        return;
+    };
+
+    // Unlock the recipe (even if already unlocked)
+    unlocked.blueprints.insert(recipe_id.clone());
+    inventory.remove_item(item_id, 1);
+
+    info!("Blueprint used: unlocked recipe '{}'", recipe_id);
+}

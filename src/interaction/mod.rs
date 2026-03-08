@@ -1,5 +1,6 @@
 pub mod block_action;
 pub mod interactable;
+pub mod use_item;
 
 use bevy::prelude::*;
 
@@ -20,6 +21,7 @@ impl Plugin for InteractionPlugin {
                     interactable::detect_nearby_interactable,
                     interactable::handle_interaction_input,
                     interactable::update_interactable_highlight,
+                    use_item::use_item_system,
                 )
                     .in_set(GameSet::Input),
             );
