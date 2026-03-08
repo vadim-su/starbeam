@@ -118,9 +118,14 @@ pub fn block_interaction_system(
         Query<(Entity, &PlacedObjectEntity)>,
         Option<ResMut<crate::liquid::LiquidSimState>>,
         Res<ItemUsedThisFrame>,
+        Res<crate::chat::ChatState>,
     ),
 ) {
-    let (object_entities, mut liquid_sim, item_used) = object_params;
+    let (object_entities, mut liquid_sim, item_used, chat_state) = object_params;
+
+    if chat_state.is_active {
+        return;
+    }
     let (fallback_lm, fallback_img, mut rc_dirty, mut dirty_chunks) = fallbacks;
     let left_click = mouse.just_pressed(MouseButton::Left);
     let right_click = mouse.just_pressed(MouseButton::Right);

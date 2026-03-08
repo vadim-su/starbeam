@@ -86,7 +86,11 @@ pub fn handle_interaction_input(
     nearby: Res<NearbyInteractable>,
     mut open_station: ResMut<OpenStation>,
     mut hand_craft_open: ResMut<HandCraftOpen>,
+    chat_state: Res<crate::chat::ChatState>,
 ) {
+    if chat_state.is_active {
+        return;
+    }
     // E key: toggle station interaction
     if keyboard.just_pressed(KeyCode::KeyE) {
         // If a station is open, close it

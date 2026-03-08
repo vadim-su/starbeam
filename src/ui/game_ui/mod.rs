@@ -145,7 +145,12 @@ fn toggle_inventory(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut state: ResMut<InventoryScreenState>,
     mut query: Query<&mut Visibility, With<InventoryScreen>>,
+    chat_state: Res<crate::chat::ChatState>,
 ) {
+    if chat_state.is_active {
+        return;
+    }
+
     if keyboard.just_pressed(KeyCode::KeyI) {
         state.visible = !state.visible;
 

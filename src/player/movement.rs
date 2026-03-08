@@ -9,7 +9,12 @@ pub fn player_input(
     keys: Res<ButtonInput<KeyCode>>,
     player_config: Res<PlayerConfig>,
     mut query: Query<(&mut Velocity, &Grounded, &Submerged), With<Player>>,
+    chat_state: Res<crate::chat::ChatState>,
 ) {
+    if chat_state.is_active {
+        return;
+    }
+
     let dt = time.delta_secs().min(MAX_DELTA_SECS);
 
     for (mut vel, grounded, submerged) in &mut query {

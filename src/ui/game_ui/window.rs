@@ -283,7 +283,12 @@ pub fn close_topmost_on_esc(
     mut open_station: ResMut<OpenStation>,
     mut hand_craft_open: ResMut<HandCraftOpen>,
     focused: Res<FocusedWindow>,
+    chat_state: Res<crate::chat::ChatState>,
 ) {
+    if chat_state.is_active {
+        return;
+    }
+
     if !keyboard.just_pressed(KeyCode::Escape) {
         return;
     }

@@ -17,8 +17,13 @@ pub fn use_item_system(
     mut player_query: Query<(&Hotbar, &mut Inventory, &mut UnlockedRecipes), With<Player>>,
     item_registry: Res<ItemRegistry>,
     mut item_used: ResMut<ItemUsedThisFrame>,
+    chat_state: Res<crate::chat::ChatState>,
 ) {
     item_used.0 = false;
+
+    if chat_state.is_active {
+        return;
+    }
 
     if !mouse.just_pressed(MouseButton::Right) {
         return;
