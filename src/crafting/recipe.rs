@@ -38,7 +38,7 @@ impl UnlockCondition {
         match self {
             UnlockCondition::Always => true,
             UnlockCondition::PickupItem(item) => unlocked_items.contains(item),
-            UnlockCondition::Blueprint(_) => false,
+            UnlockCondition::Blueprint(id) => unlocked_items.contains(id),
             UnlockCondition::Station(_) => false,
         }
     }
@@ -138,6 +138,13 @@ mod tests {
 
         unlocked.insert("stone".into());
         assert!(pickup.is_unlocked(&unlocked));
+
+        let blueprint = UnlockCondition::Blueprint("wooden_sword".into());
+        let mut bp_unlocked = HashSet::new();
+        assert!(!blueprint.is_unlocked(&bp_unlocked));
+
+        bp_unlocked.insert("wooden_sword".into());
+        assert!(blueprint.is_unlocked(&bp_unlocked));
     }
 
     #[test]
