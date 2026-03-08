@@ -133,6 +133,24 @@ pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServe
             "content/objects/tree/".to_string(),
             asset_server.load::<ObjectDefAsset>("content/objects/tree/tree.object.ron"),
         ),
+        (
+            "content/objects/airlock/".to_string(),
+            asset_server.load::<ObjectDefAsset>("content/objects/airlock/airlock.object.ron"),
+        ),
+        (
+            "content/objects/fuel_tank/".to_string(),
+            asset_server.load::<ObjectDefAsset>("content/objects/fuel_tank/fuel_tank.object.ron"),
+        ),
+        (
+            "content/objects/autopilot_console/".to_string(),
+            asset_server.load::<ObjectDefAsset>(
+                "content/objects/autopilot_console/autopilot_console.object.ron",
+            ),
+        ),
+        (
+            "content/objects/capsule/".to_string(),
+            asset_server.load::<ObjectDefAsset>("content/objects/capsule/capsule.object.ron"),
+        ),
     ];
 
     // Load item definitions from individual *.item.ron files.

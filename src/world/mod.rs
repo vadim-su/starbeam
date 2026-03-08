@@ -16,6 +16,7 @@ use bevy::prelude::*;
 use bevy::sprite_render::Material2dPlugin;
 
 use crate::cosmos::persistence::{self, DirtyChunks, Universe};
+use crate::cosmos::ship_hull;
 use crate::liquid::{LiquidFieldMaterial, LiquidMaterial};
 use crate::registry::AppState;
 use crate::sets::GameSet;
@@ -48,6 +49,10 @@ impl Plugin for WorldPlugin {
                 OnEnter(AppState::InGame),
                 persistence::respawn_saved_dropped_items
                     .run_if(resource_exists::<persistence::PendingDroppedItems>),
+            )
+            .add_systems(
+                OnEnter(AppState::InGame),
+                ship_hull::generate_ship_hull_system,
             )
             .add_systems(
                 Update,
