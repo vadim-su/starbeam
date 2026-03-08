@@ -1,4 +1,5 @@
 mod camera;
+mod chat;
 pub mod cosmos;
 pub mod crafting;
 mod interaction;
@@ -56,6 +57,7 @@ fn main() {
         .add_plugins(camera::CameraPlugin)
         .add_plugins(parallax::ParallaxPlugin)
         .add_plugins(interaction::InteractionPlugin)
+        .add_plugins(chat::ChatPlugin)
         .add_plugins(ui::UiPlugin)
         .add_plugins(item::ItemPlugin)
         .add_plugins(object::ObjectPlugin)
