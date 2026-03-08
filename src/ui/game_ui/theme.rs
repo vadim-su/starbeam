@@ -55,6 +55,13 @@ pub struct HotbarConfig {
     pub margin_bottom: f32,
     pub border_width: f32,
     pub slot_texture: Option<SliceConfig>,
+    /// Font size for slot number labels (1, 2, 3…).
+    #[serde(default = "default_label_font_size")]
+    pub label_font_size: f32,
+}
+
+fn default_label_font_size() -> f32 {
+    20.0
 }
 
 /// Equipment configuration.

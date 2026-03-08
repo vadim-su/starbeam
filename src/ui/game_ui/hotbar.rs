@@ -149,7 +149,7 @@ pub fn spawn_hotbar(commands: &mut Commands, theme: &UiTheme, asset_server: &Ass
                         slot_parent.spawn((
                             Text::new(format!("{}", i + 1)),
                             TextFont {
-                                font_size: 10.0,
+                                font_size: config.label_font_size,
                                 ..default()
                             },
                             TextColor(Color::from(text_dim)),
@@ -192,13 +192,7 @@ pub fn update_hotbar_slots(
             hotbar.slots[index].right_hand.as_deref()
         };
 
-        // Update visual state based on item presence
-        if item_opt.is_some() {
-            // Has item — show a color (placeholder until icons)
-            *bg_color = BackgroundColor(Color::srgb(0.3, 0.5, 0.3));
-        } else {
-            // Empty slot
-            *bg_color = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0));
-        }
+        // Clear slot background — icons and greyed-out tint handle visuals now.
+        *bg_color = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0));
     }
 }

@@ -23,6 +23,7 @@
         anchor: "BottomCenter",
         margin_bottom: 16.0,
         border_width: 2.0,
+        label_font_size: 20.0,
         slot_texture: Some((
             texture: "textures/ui/slot.png",
             border: 8.0,
