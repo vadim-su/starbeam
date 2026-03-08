@@ -190,7 +190,11 @@ fn update_recipe_list(
         return;
     };
 
-    let recipes = recipe_registry.for_station(station_id.as_deref());
+    let recipes: Vec<&crate::crafting::Recipe> = recipe_registry
+        .for_station(station_id.as_deref())
+        .into_iter()
+        .filter(|r| r.unlocked_by.is_unlocked(&unlocked.blueprints))
+        .collect();
     let craftable: Vec<&str> = recipe_registry
         .craftable_recipes(station_id.as_deref(), inventory, &unlocked.blueprints)
         .iter()
