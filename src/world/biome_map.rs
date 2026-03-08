@@ -79,7 +79,18 @@ impl BiomeMap {
     ) -> Self {
         assert!(region_min > 0, "region_min must be > 0");
         assert!(region_max >= region_min, "region_max must be >= region_min");
-        assert!(!secondaries.is_empty(), "need at least one secondary biome");
+
+        // Single-biome world (e.g. ship): one region spanning the entire width.
+        if secondaries.is_empty() {
+            return Self {
+                regions: vec![BiomeRegion {
+                    biome_id: biome_registry.id_by_name(primary),
+                    start_x: 0,
+                    width: world_width,
+                }],
+                world_width,
+            };
+        }
 
         let mut rng = SplitMix64::new(seed);
 

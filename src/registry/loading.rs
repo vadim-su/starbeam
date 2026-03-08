@@ -23,9 +23,8 @@ use crate::cosmos::address::{CelestialAddress, CelestialSeeds};
 use crate::cosmos::assets::{GenerationConfigAsset, StarTypeAsset};
 use crate::cosmos::current::CurrentSystem;
 use crate::cosmos::generation::generate_system;
-use crate::cosmos::fuel::ShipFuel;
 use crate::cosmos::pressurization::PressureMap;
-use crate::cosmos::ship_location::{GlobalBiome, ShipLocation};
+use crate::cosmos::ship_location::{GlobalBiome, ShipManifest};
 use crate::item::definition::ItemDef;
 use crate::item::registry::ItemRegistry;
 use crate::object::definition::ObjectDef;
@@ -102,6 +101,11 @@ pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServe
             "barren".to_string(),
             asset_server
                 .load::<PlanetTypeAsset>("worlds/planet_types/barren/barren.planet.ron"),
+        ),
+        (
+            "ship".to_string(),
+            asset_server
+                .load::<PlanetTypeAsset>("worlds/planet_types/ship/ship.planet.ron"),
         ),
     ];
 
@@ -414,7 +418,7 @@ pub(crate) fn check_loading(
     let orbit_address = garden_body.address.clone();
 
     // Build ActiveWorld for the player's ship instead of a planet
-    let ship_address = CelestialAddress::Ship { owner_id: 0 };
+    let ship_address = CelestialAddress::Ship { ship_id: 0 };
     let ship_planet_type = "ship".to_string();
     let ship_width: i32 = 128;
     let ship_height: i32 = 64;
@@ -435,10 +439,9 @@ pub(crate) fn check_loading(
     commands.insert_resource(TerrainNoiseCache::new(active_world.seed));
     commands.insert_resource(active_world);
 
-    // Ship starts in orbit around the first garden planet
-    commands.insert_resource(ShipLocation::Orbit(orbit_address.clone()));
+    // Ship manifest with starter ship orbiting the first garden planet
+    commands.insert_resource(ShipManifest::with_starter_ship(orbit_address.clone()));
     commands.insert_resource(PressureMap::new_dirty());
-    commands.init_resource::<ShipFuel>();
 
     // DayNightConfig for ship (permanent "day" lighting)
     let day_night_config = crate::world::day_night::DayNightConfig {

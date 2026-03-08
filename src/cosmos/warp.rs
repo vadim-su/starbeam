@@ -9,9 +9,8 @@ use bevy::prelude::*;
 
 use crate::cosmos::address::{CelestialAddress, CelestialSeeds};
 use crate::cosmos::current::CurrentSystem;
-use crate::cosmos::fuel::ShipFuel;
 use crate::cosmos::pressurization::PressureMap;
-use crate::cosmos::ship_location::{GlobalBiome, ShipLocation};
+use crate::cosmos::ship_location::{GlobalBiome, ShipLocation, ShipManifest};
 use crate::cosmos::persistence::{
     save_current_world, DirtyChunks, PendingDroppedItems, SavedDroppedItem, Universe,
 };
@@ -33,9 +32,11 @@ pub struct WarpToBody {
     pub orbit: u32,
 }
 
-/// Message requesting a warp to the player's ship.
+/// Message requesting a warp to a specific ship.
 #[derive(Message, Debug)]
-pub struct WarpToShip;
+pub struct WarpToShip {
+    pub ship_id: u64,
+}
 
 /// Marker resource: when present, the player should be teleported to the
 /// surface of the new world on the next `InGame` enter.
@@ -62,12 +63,17 @@ pub fn handle_warp(
         Query<Entity, With<DroppedItem>>,
     ),
     dropped_items_for_save: Query<(&DroppedItem, &Transform)>,
-    active_world: Option<Res<ActiveWorld>>,
-    time: Res<Time>,
+    extra: (
+        Option<Res<ActiveWorld>>,
+        Res<Time>,
+        Option<ResMut<ShipManifest>>,
+    ),
 ) {
     let Some(warp) = warp_events.read().last() else {
         return;
     };
+
+    let (active_world, time, mut manifest) = extra;
 
     let Some(body) = current_system
         .system
@@ -127,7 +133,7 @@ pub fn handle_warp(
     for entity in &parallax_entities {
         commands.entity(entity).despawn();
     }
-    // --- 3. Despawn object entities (BUG FIX: these survived warp before) ---
+    // --- 3. Despawn object entities ---
     for entity in &object_entity_query {
         commands.entity(entity).despawn();
     }
@@ -141,13 +147,9 @@ pub fn handle_warp(
     loaded_chunks.map.clear();
 
     // Remove ship-specific resources when warping away from a ship.
-    // GlobalBiome will be re-inserted by check_biomes_loaded if the
-    // destination is also a ship world.
     if let Some(ref aw) = active_world {
         if matches!(aw.address, CelestialAddress::Ship { .. }) {
             commands.remove_resource::<GlobalBiome>();
-            commands.remove_resource::<ShipLocation>();
-            commands.remove_resource::<ShipFuel>();
             commands.remove_resource::<PressureMap>();
         }
     }
@@ -224,9 +226,12 @@ pub fn handle_warp(
     // --- 11. Track ship location when warping to a ship world ---
     if matches!(body.address, CelestialAddress::Ship { .. }) {
         if let Some(ref aw) = active_world {
-            commands.insert_resource(ShipLocation::Orbit(aw.address.clone()));
+            if let Some(ref mut manifest) = manifest {
+                if let Some(ship) = manifest.active_mut() {
+                    ship.location = ShipLocation::Orbit(aw.address.clone());
+                }
+            }
         }
-        commands.init_resource::<ShipFuel>();
     }
 
     // --- 12. Mark player for respawn on new world surface ---
@@ -245,8 +250,7 @@ pub fn handle_warp(
 /// System that handles warping to the player's ship.
 ///
 /// Ships are not part of the star system's generated bodies, so this handler
-/// constructs the ship's `GeneratedBody` manually and performs the same
-/// save-clear-rebuild cycle as `handle_warp`.
+/// constructs the ship's `ActiveWorld` from `ShipManifest` metadata.
 #[allow(clippy::too_many_arguments)]
 pub fn handle_warp_to_ship(
     mut commands: Commands,
@@ -266,21 +270,33 @@ pub fn handle_warp_to_ship(
         Query<Entity, With<DroppedItem>>,
     ),
     dropped_items_for_save: Query<(&DroppedItem, &Transform)>,
-    active_world: Option<Res<ActiveWorld>>,
-    time: Res<Time>,
+    extra: (
+        Option<Res<ActiveWorld>>,
+        Res<Time>,
+        ResMut<ShipManifest>,
+    ),
 ) {
-    if warp_events.read().last().is_none() {
+    let Some(warp) = warp_events.read().last() else {
         return;
-    }
+    };
 
-    let ship_address = CelestialAddress::Ship { owner_id: 0 };
-    let ship_planet_type = "ship".to_string();
-    let ship_width = 128;
-    let ship_height = 64;
+    let (active_world, time, mut manifest) = extra;
+
+    let Some(ship) = manifest.ships.get(&warp.ship_id) else {
+        warn!("WarpToShip: no ship with id {}", warp.ship_id);
+        return;
+    };
+
+    let ship_address = CelestialAddress::Ship {
+        ship_id: warp.ship_id,
+    };
+    let ship_planet_type = ship.planet_type.clone();
+    let ship_width = ship.width;
+    let ship_height = ship.height;
 
     info!(
-        "Warping to ship — {} ({}×{})",
-        ship_planet_type, ship_width, ship_height
+        "Warping to ship {} — {} ({}×{})",
+        warp.ship_id, ship_planet_type, ship_width, ship_height
     );
 
     let (mut rc_config, mut rc_input) = rc_state;
@@ -340,8 +356,6 @@ pub fn handle_warp_to_ship(
     if let Some(ref aw) = active_world {
         if matches!(aw.address, CelestialAddress::Ship { .. }) {
             commands.remove_resource::<GlobalBiome>();
-            commands.remove_resource::<ShipLocation>();
-            commands.remove_resource::<ShipFuel>();
             commands.remove_resource::<PressureMap>();
         }
     }
@@ -425,11 +439,13 @@ pub fn handle_warp_to_ship(
     *rc_config = RcLightingConfig::default();
     *rc_input = RcInputData::default();
 
-    // --- 11. Track ship location: orbiting the planet we just left ---
+    // --- 11. Update ship location: orbiting the planet we just left ---
     if let Some(ref aw) = active_world {
-        commands.insert_resource(ShipLocation::Orbit(aw.address.clone()));
+        if let Some(ship) = manifest.ships.get_mut(&warp.ship_id) {
+            ship.location = ShipLocation::Orbit(aw.address.clone());
+        }
     }
-    commands.init_resource::<ShipFuel>();
+    manifest.active_ship = Some(warp.ship_id);
 
     // --- 12. Mark player for respawn on the ship ---
     commands.insert_resource(NeedsRespawn);
@@ -437,5 +453,5 @@ pub fn handle_warp_to_ship(
     // --- 13. Transition to LoadingBiomes state ---
     next_state.set(AppState::LoadingBiomes);
 
-    info!("Warp to ship complete — loading biomes for ship world");
+    info!("Warp to ship {} complete — loading biomes for ship world", warp.ship_id);
 }

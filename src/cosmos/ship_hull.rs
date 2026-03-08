@@ -225,7 +225,7 @@ mod tests {
 
     /// Build a ship-like ActiveWorld (128x64, wrap_x=false).
     fn ship_world() -> ActiveWorld {
-        let address = CelestialAddress::Ship { owner_id: 1 };
+        let address = CelestialAddress::Ship { ship_id: 1 };
         let seeds = CelestialSeeds::derive(42, &address);
         ActiveWorld {
             address,

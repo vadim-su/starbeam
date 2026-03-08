@@ -1,7 +1,7 @@
 (
     id: "ship",
     primary_biome: "deep_space",
-    secondary_biomes: [],
+    secondary_biomes: ["orbit_garden", "orbit_barren"],
     layers: (
         surface: (
             primary_biome: Some("deep_space"),

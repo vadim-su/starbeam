@@ -3,7 +3,7 @@ use bevy::sprite_render::MeshMaterial2d;
 
 use crate::cosmos::address::CelestialAddress;
 use crate::cosmos::capsule::{AirlockMarker, AutopilotMarker, CapsuleLocation, CapsuleMarker};
-use crate::cosmos::ship_location::ShipLocation;
+use crate::cosmos::ship_location::{ShipLocation, ShipManifest};
 use crate::cosmos::warp::{WarpToBody, WarpToShip};
 use crate::crafting::CraftingStation;
 use crate::physics::TileCollider;
@@ -123,7 +123,7 @@ pub fn handle_interaction_input(
     airlock_query: Query<Entity, With<AirlockMarker>>,
     autopilot_query: Query<Entity, With<AutopilotMarker>>,
     active_world: Res<ActiveWorld>,
-    ship_location: Option<Res<ShipLocation>>,
+    ship_manifest: Option<Res<ShipManifest>>,
     capsule_location: Option<Res<CapsuleLocation>>,
     mut star_map: (
         ResMut<crate::ui::star_map::StarMapState>,
@@ -169,8 +169,12 @@ pub fn handle_interaction_input(
                     tile_y,
                 });
 
-                // Fire WarpToShip
-                warp_ship_events.write(WarpToShip);
+                // Fire WarpToShip for the active ship (default to 0)
+                let ship_id = ship_manifest
+                    .as_ref()
+                    .and_then(|m| m.active_ship)
+                    .unwrap_or(0);
+                warp_ship_events.write(WarpToShip { ship_id });
                 info!(
                     "Capsule activated at tile ({}, {}) — warping to ship",
                     tile_x, tile_y
@@ -195,7 +199,11 @@ pub fn handle_interaction_input(
                 }
 
                 // Ship must be in orbit (not in transit)
-                match ship_location.as_deref() {
+                let active_location = ship_manifest
+                    .as_ref()
+                    .and_then(|m| m.active())
+                    .map(|s| &s.location);
+                match active_location {
                     Some(ShipLocation::Orbit(planet_addr)) => {
                         // If we have a capsule location on that planet, warp to it
                         if let Some(ref capsule_loc) = capsule_location {
@@ -223,7 +231,7 @@ pub fn handle_interaction_input(
                         info!("Cannot disembark — ship is in transit");
                     }
                     None => {
-                        warn!("Airlock: no ShipLocation resource found");
+                        warn!("Airlock: no active ship in ShipManifest");
                     }
                 }
                 return;

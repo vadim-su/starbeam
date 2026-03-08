@@ -42,7 +42,7 @@ pub enum CelestialAddress {
         index: u32,
     },
     Ship {
-        owner_id: u64,
+        ship_id: u64,
     },
 }
 
@@ -159,8 +159,8 @@ impl CelestialSeeds {
                 belt,
                 index,
             } => (*galaxy, *system, *belt, Some(*index)),
-            CelestialAddress::Ship { owner_id } => {
-                (IVec2::ZERO, IVec2::ZERO, *owner_id as u32, None)
+            CelestialAddress::Ship { ship_id } => {
+                (IVec2::ZERO, IVec2::ZERO, *ship_id as u32, None)
             }
         };
 

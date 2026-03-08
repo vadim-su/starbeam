@@ -6,7 +6,7 @@
 use bevy::prelude::*;
 
 /// Ship fuel resource. Exists only when on a ship world.
-#[derive(Resource, Debug)]
+#[derive(Resource, Debug, Clone)]
 pub struct ShipFuel {
     pub current: f32,
     pub capacity: f32,

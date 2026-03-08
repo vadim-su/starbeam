@@ -11,8 +11,8 @@ use bevy_egui::{egui, EguiContexts};
 
 use crate::cosmos::address::CelestialAddress;
 use crate::cosmos::current::CurrentSystem;
-use crate::cosmos::fuel::{self, ShipFuel};
-use crate::cosmos::ship_location::ShipLocation;
+use crate::cosmos::fuel;
+use crate::cosmos::ship_location::{ShipLocation, ShipManifest};
 use crate::cosmos::warp::WarpToBody;
 use crate::registry::world::ActiveWorld;
 use bevy::ecs::message::MessageWriter;
@@ -50,8 +50,7 @@ pub fn draw_star_map(
     mut autopilot_mode: ResMut<AutopilotMode>,
     current_system: Option<Res<CurrentSystem>>,
     active_world: Option<Res<ActiveWorld>>,
-    ship_location: Option<Res<ShipLocation>>,
-    ship_fuel: Option<Res<ShipFuel>>,
+    ship_manifest: Option<Res<ShipManifest>>,
     mut warp_events: MessageWriter<WarpToBody>,
     mut navigate_events: MessageWriter<NavigateToBody>,
 ) -> Result {
@@ -70,9 +69,12 @@ pub fn draw_star_map(
     let is_autopilot = autopilot_mode.0;
     let is_on_ship = matches!(active_world.address, CelestialAddress::Ship { .. });
 
-    // Determine the "current orbit" — for ships, use ShipLocation.
+    // Read active ship data from manifest
+    let active_ship = ship_manifest.as_ref().and_then(|m| m.active());
+
+    // Determine the "current orbit" — for ships, use ShipLocation from manifest.
     let current_orbit = if is_on_ship {
-        match ship_location.as_deref() {
+        match active_ship.map(|s| &s.location) {
             Some(ShipLocation::Orbit(addr)) => addr.orbit().unwrap_or(0),
             Some(ShipLocation::InTransit { .. }) => 0,
             None => 0,
@@ -81,7 +83,10 @@ pub fn draw_star_map(
         active_world.address.orbit().unwrap_or(0)
     };
 
-    let in_transit = matches!(ship_location.as_deref(), Some(ShipLocation::InTransit { .. }));
+    let in_transit = matches!(
+        active_ship.map(|s| &s.location),
+        Some(ShipLocation::InTransit { .. })
+    );
 
     let panel_frame = egui::Frame::NONE
         .fill(egui::Color32::from_rgba_unmultiplied(15, 15, 30, 220))
@@ -122,14 +127,14 @@ pub fn draw_star_map(
             // --- Fuel display (autopilot mode) ---
             if is_autopilot {
                 ui.separator();
-                if let Some(ref fuel) = ship_fuel {
+                if let Some(ref ship) = active_ship {
                     ui.horizontal(|ui| {
                         ui.label(
                             egui::RichText::new("Fuel:")
                                 .color(egui::Color32::from_rgb(255, 180, 60))
                                 .strong(),
                         );
-                        let fuel_pct = fuel.current / fuel.capacity;
+                        let fuel_pct = ship.fuel.current / ship.fuel.capacity;
                         let fuel_color = if fuel_pct > 0.5 {
                             egui::Color32::from_rgb(80, 255, 80)
                         } else if fuel_pct > 0.2 {
@@ -140,7 +145,7 @@ pub fn draw_star_map(
                         ui.label(
                             egui::RichText::new(format!(
                                 "{:.0} / {:.0}",
-                                fuel.current, fuel.capacity
+                                ship.fuel.current, ship.fuel.capacity
                             ))
                             .color(fuel_color)
                             .monospace(),
@@ -150,7 +155,7 @@ pub fn draw_star_map(
 
                 if in_transit {
                     if let Some(ShipLocation::InTransit { progress, to, .. }) =
-                        ship_location.as_deref()
+                        active_ship.map(|s| &s.location)
                     {
                         ui.horizontal(|ui| {
                             ui.label(
@@ -225,9 +230,8 @@ pub fn draw_star_map(
                         } else if is_autopilot {
                             // Autopilot mode: show fuel cost and Navigate button
                             let cost = fuel::fuel_cost(current_orbit, body_orbit);
-                            let has_fuel = ship_fuel
-                                .as_ref()
-                                .map(|f| f.current >= cost)
+                            let has_fuel = active_ship
+                                .map(|s| s.fuel.current >= cost)
                                 .unwrap_or(false);
 
                             let cost_text = format!("{:.0}F", cost);
