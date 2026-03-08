@@ -82,11 +82,22 @@ fn init_chat_state(mut commands: Commands, theme: Res<UiTheme>) {
     commands.insert_resource(ChatState::new(theme.chat.max_messages));
 }
 
+#[cfg(debug_assertions)]
+fn send_test_messages(mut chat_state: ResMut<ChatState>, time: Res<Time>) {
+    let t = time.elapsed_secs_f64();
+    chat_state.send_system("Welcome to Starbeam!", t);
+    chat_state.send_dialog("Merchant", "Hello, traveler!", t + 0.1);
+    chat_state.send_system("Press Enter to open chat.", t + 0.2);
+}
+
 pub struct ChatPlugin;
 
 impl Plugin for ChatPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ChatCommandEvent>()
             .add_systems(OnEnter(AppState::InGame), init_chat_state);
+
+        #[cfg(debug_assertions)]
+        app.add_systems(OnEnter(AppState::InGame), send_test_messages.after(init_chat_state));
     }
 }
