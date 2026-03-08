@@ -5,6 +5,7 @@ pub mod current;
 pub mod fuel;
 pub mod generation;
 pub mod persistence;
+pub mod pressurization;
 pub mod ship_hull;
 pub mod ship_location;
 pub mod warp;

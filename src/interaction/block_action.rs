@@ -3,6 +3,7 @@ use bevy::sprite_render::MeshMaterial2d;
 use bevy::window::PrimaryWindow;
 
 use crate::cosmos::persistence::{DirtyChunks, DROPPED_ITEM_LIFETIME_SECS};
+use crate::cosmos::pressurization::PressureMap;
 use crate::crafting::CraftingStation;
 use crate::inventory::{Hotbar, Inventory};
 use crate::item::{calculate_drops, DropDef, DroppedItem, ItemRegistry, SpawnParams};
@@ -110,6 +111,7 @@ pub fn block_interaction_system(
         Res<FallbackItemImage>,
         ResMut<RcGridDirty>,
         ResMut<DirtyChunks>,
+        Option<ResMut<PressureMap>>,
     ),
     mut lit_materials: ResMut<Assets<LitSpriteMaterial>>,
     object_registry: Option<Res<ObjectRegistry>>,
@@ -126,7 +128,7 @@ pub fn block_interaction_system(
     if chat_state.is_active {
         return;
     }
-    let (fallback_lm, fallback_img, mut rc_dirty, mut dirty_chunks) = fallbacks;
+    let (fallback_lm, fallback_img, mut rc_dirty, mut dirty_chunks, mut pressure_map) = fallbacks;
     let left_click = mouse.just_pressed(MouseButton::Left);
     let right_click = mouse.just_pressed(MouseButton::Right);
     if !left_click && !right_click {
@@ -496,6 +498,11 @@ pub fn block_interaction_system(
     // Notify RC lighting that tiles changed — density/albedo/flat grids
     // must be rebuilt on the next frame.
     rc_dirty.0 = true;
+
+    // Mark pressure map dirty so pressurization is recalculated (ship worlds).
+    if let Some(ref mut pm) = pressure_map {
+        pm.dirty = true;
+    }
 
     // Update bitmasks for the modified layer
     let modified_layer = if left_click { Layer::Fg } else { Layer::Bg };

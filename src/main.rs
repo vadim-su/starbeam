@@ -53,6 +53,7 @@ fn main() {
         .add_plugins(liquid::LiquidPlugin)
         .add_plugins(player::PlayerPlugin)
         .add_plugins(physics::PhysicsPlugin)
+        .add_plugins(cosmos::pressurization::PressurizationPlugin)
         .add_plugins(particles::ParticlePlugin)
         .add_plugins(camera::CameraPlugin)
         .add_plugins(parallax::ParallaxPlugin)

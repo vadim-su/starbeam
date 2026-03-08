@@ -10,6 +10,7 @@ use bevy::prelude::*;
 use crate::cosmos::address::{CelestialAddress, CelestialSeeds};
 use crate::cosmos::current::CurrentSystem;
 use crate::cosmos::fuel::ShipFuel;
+use crate::cosmos::pressurization::PressureMap;
 use crate::cosmos::ship_location::{GlobalBiome, ShipLocation};
 use crate::cosmos::persistence::{
     save_current_world, DirtyChunks, PendingDroppedItems, SavedDroppedItem, Universe,
@@ -147,7 +148,13 @@ pub fn handle_warp(
             commands.remove_resource::<GlobalBiome>();
             commands.remove_resource::<ShipLocation>();
             commands.remove_resource::<ShipFuel>();
+            commands.remove_resource::<PressureMap>();
         }
+    }
+
+    // Insert PressureMap if destination is a ship world
+    if matches!(body.address, CelestialAddress::Ship { .. }) {
+        commands.insert_resource(PressureMap::new_dirty());
     }
 
     // --- 6. Compute pending dropped items for the destination world ---
@@ -335,8 +342,12 @@ pub fn handle_warp_to_ship(
             commands.remove_resource::<GlobalBiome>();
             commands.remove_resource::<ShipLocation>();
             commands.remove_resource::<ShipFuel>();
+            commands.remove_resource::<PressureMap>();
         }
     }
+
+    // Insert PressureMap for the ship world (marked dirty for initial calculation)
+    commands.insert_resource(PressureMap::new_dirty());
 
     // --- 6. Compute pending dropped items for the ship world ---
     let pending_items = if let Some(save) = universe.planets.get(&ship_address) {

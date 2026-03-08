@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+use crate::cosmos::pressurization::InVacuum;
 use crate::liquid::data::{LiquidCell, LiquidId};
 use crate::liquid::registry::LiquidRegistry;
 use crate::math::{tile_aabb, Aabb};
@@ -114,13 +115,19 @@ impl Plugin for PhysicsPlugin {
 /// Apply gravitational acceleration to all entities with `Velocity` + `Gravity`.
 /// If the entity has a `Submerged` component and is swimming, gravity is reduced
 /// by the configured `swim_gravity_factor`.
+/// If the entity has an `InVacuum` component and is in vacuum, gravity is zero.
 pub fn apply_gravity(
     time: Res<Time>,
     player_config: Option<Res<PlayerConfig>>,
-    mut query: Query<(&mut Velocity, &Gravity, Option<&Submerged>)>,
+    mut query: Query<(&mut Velocity, &Gravity, Option<&Submerged>, Option<&InVacuum>)>,
 ) {
     let dt = time.delta_secs().min(MAX_DELTA_SECS);
-    for (mut vel, gravity, submerged) in &mut query {
+    for (mut vel, gravity, submerged, in_vacuum) in &mut query {
+        // Zero gravity in vacuum
+        if in_vacuum.is_some_and(|v| v.0) {
+            continue;
+        }
+
         let gravity_factor = match submerged {
             Some(sub) if sub.is_swimming() => player_config
                 .as_ref()

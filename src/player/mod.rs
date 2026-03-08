@@ -7,6 +7,7 @@ use bevy::prelude::*;
 use bevy::sprite_render::MeshMaterial2d;
 
 use crate::cosmos::capsule::CapsuleLocation;
+use crate::cosmos::pressurization::InVacuum;
 use crate::cosmos::warp::NeedsRespawn;
 use crate::crafting::{HandCraftState, UnlockedRecipes};
 use crate::inventory::{Hotbar, Inventory};
@@ -121,6 +122,7 @@ fn spawn_player(
         Gravity(player_config.gravity),
         Grounded(false),
         Submerged::default(),
+        InVacuum::default(),
         TileCollider {
             width: player_config.width,
             height: player_config.height,
