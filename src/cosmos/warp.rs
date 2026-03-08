@@ -9,6 +9,7 @@ use bevy::prelude::*;
 
 use crate::cosmos::address::{CelestialAddress, CelestialSeeds};
 use crate::cosmos::current::CurrentSystem;
+use crate::cosmos::fuel::ShipFuel;
 use crate::cosmos::ship_location::{GlobalBiome, ShipLocation};
 use crate::cosmos::persistence::{
     save_current_world, DirtyChunks, PendingDroppedItems, SavedDroppedItem, Universe,
@@ -145,6 +146,7 @@ pub fn handle_warp(
         if matches!(aw.address, CelestialAddress::Ship { .. }) {
             commands.remove_resource::<GlobalBiome>();
             commands.remove_resource::<ShipLocation>();
+            commands.remove_resource::<ShipFuel>();
         }
     }
 
@@ -217,6 +219,7 @@ pub fn handle_warp(
         if let Some(ref aw) = active_world {
             commands.insert_resource(ShipLocation::Orbit(aw.address.clone()));
         }
+        commands.init_resource::<ShipFuel>();
     }
 
     // --- 12. Mark player for respawn on new world surface ---
@@ -331,6 +334,7 @@ pub fn handle_warp_to_ship(
         if matches!(aw.address, CelestialAddress::Ship { .. }) {
             commands.remove_resource::<GlobalBiome>();
             commands.remove_resource::<ShipLocation>();
+            commands.remove_resource::<ShipFuel>();
         }
     }
 
@@ -414,6 +418,7 @@ pub fn handle_warp_to_ship(
     if let Some(ref aw) = active_world {
         commands.insert_resource(ShipLocation::Orbit(aw.address.clone()));
     }
+    commands.init_resource::<ShipFuel>();
 
     // --- 12. Mark player for respawn on the ship ---
     commands.insert_resource(NeedsRespawn);

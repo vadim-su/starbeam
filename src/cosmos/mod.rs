@@ -2,6 +2,7 @@ pub mod address;
 pub mod assets;
 pub mod capsule;
 pub mod current;
+pub mod fuel;
 pub mod generation;
 pub mod persistence;
 pub mod ship_hull;

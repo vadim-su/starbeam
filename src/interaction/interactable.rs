@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::sprite_render::MeshMaterial2d;
 
 use crate::cosmos::address::CelestialAddress;
-use crate::cosmos::capsule::{AirlockMarker, CapsuleLocation, CapsuleMarker};
+use crate::cosmos::capsule::{AirlockMarker, AutopilotMarker, CapsuleLocation, CapsuleMarker};
 use crate::cosmos::ship_location::ShipLocation;
 use crate::cosmos::warp::{WarpToBody, WarpToShip};
 use crate::crafting::CraftingStation;
@@ -65,6 +65,7 @@ pub fn detect_nearby_interactable(
     station_query: Query<(Entity, &Transform), With<CraftingStation>>,
     capsule_query: Query<(Entity, &Transform), With<CapsuleMarker>>,
     airlock_query: Query<(Entity, &Transform), With<AirlockMarker>>,
+    autopilot_query: Query<(Entity, &Transform), With<AutopilotMarker>>,
     world_config: Res<ActiveWorld>,
 ) {
     let Ok((player_tf, player_col)) = player_query.single() else {
@@ -98,6 +99,9 @@ pub fn detect_nearby_interactable(
     for (entity, tf) in &airlock_query {
         check(entity, tf);
     }
+    for (entity, tf) in &autopilot_query {
+        check(entity, tf);
+    }
 
     nearby.entity = closest.map(|(e, _)| e);
 }
@@ -117,9 +121,14 @@ pub fn handle_interaction_input(
     station_query: Query<Entity, With<CraftingStation>>,
     capsule_query: Query<&Transform, With<CapsuleMarker>>,
     airlock_query: Query<Entity, With<AirlockMarker>>,
+    autopilot_query: Query<Entity, With<AutopilotMarker>>,
     active_world: Res<ActiveWorld>,
     ship_location: Option<Res<ShipLocation>>,
     capsule_location: Option<Res<CapsuleLocation>>,
+    mut star_map: (
+        ResMut<crate::ui::star_map::StarMapState>,
+        ResMut<crate::ui::star_map::AutopilotMode>,
+    ),
     mut warp_body_events: bevy::ecs::message::MessageWriter<WarpToBody>,
     mut warp_ship_events: bevy::ecs::message::MessageWriter<WarpToShip>,
 ) {
@@ -166,6 +175,14 @@ pub fn handle_interaction_input(
                     "Capsule activated at tile ({}, {}) — warping to ship",
                     tile_x, tile_y
                 );
+                return;
+            }
+
+            // Check if it's an autopilot console (open star map in autopilot mode)
+            if autopilot_query.get(entity).is_ok() {
+                star_map.0.visible = true;
+                star_map.1 .0 = true;
+                info!("Autopilot console activated — opening star map in autopilot mode");
                 return;
             }
 
@@ -233,7 +250,7 @@ const HIGHLIGHT_COLOR: Vec4 = Vec4::new(1.0, 1.0, 1.0, 0.25);
 /// Set highlight on the nearest interactable entity, clear on others.
 pub fn update_interactable_highlight(
     nearby: Res<NearbyInteractable>,
-    interactable_query: Query<&MeshMaterial2d<LitSpriteMaterial>, Or<(With<CraftingStation>, With<CapsuleMarker>, With<AirlockMarker>)>>,
+    interactable_query: Query<&MeshMaterial2d<LitSpriteMaterial>, Or<(With<CraftingStation>, With<CapsuleMarker>, With<AirlockMarker>, With<AutopilotMarker>)>>,
     mut materials: ResMut<Assets<LitSpriteMaterial>>,
 ) {
     if !nearby.is_changed() {

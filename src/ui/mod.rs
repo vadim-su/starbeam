@@ -5,6 +5,7 @@ pub mod star_map;
 use bevy::prelude::*;
 use bevy_egui::EguiPrimaryContextPass;
 
+use crate::cosmos::ship_location::{handle_navigate, tick_ship_travel};
 use crate::cosmos::warp::{handle_warp, handle_warp_to_ship, WarpToBody, WarpToShip};
 use crate::registry::AppState;
 use crate::sets::GameSet;
@@ -16,8 +17,10 @@ impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<debug_panel::DebugUiState>()
             .init_resource::<star_map::StarMapState>()
+            .init_resource::<star_map::AutopilotMode>()
             .add_message::<WarpToBody>()
             .add_message::<WarpToShip>()
+            .add_message::<star_map::NavigateToBody>()
             .add_plugins(GameUiPlugin)
             .add_systems(
                 Update,
@@ -33,7 +36,15 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Update,
-                (handle_warp, handle_warp_to_ship).run_if(in_state(AppState::InGame)),
+                (handle_warp, handle_warp_to_ship, handle_navigate)
+                    .run_if(in_state(AppState::InGame)),
+            )
+            .add_systems(
+                Update,
+                tick_ship_travel.run_if(
+                    in_state(AppState::InGame)
+                        .and(resource_exists::<crate::cosmos::ship_location::ShipLocation>),
+                ),
             );
     }
 }
