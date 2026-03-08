@@ -7,4 +7,20 @@
         station: None,
         unlocked_by: Always,
     ),
+    (
+        id: "wooden_sword",
+        result: (item_id: "wood", count: 1),
+        ingredients: [(item_id: "dirt", count: 5)],
+        craft_time: 1.0,
+        station: None,
+        unlocked_by: Blueprint("wooden_sword"),
+    ),
+    (
+        id: "stone_pickaxe",
+        result: (item_id: "stone", count: 1),
+        ingredients: [(item_id: "dirt", count: 10)],
+        craft_time: 1.5,
+        station: None,
+        unlocked_by: Blueprint("stone_pickaxe"),
+    ),
 ]

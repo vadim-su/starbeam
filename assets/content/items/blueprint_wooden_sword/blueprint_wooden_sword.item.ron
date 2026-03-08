@@ -1,0 +1,9 @@
+(
+  id: "blueprint_wooden_sword",
+  display_name: "Blueprint: Wooden Sword",
+  description: "Learn to craft a wooden sword.",
+  max_stack: 1,
+  rarity: Uncommon,
+  item_type: Blueprint,
+  blueprint_recipe: Some("wooden_sword"),
+)

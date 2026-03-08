@@ -1,0 +1,9 @@
+(
+  id: "blueprint_stone_pickaxe",
+  display_name: "Blueprint: Stone Pickaxe",
+  description: "Learn to craft a stone pickaxe.",
+  max_stack: 1,
+  rarity: Uncommon,
+  item_type: Blueprint,
+  blueprint_recipe: Some("stone_pickaxe"),
+)
