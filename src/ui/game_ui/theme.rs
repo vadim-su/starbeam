@@ -107,6 +107,7 @@ pub struct ChatConfig {
     pub visible_lines: usize,
     pub fade_delay_secs: f32,
     pub fade_duration_secs: f32,
+    pub font: String,
     pub font_size: f32,
     pub width: f32,
     pub height: f32,

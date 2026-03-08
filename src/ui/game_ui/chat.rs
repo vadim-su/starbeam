@@ -31,7 +31,13 @@ pub struct ChatMessageText {
 #[derive(Component)]
 pub struct ChatBackground;
 
-pub fn spawn_chat(commands: &mut Commands, theme: &UiTheme) {
+/// Loaded chat font handle.
+#[derive(Resource)]
+pub struct ChatFont(pub Handle<Font>);
+
+pub fn spawn_chat(commands: &mut Commands, theme: &UiTheme, asset_server: &AssetServer) {
+    let font_handle: Handle<Font> = asset_server.load(&theme.chat.font);
+    commands.insert_resource(ChatFont(font_handle.clone()));
     let chat = &theme.chat;
 
     commands
@@ -82,6 +88,7 @@ pub fn spawn_chat(commands: &mut Commands, theme: &UiTheme) {
                 ChatInputLine,
                 Text::new(""),
                 TextFont {
+                    font: font_handle.clone(),
                     font_size: chat.font_size,
                     ..default()
                 },
@@ -254,6 +261,7 @@ pub fn chat_render_messages(
     theme: Res<UiTheme>,
     time: Res<Time>,
     mut render_state: Local<ChatRenderState>,
+    chat_font: Res<ChatFont>,
 ) {
     let chat = &theme.chat;
     let now = time.elapsed_secs_f64();
@@ -341,6 +349,7 @@ pub fn chat_render_messages(
                 ChatMessageText { index: i },
                 Text::new(display_text),
                 TextFont {
+                    font: chat_font.0.clone(),
                     font_size: chat.font_size,
                     ..default()
                 },

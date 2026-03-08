@@ -51,7 +51,13 @@ fn spawn_camera(mut commands: Commands) {
 fn camera_zoom(
     mut scroll_events: MessageReader<MouseWheel>,
     mut camera_query: Query<&mut Projection, With<Camera2d>>,
+    chat_state: Res<crate::chat::ChatState>,
 ) {
+    if chat_state.is_active {
+        // Consume events so they don't queue up
+        scroll_events.read().count();
+        return;
+    }
     let total: f32 = scroll_events.read().map(|e| e.y).sum();
     if total == 0.0 {
         return;

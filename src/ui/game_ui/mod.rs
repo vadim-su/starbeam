@@ -178,7 +178,7 @@ fn spawn_game_ui(
     }
     hotbar::spawn_hotbar(&mut commands, &theme, &asset_server);
     inventory::spawn_inventory_screen(&mut commands, &theme, &asset_server);
-    chat::spawn_chat(&mut commands, &theme);
+    chat::spawn_chat(&mut commands, &theme, &asset_server);
 }
 
 /// Initialize slot frame textures.

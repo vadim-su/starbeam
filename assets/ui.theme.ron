@@ -70,6 +70,7 @@
         visible_lines: 5,
         fade_delay_secs: 5.0,
         fade_duration_secs: 1.0,
+        font: "fonts/NotoSans-Regular.ttf",
         font_size: 14.0,
         width: 400.0,
         height: 200.0,
