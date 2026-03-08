@@ -32,6 +32,11 @@ pub fn surface_height(
     frequency: f64,
     amplitude: f64,
 ) -> i32 {
+    // Place surface below the world so all tiles become air (used by ship worlds)
+    if amplitude == 0.0 {
+        return -1;
+    }
+
     let perlin = &noise.surface;
     let base = SURFACE_BASE * wc.height_tiles as f64;
 
@@ -488,5 +493,12 @@ mod tests {
         let h_neg = surface_height(&cache, -1, &wc, freq, amp);
         let h_pos = surface_height(&cache, wc.width_tiles - 1, &wc, freq, amp);
         assert_eq!(h_neg, h_pos);
+    }
+
+    #[test]
+    fn surface_height_with_zero_amplitude_returns_below_world() {
+        let wc = fixtures::test_world_config();
+        let cache = TerrainNoiseCache::new(TEST_SEED);
+        assert_eq!(surface_height(&cache, 100, &wc, 1.0, 0.0), -1);
     }
 }

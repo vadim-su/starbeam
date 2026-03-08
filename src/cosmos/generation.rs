@@ -30,6 +30,7 @@ pub struct GeneratedBody {
     pub width_tiles: i32,
     pub height_tiles: i32,
     pub day_night: DayNightConfig,
+    pub wrap_x: bool,
 }
 
 /// A complete generated star system.
@@ -144,6 +145,7 @@ pub fn generate_system(
             width_tiles: width,
             height_tiles: height,
             day_night,
+            wrap_x: planet_template.wrap_x.unwrap_or(true),
         });
     }
 
@@ -396,6 +398,7 @@ mod tests {
             sun_intensity_modifier: None,
             danger_multipliers: Some([0.5, 0.0, 0.5, 1.0]),
             temperature_modifiers: None,
+            wrap_x: None,
         }
     }
 

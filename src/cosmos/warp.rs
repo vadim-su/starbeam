@@ -171,7 +171,7 @@ pub fn handle_warp(
         chunk_load_radius: current_system.chunk_load_radius,
         seed: seeds.terrain_seed_u32(),
         planet_type: body.planet_type_id.clone(),
-        wrap_x: true,
+        wrap_x: body.wrap_x,
     };
     commands.insert_resource(TerrainNoiseCache::new(new_active_world.seed));
     commands.insert_resource(new_active_world);

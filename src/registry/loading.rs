@@ -403,7 +403,7 @@ pub(crate) fn check_loading(
         chunk_load_radius: gen_config.chunk_load_radius,
         seed: seeds.terrain_seed_u32(),
         planet_type: body.planet_type_id.clone(),
-        wrap_x: true,
+        wrap_x: body.wrap_x,
     };
     commands.insert_resource(TerrainNoiseCache::new(active_world.seed));
     commands.insert_resource(active_world);

@@ -1,0 +1,36 @@
+(
+    id: "ship",
+    primary_biome: "deep_space",
+    secondary_biomes: [],
+    layers: (
+        surface: (
+            primary_biome: Some("deep_space"),
+            terrain_frequency: 0.0,
+            terrain_amplitude: 0.0,
+            depth_ratio: 1.0,
+        ),
+        underground: (
+            primary_biome: Some("deep_space"),
+            terrain_frequency: 0.0,
+            terrain_amplitude: 0.0,
+            depth_ratio: 0.0,
+        ),
+        deep_underground: (
+            primary_biome: Some("deep_space"),
+            terrain_frequency: 0.0,
+            terrain_amplitude: 0.0,
+            depth_ratio: 0.0,
+        ),
+        core: (
+            primary_biome: Some("deep_space"),
+            terrain_frequency: 0.0,
+            terrain_amplitude: 0.0,
+            depth_ratio: 0.0,
+        ),
+    ),
+    region_width_min: 9999,
+    region_width_max: 9999,
+    primary_region_ratio: 1.0,
+    size: Some((128, 64)),
+    wrap_x: Some(false),
+)

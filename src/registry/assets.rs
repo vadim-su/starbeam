@@ -283,6 +283,8 @@ pub struct PlanetTypeAsset {
     pub danger_multipliers: Option<[f32; 4]>,
     #[serde(default)]
     pub temperature_modifiers: Option<[f32; 4]>,
+    #[serde(default)]
+    pub wrap_x: Option<bool>,
 }
 
 /// Asset loaded from *.biome.ron
