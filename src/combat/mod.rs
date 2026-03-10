@@ -4,6 +4,8 @@ pub mod death;
 pub mod fall_damage;
 pub mod health;
 pub mod liquid_damage;
+pub mod melee;
+pub mod projectile;
 
 use bevy::prelude::*;
 use crate::sets::GameSet;
@@ -44,6 +46,18 @@ impl Plugin for CombatPlugin {
                 (
                     fall_damage::fall_damage_system,
                     liquid_damage::liquid_damage_system,
+                )
+                    .in_set(GameSet::Physics),
+            )
+            .add_systems(
+                Update,
+                melee::melee_attack_system.in_set(GameSet::Input),
+            )
+            .add_systems(
+                Update,
+                (
+                    projectile::tick_projectiles,
+                    projectile::projectile_hit_detection,
                 )
                     .in_set(GameSet::Physics),
             );

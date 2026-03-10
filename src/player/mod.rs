@@ -157,6 +157,7 @@ fn spawn_player(
     ));
     parent.insert(crate::combat::Health::new(100.0));
     parent.insert(crate::combat::fall_damage::FallTracker::default());
+    parent.insert(crate::combat::melee::MeleeAttack::default());
 
     // Spawn child entities for each body part
     parent.with_children(|builder| {
