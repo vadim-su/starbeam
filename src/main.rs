@@ -3,6 +3,7 @@ mod chat;
 pub mod combat;
 pub mod cosmos;
 pub mod crafting;
+pub mod enemy;
 mod interaction;
 pub mod inventory;
 pub mod item;
@@ -66,6 +67,7 @@ fn main() {
         .add_plugins(inventory::InventoryPlugin)
         .add_plugins(crafting::CraftingPlugin)
         .add_plugins(combat::CombatPlugin)
+        .add_plugins(enemy::EnemyPlugin)
         .configure_sets(
             Update,
             (
