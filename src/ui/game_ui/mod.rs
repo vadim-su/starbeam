@@ -10,6 +10,7 @@ pub mod oxygen_hud;
 pub mod slot_sync;
 pub mod theme;
 pub mod tooltip;
+pub mod trade_panel;
 pub mod window;
 
 use bevy::asset::RenderAssetUsages;
@@ -99,6 +100,7 @@ impl Plugin for GameUiPlugin {
         // UiTheme is loaded via the asset system during the Loading phase
         // and hot-reloaded in real-time by hot_reload_ui_theme.
         app.add_plugins(crafting_panel::CraftingUiPlugin)
+            .add_plugins(trade_panel::TradeUiPlugin)
             .init_resource::<DragState>()
             .init_resource::<HoveredSlot>()
             .init_resource::<InventoryScreenState>()

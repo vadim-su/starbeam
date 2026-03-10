@@ -13,6 +13,7 @@ use bevy::ui::widget::ImageNode;
 use super::components::{DragState, InventoryScreenState};
 use super::theme::UiTheme;
 use crate::interaction::interactable::{HandCraftOpen, OpenStation};
+use crate::trader::OpenTrader;
 
 const HEADER_HEIGHT: f32 = 28.0;
 
@@ -32,6 +33,7 @@ pub struct FocusedWindow(pub Option<Entity>);
 pub enum GameWindow {
     Inventory,
     Crafting,
+    Trading,
 }
 
 /// Close button inside a window header.
@@ -282,6 +284,7 @@ pub fn close_topmost_on_esc(
     mut inv_state: ResMut<InventoryScreenState>,
     mut open_station: ResMut<OpenStation>,
     mut hand_craft_open: ResMut<HandCraftOpen>,
+    mut open_trader: ResMut<OpenTrader>,
     focused: Res<FocusedWindow>,
     chat_state: Res<crate::chat::ChatState>,
 ) {
@@ -310,6 +313,7 @@ pub fn close_topmost_on_esc(
                 continue;
             }
             let priority = match window {
+                GameWindow::Trading => 3,
                 GameWindow::Crafting => 2,
                 GameWindow::Inventory => 1,
             };
@@ -331,6 +335,7 @@ pub fn close_topmost_on_esc(
             &mut inv_state,
             &mut open_station,
             &mut hand_craft_open,
+            &mut open_trader,
         );
     }
 }
@@ -342,6 +347,7 @@ pub fn handle_window_close_button(
     mut inv_state: ResMut<InventoryScreenState>,
     mut open_station: ResMut<OpenStation>,
     mut hand_craft_open: ResMut<HandCraftOpen>,
+    mut open_trader: ResMut<OpenTrader>,
 ) {
     for (interaction, close_btn) in &buttons {
         if *interaction != Interaction::Pressed {
@@ -354,6 +360,7 @@ pub fn handle_window_close_button(
                 &mut inv_state,
                 &mut open_station,
                 &mut hand_craft_open,
+                &mut open_trader,
             );
         }
     }
@@ -366,6 +373,7 @@ fn close_window(
     inv_state: &mut InventoryScreenState,
     open_station: &mut OpenStation,
     hand_craft_open: &mut HandCraftOpen,
+    open_trader: &mut OpenTrader,
 ) {
     match window {
         GameWindow::Inventory => {
@@ -375,6 +383,9 @@ fn close_window(
         GameWindow::Crafting => {
             open_station.0 = None;
             hand_craft_open.0 = false;
+        }
+        GameWindow::Trading => {
+            open_trader.0 = None;
         }
     }
 }
