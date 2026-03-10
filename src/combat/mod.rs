@@ -1,18 +1,26 @@
+pub mod damage;
 pub mod health;
 
 use bevy::prelude::*;
 use crate::sets::GameSet;
 
+pub use damage::*;
 pub use health::*;
 
 pub struct CombatPlugin;
 
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            tick_invincibility.in_set(GameSet::Physics),
-        );
+        app.add_message::<DamageEvent>()
+            .add_systems(
+                Update,
+                (
+                    tick_invincibility,
+                    damage::process_damage,
+                    damage::apply_damage_knockback,
+                )
+                    .in_set(GameSet::Physics),
+            );
     }
 }
 
