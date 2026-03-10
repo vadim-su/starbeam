@@ -135,9 +135,9 @@ pub fn handle_interaction_input(
     mut star_map: (
         ResMut<crate::ui::star_map::StarMapState>,
         ResMut<crate::ui::star_map::AutopilotMode>,
+        bevy::ecs::message::MessageWriter<WarpToBody>,
+        bevy::ecs::message::MessageWriter<WarpToShip>,
     ),
-    mut warp_body_events: bevy::ecs::message::MessageWriter<WarpToBody>,
-    mut warp_ship_events: bevy::ecs::message::MessageWriter<WarpToShip>,
 ) {
     if chat_state.is_active {
         return;
@@ -192,7 +192,7 @@ pub fn handle_interaction_input(
                     .as_ref()
                     .and_then(|m| m.active_ship)
                     .unwrap_or(0);
-                warp_ship_events.write(WarpToShip { ship_id });
+                star_map.3.write(WarpToShip { ship_id });
                 info!(
                     "Capsule activated at tile ({}, {}) — warping to ship",
                     tile_x, tile_y
@@ -226,7 +226,7 @@ pub fn handle_interaction_input(
                         // If we have a capsule location on that planet, warp to it
                         if let Some(ref capsule_loc) = capsule_location {
                             if capsule_loc.planet_address == *planet_addr {
-                                warp_body_events.write(WarpToBody {
+                                star_map.2.write(WarpToBody {
                                     orbit: capsule_loc.planet_orbit,
                                 });
                                 info!(
@@ -239,7 +239,7 @@ pub fn handle_interaction_input(
                         // No capsule on the orbited planet — warp to the planet
                         // orbit anyway (will spawn at default location)
                         if let Some(orbit) = planet_addr.orbit() {
-                            warp_body_events.write(WarpToBody { orbit });
+                            star_map.2.write(WarpToBody { orbit });
                             info!("Airlock activated — warping to orbit {}", orbit);
                         } else {
                             warn!("Airlock: orbiting body has no orbit index");

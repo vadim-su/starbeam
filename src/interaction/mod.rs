@@ -36,13 +36,19 @@ impl Plugin for InteractionPlugin {
             )
             .add_systems(
                 Update,
-                (
-                    block_action::block_interaction_system,
-                    interactable::detect_nearby_interactable,
-                    interactable::handle_interaction_input,
-                    interactable::update_interactable_highlight,
-                )
-                    .in_set(InteractionSet::BlockAction),
+                block_action::block_interaction_system.in_set(InteractionSet::BlockAction),
+            )
+            .add_systems(
+                Update,
+                interactable::detect_nearby_interactable.in_set(InteractionSet::BlockAction),
+            )
+            .add_systems(
+                Update,
+                interactable::handle_interaction_input.in_set(InteractionSet::BlockAction),
+            )
+            .add_systems(
+                Update,
+                interactable::update_interactable_highlight.in_set(InteractionSet::BlockAction),
             );
     }
 }

@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy::sprite_render::MeshMaterial2d;
 use bevy::window::PrimaryWindow;
 
+use crate::combat::block_damage::{BlockDamageMap, BlockDamageState};
 use crate::cosmos::persistence::{DirtyChunks, DROPPED_ITEM_LIFETIME_SECS};
 use crate::cosmos::pressurization::PressureMap;
 use crate::crafting::CraftingStation;
@@ -112,6 +113,8 @@ pub fn block_interaction_system(
         ResMut<RcGridDirty>,
         ResMut<DirtyChunks>,
         Option<ResMut<PressureMap>>,
+        Res<Time>,
+        ResMut<BlockDamageMap>,
     ),
     mut lit_materials: ResMut<Assets<LitSpriteMaterial>>,
     object_registry: Option<Res<ObjectRegistry>>,
@@ -128,10 +131,10 @@ pub fn block_interaction_system(
     if chat_state.is_active {
         return;
     }
-    let (fallback_lm, fallback_img, mut rc_dirty, mut dirty_chunks, mut pressure_map) = fallbacks;
-    let left_click = mouse.just_pressed(MouseButton::Left);
+    let (fallback_lm, fallback_img, mut rc_dirty, mut dirty_chunks, mut pressure_map, time, mut block_damage_map) = fallbacks;
+    let left_held = mouse.pressed(MouseButton::Left);
     let right_click = mouse.just_pressed(MouseButton::Right);
-    if !left_click && !right_click {
+    if !left_held && !right_click {
         return;
     }
 
@@ -167,7 +170,7 @@ pub fn block_interaction_system(
         return;
     }
 
-    if left_click {
+    if left_held {
         // Check for object first
         if let Some(ref obj_reg) = object_registry {
             if let Some((anchor_x, anchor_y, obj_idx, obj_id)) =
@@ -220,31 +223,62 @@ pub fn block_interaction_system(
         };
 
         if ctx_ref.tile_registry.is_solid(current) {
-            // Break fg tile
+            // Accumulate mining damage instead of instant break
+            let dt = time.delta_secs();
             let tile_def = ctx_ref.tile_registry.get(current);
-            let tile_center = Vec2::new(
-                tile_x as f32 * ctx_ref.config.tile_size + ctx_ref.config.tile_size / 2.0,
-                tile_y as f32 * ctx_ref.config.tile_size + ctx_ref.config.tile_size / 2.0,
-            );
-            spawn_tile_drops(
-                &mut commands,
-                &tile_def.drops,
-                tile_center,
-                &item_registry,
-                &icon_registry,
-                &quad,
-                &fallback_lm,
-                &mut lit_materials,
-                &fallback_img.0,
-            );
-            world_map.set_tile(tile_x, tile_y, Layer::Fg, TileId::AIR, &ctx_ref);
-            // Wake liquid neighbors when a solid tile is removed.
-            if let Some(ref mut sim) = liquid_sim {
-                sim.sleep.wake_with_neighbors(tile_x, tile_y);
+            let hardness = tile_def.hardness;
+
+            // Get mining_power from active left-hand item, default 1.0
+            let mining_power = hotbar.slots[hotbar.active_slot]
+                .left_hand
+                .as_deref()
+                .and_then(|item_id| item_registry.by_name(item_id))
+                .and_then(|id| item_registry.get(id).stats.as_ref())
+                .and_then(|stats| stats.mining_power)
+                .unwrap_or(1.0);
+
+            let state = block_damage_map
+                .damage
+                .entry((tile_x, tile_y))
+                .or_insert(BlockDamageState {
+                    accumulated: 0.0,
+                    regen_timer: 0.0,
+                });
+            state.accumulated += mining_power * dt;
+            state.regen_timer = 0.0;
+
+            if state.accumulated >= hardness {
+                // Block destroyed
+                block_damage_map.damage.remove(&(tile_x, tile_y));
+
+                let tile_center = Vec2::new(
+                    tile_x as f32 * ctx_ref.config.tile_size + ctx_ref.config.tile_size / 2.0,
+                    tile_y as f32 * ctx_ref.config.tile_size + ctx_ref.config.tile_size / 2.0,
+                );
+                spawn_tile_drops(
+                    &mut commands,
+                    &tile_def.drops,
+                    tile_center,
+                    &item_registry,
+                    &icon_registry,
+                    &quad,
+                    &fallback_lm,
+                    &mut lit_materials,
+                    &fallback_img.0,
+                );
+                world_map.set_tile(tile_x, tile_y, Layer::Fg, TileId::AIR, &ctx_ref);
+                // Wake liquid neighbors when a solid tile is removed.
+                if let Some(ref mut sim) = liquid_sim {
+                    sim.sleep.wake_with_neighbors(tile_x, tile_y);
+                }
+                let wrapped_x = ctx_ref.config.wrap_tile_x(tile_x);
+                let (dirty_cx, dirty_cy) =
+                    tile_to_chunk(wrapped_x, tile_y, ctx_ref.config.chunk_size);
+                dirty_chunks.0.insert((dirty_cx, dirty_cy));
+            } else {
+                // Damage accumulated but block not yet destroyed — skip post-break logic
+                return;
             }
-            let wrapped_x = ctx_ref.config.wrap_tile_x(tile_x);
-            let (dirty_cx, dirty_cy) = tile_to_chunk(wrapped_x, tile_y, ctx_ref.config.chunk_size);
-            dirty_chunks.0.insert((dirty_cx, dirty_cy));
         } else {
             // Left-click on air = place from left hand (objects then tiles).
             // This is intentional: left-hand items use left-click, right-hand items use right-click.
@@ -505,7 +539,7 @@ pub fn block_interaction_system(
     }
 
     // Update bitmasks for the modified layer
-    let modified_layer = if left_click { Layer::Fg } else { Layer::Bg };
+    let modified_layer = if left_held { Layer::Fg } else { Layer::Bg };
     let bitmask_dirty =
         update_bitmasks_around(&mut world_map, tile_x, tile_y, modified_layer, &ctx_ref);
 
