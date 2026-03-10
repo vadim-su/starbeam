@@ -38,6 +38,10 @@ impl Plugin for UiPlugin {
                 EguiPrimaryContextPass,
                 game_ui::oxygen_hud::draw_oxygen_hud.run_if(in_state(AppState::InGame)),
             )
+            .add_systems(
+                EguiPrimaryContextPass,
+                game_ui::health_hud::draw_health_hud.run_if(in_state(AppState::InGame)),
+            )
             .add_systems(Update, handle_warp.run_if(in_state(AppState::InGame)))
             .add_systems(Update, handle_warp_to_ship.run_if(in_state(AppState::InGame)))
             .add_systems(Update, handle_navigate.run_if(in_state(AppState::InGame)))

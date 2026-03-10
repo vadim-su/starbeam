@@ -5,6 +5,7 @@ pub mod drag_drop;
 pub mod hotbar;
 pub mod icon_registry;
 pub mod inventory;
+pub mod health_hud;
 pub mod oxygen_hud;
 pub mod slot_sync;
 pub mod theme;
