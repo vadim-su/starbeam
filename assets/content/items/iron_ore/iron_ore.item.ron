@@ -1,0 +1,8 @@
+(
+  id: "iron_ore",
+  display_name: "Iron Ore",
+  description: "Raw iron ore. Can be smelted into useful materials.",
+  max_stack: 999,
+  rarity: Common,
+  item_type: Resource,
+)

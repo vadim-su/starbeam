@@ -1,0 +1,17 @@
+(
+  id: "bow",
+  display_name: "Bow",
+  description: "A simple ranged weapon. Requires arrows to fire.",
+  max_stack: 1,
+  rarity: Common,
+  item_type: Weapon,
+  stats: Some((
+    damage: Some(10.0),
+    defense: None,
+    speed_bonus: None,
+    health_bonus: None,
+    mining_power: None,
+    attack_speed: Some(0.8),
+    knockback: None,
+  )),
+)

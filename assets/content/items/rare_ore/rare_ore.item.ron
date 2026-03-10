@@ -1,0 +1,8 @@
+(
+  id: "rare_ore",
+  display_name: "Rare Ore",
+  description: "An exceptionally rare mineral found deep underground.",
+  max_stack: 999,
+  rarity: Rare,
+  item_type: Resource,
+)

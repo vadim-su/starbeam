@@ -1,0 +1,17 @@
+(
+  id: "stone_pickaxe",
+  display_name: "Stone Pickaxe",
+  description: "A basic pickaxe made of stone. Slow but reliable.",
+  max_stack: 1,
+  rarity: Common,
+  item_type: Tool,
+  stats: Some((
+    damage: Some(3.0),
+    defense: None,
+    speed_bonus: None,
+    health_bonus: None,
+    mining_power: Some(2.0),
+    attack_speed: Some(1.0),
+    knockback: Some(2.0),
+  )),
+)

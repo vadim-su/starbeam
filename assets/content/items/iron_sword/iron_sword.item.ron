@@ -1,0 +1,17 @@
+(
+  id: "iron_sword",
+  display_name: "Iron Sword",
+  description: "A sharp iron blade. A dependable weapon for any explorer.",
+  max_stack: 1,
+  rarity: Uncommon,
+  item_type: Weapon,
+  stats: Some((
+    damage: Some(15.0),
+    defense: None,
+    speed_bonus: None,
+    health_bonus: None,
+    mining_power: None,
+    attack_speed: Some(1.4),
+    knockback: Some(5.0),
+  )),
+)

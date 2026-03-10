@@ -1,0 +1,17 @@
+(
+  id: "stone_sword",
+  display_name: "Stone Sword",
+  description: "A crude blade chipped from stone. Better than bare fists.",
+  max_stack: 1,
+  rarity: Common,
+  item_type: Weapon,
+  stats: Some((
+    damage: Some(8.0),
+    defense: None,
+    speed_bonus: None,
+    health_bonus: None,
+    mining_power: None,
+    attack_speed: Some(1.2),
+    knockback: Some(4.0),
+  )),
+)

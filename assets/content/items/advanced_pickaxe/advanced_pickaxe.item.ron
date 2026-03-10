@@ -1,0 +1,17 @@
+(
+  id: "advanced_pickaxe",
+  display_name: "Advanced Pickaxe",
+  description: "A high-tech pickaxe built with rare crystals. Tears through any block.",
+  max_stack: 1,
+  rarity: Rare,
+  item_type: Tool,
+  stats: Some((
+    damage: Some(7.0),
+    defense: None,
+    speed_bonus: None,
+    health_bonus: None,
+    mining_power: Some(10.0),
+    attack_speed: Some(1.0),
+    knockback: Some(3.0),
+  )),
+)

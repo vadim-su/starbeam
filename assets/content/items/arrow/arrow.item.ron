@@ -1,0 +1,8 @@
+(
+  id: "arrow",
+  display_name: "Arrow",
+  description: "Ammunition for bows. Pointy end goes forward.",
+  max_stack: 999,
+  rarity: Common,
+  item_type: Resource,
+)

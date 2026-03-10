@@ -1,0 +1,17 @@
+(
+  id: "iron_pickaxe",
+  display_name: "Iron Pickaxe",
+  description: "A sturdy pickaxe forged from iron. Mines most ores with ease.",
+  max_stack: 1,
+  rarity: Uncommon,
+  item_type: Tool,
+  stats: Some((
+    damage: Some(5.0),
+    defense: None,
+    speed_bonus: None,
+    health_bonus: None,
+    mining_power: Some(5.0),
+    attack_speed: Some(1.0),
+    knockback: Some(2.0),
+  )),
+)

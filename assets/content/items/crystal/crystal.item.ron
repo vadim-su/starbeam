@@ -1,0 +1,8 @@
+(
+  id: "crystal",
+  display_name: "Crystal",
+  description: "A shimmering crystal pulsing with energy. Used in advanced crafting.",
+  max_stack: 999,
+  rarity: Uncommon,
+  item_type: Resource,
+)
