@@ -1,5 +1,6 @@
 mod camera;
 mod chat;
+pub mod combat;
 pub mod cosmos;
 pub mod crafting;
 mod interaction;
@@ -64,6 +65,7 @@ fn main() {
         .add_plugins(object::ObjectPlugin)
         .add_plugins(inventory::InventoryPlugin)
         .add_plugins(crafting::CraftingPlugin)
+        .add_plugins(combat::CombatPlugin)
         .configure_sets(
             Update,
             (

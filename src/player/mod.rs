@@ -155,6 +155,7 @@ fn spawn_player(
         Transform::from_xyz(spawn_pixel_x, spawn_pixel_y, 1.0),
         Visibility::default(),
     ));
+    parent.insert(crate::combat::Health::new(100.0));
 
     // Spawn child entities for each body part
     parent.with_children(|builder| {
