@@ -1,6 +1,8 @@
 pub mod ai;
 pub mod components;
+pub mod flyer;
 pub mod loot;
+pub mod shooter;
 pub mod slime;
 pub mod spawner;
 
@@ -23,6 +25,14 @@ impl Plugin for EnemyPlugin {
             .add_systems(
                 Update,
                 slime::contact_damage_system.in_set(GameSet::Physics),
+            )
+            .add_systems(
+                Update,
+                shooter::shooter_attack_system.in_set(GameSet::Physics),
+            )
+            .add_systems(
+                Update,
+                flyer::flyer_bob_system.in_set(GameSet::Physics),
             )
             .add_systems(
                 Update,
