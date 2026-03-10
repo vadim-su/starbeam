@@ -8,6 +8,7 @@ use crate::cosmos::warp::{WarpToBody, WarpToShip};
 use crate::crafting::CraftingStation;
 use crate::physics::TileCollider;
 use crate::player::Player;
+use crate::trader::{Trader, OpenTrader};
 use crate::registry::world::ActiveWorld;
 use crate::world::lit_sprite::LitSpriteMaterial;
 
@@ -66,6 +67,7 @@ pub fn detect_nearby_interactable(
     capsule_query: Query<(Entity, &Transform), With<CapsuleMarker>>,
     airlock_query: Query<(Entity, &Transform), With<AirlockMarker>>,
     autopilot_query: Query<(Entity, &Transform), With<AutopilotMarker>>,
+    trader_query: Query<(Entity, &Transform), With<Trader>>,
     world_config: Res<ActiveWorld>,
 ) {
     let Ok((player_tf, player_col)) = player_query.single() else {
@@ -102,6 +104,9 @@ pub fn detect_nearby_interactable(
     for (entity, tf) in &autopilot_query {
         check(entity, tf);
     }
+    for (entity, tf) in &trader_query {
+        check(entity, tf);
+    }
 
     nearby.entity = closest.map(|(e, _)| e);
 }
@@ -115,6 +120,7 @@ pub fn handle_interaction_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     nearby: Res<NearbyInteractable>,
     mut open_station: ResMut<OpenStation>,
+    mut open_trader: ResMut<OpenTrader>,
     mut hand_craft_open: ResMut<HandCraftOpen>,
     chat_state: Res<crate::chat::ChatState>,
     // Queries to determine what type the nearby entity is
@@ -122,6 +128,7 @@ pub fn handle_interaction_input(
     capsule_query: Query<&Transform, With<CapsuleMarker>>,
     airlock_query: Query<Entity, With<AirlockMarker>>,
     autopilot_query: Query<Entity, With<AutopilotMarker>>,
+    trader_interact_query: Query<Entity, With<Trader>>,
     active_world: Res<ActiveWorld>,
     ship_manifest: Option<Res<ShipManifest>>,
     capsule_location: Option<Res<CapsuleLocation>>,
@@ -142,6 +149,11 @@ pub fn handle_interaction_input(
             open_station.0 = None;
             return;
         }
+        // If a trader is open, close it
+        if open_trader.0.is_some() {
+            open_trader.0 = None;
+            return;
+        }
         // Close hand-craft if open
         if hand_craft_open.0 {
             hand_craft_open.0 = false;
@@ -151,6 +163,12 @@ pub fn handle_interaction_input(
             // Check if it's a crafting station
             if station_query.get(entity).is_ok() {
                 open_station.0 = Some(entity);
+                return;
+            }
+
+            // Check if it's a trader
+            if trader_interact_query.get(entity).is_ok() {
+                open_trader.0 = Some(entity);
                 return;
             }
 
@@ -258,7 +276,7 @@ const HIGHLIGHT_COLOR: Vec4 = Vec4::new(1.0, 1.0, 1.0, 0.25);
 /// Set highlight on the nearest interactable entity, clear on others.
 pub fn update_interactable_highlight(
     nearby: Res<NearbyInteractable>,
-    interactable_query: Query<&MeshMaterial2d<LitSpriteMaterial>, Or<(With<CraftingStation>, With<CapsuleMarker>, With<AirlockMarker>, With<AutopilotMarker>)>>,
+    interactable_query: Query<&MeshMaterial2d<LitSpriteMaterial>, Or<(With<CraftingStation>, With<CapsuleMarker>, With<AirlockMarker>, With<AutopilotMarker>, With<Trader>)>>,
     mut materials: ResMut<Assets<LitSpriteMaterial>>,
 ) {
     if !nearby.is_changed() {
