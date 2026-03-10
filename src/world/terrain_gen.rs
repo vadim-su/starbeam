@@ -14,6 +14,7 @@ const SURFACE_BASE: f64 = 0.7;
 pub struct TerrainNoiseCache {
     pub surface: Perlin,
     pub cave: Perlin,
+    pub ore: Perlin,
 }
 
 impl TerrainNoiseCache {
@@ -21,6 +22,7 @@ impl TerrainNoiseCache {
         Self {
             surface: Perlin::new(seed),
             cave: Perlin::new(seed.wrapping_add(1)),
+            ore: Perlin::new(seed.wrapping_add(2)),
         }
     }
 }
@@ -53,6 +55,63 @@ pub fn surface_height(
     };
 
     (base + noise_val * amplitude) as i32
+}
+
+/// Check whether a fill_block tile should be replaced with an ore vein.
+/// Uses a separate Perlin noise layer with different frequency offsets per ore type.
+/// Each ore has a depth range (below surface) and a noise threshold.
+fn maybe_place_ore(
+    tile_x: i32,
+    tile_y: i32,
+    surface_y: i32,
+    fill_block: TileId,
+    ctx: &WorldCtxRef,
+) -> TileId {
+    let depth_below_surface = surface_y - tile_y;
+    if depth_below_surface < 10 {
+        return fill_block; // Too shallow for any ore
+    }
+
+    let ore_perlin = &ctx.noise_cache.ore;
+    let freq = 0.08;
+
+    // Rare ore: depth 50+, threshold 0.85
+    if depth_below_surface >= 50 {
+        let val = ore_perlin.get([
+            tile_x as f64 * freq + 1000.0,
+            tile_y as f64 * freq + 1000.0,
+        ]);
+        if val > 0.85 {
+            if let Some(id) = ctx.tile_registry.try_by_name("rare_ore") {
+                return id;
+            }
+        }
+    }
+
+    // Crystal: depth 30-60, threshold 0.8
+    if depth_below_surface >= 30 && depth_below_surface <= 60 {
+        let val = ore_perlin.get([
+            tile_x as f64 * freq + 500.0,
+            tile_y as f64 * freq + 500.0,
+        ]);
+        if val > 0.8 {
+            if let Some(id) = ctx.tile_registry.try_by_name("crystal") {
+                return id;
+            }
+        }
+    }
+
+    // Iron ore: depth 10-40, threshold 0.7
+    if depth_below_surface >= 10 && depth_below_surface <= 40 {
+        let val = ore_perlin.get([tile_x as f64 * freq, tile_y as f64 * freq]);
+        if val > 0.7 {
+            if let Some(id) = ctx.tile_registry.try_by_name("iron_ore") {
+                return id;
+            }
+        }
+    }
+
+    fill_block
 }
 
 pub fn generate_tile(tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> TileId {
@@ -156,7 +215,9 @@ pub fn generate_tile(tile_x: i32, tile_y: i32, ctx: &WorldCtxRef) -> TileId {
     if cave_val.abs() < biome.cave_threshold {
         TileId::AIR
     } else {
-        biome.fill_block
+        // Ore placement: only replace fill_block tiles (stone) with ore veins.
+        let fill = biome.fill_block;
+        maybe_place_ore(tile_x, tile_y, surface_y, fill, ctx)
     }
 }
 

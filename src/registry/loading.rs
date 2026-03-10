@@ -187,6 +187,42 @@ pub(crate) fn start_loading(mut commands: Commands, asset_server: Res<AssetServe
             "content/items/blueprint_stone_pickaxe/".to_string(),
             asset_server.load::<ItemDefAsset>("content/items/blueprint_stone_pickaxe/blueprint_stone_pickaxe.item.ron"),
         ),
+        (
+            "content/items/stone_pickaxe/".to_string(),
+            asset_server.load::<ItemDefAsset>("content/items/stone_pickaxe/stone_pickaxe.item.ron"),
+        ),
+        (
+            "content/items/iron_pickaxe/".to_string(),
+            asset_server.load::<ItemDefAsset>("content/items/iron_pickaxe/iron_pickaxe.item.ron"),
+        ),
+        (
+            "content/items/stone_sword/".to_string(),
+            asset_server.load::<ItemDefAsset>("content/items/stone_sword/stone_sword.item.ron"),
+        ),
+        (
+            "content/items/iron_sword/".to_string(),
+            asset_server.load::<ItemDefAsset>("content/items/iron_sword/iron_sword.item.ron"),
+        ),
+        (
+            "content/items/bow/".to_string(),
+            asset_server.load::<ItemDefAsset>("content/items/bow/bow.item.ron"),
+        ),
+        (
+            "content/items/arrow/".to_string(),
+            asset_server.load::<ItemDefAsset>("content/items/arrow/arrow.item.ron"),
+        ),
+        (
+            "content/items/iron_ore/".to_string(),
+            asset_server.load::<ItemDefAsset>("content/items/iron_ore/iron_ore.item.ron"),
+        ),
+        (
+            "content/items/crystal/".to_string(),
+            asset_server.load::<ItemDefAsset>("content/items/crystal/crystal.item.ron"),
+        ),
+        (
+            "content/items/rare_ore/".to_string(),
+            asset_server.load::<ItemDefAsset>("content/items/rare_ore/rare_ore.item.ron"),
+        ),
     ];
 
     let recipes = vec![
