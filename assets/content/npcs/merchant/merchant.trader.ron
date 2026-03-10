@@ -1,0 +1,7 @@
+(
+    offers: [
+        (cost: [("iron_ore", 10)], result: ("iron_sword", 1)),
+        (cost: [("stone", 20)], result: ("stone_pickaxe", 1)),
+        (cost: [("crystal", 5)], result: ("iron_pickaxe", 1)),
+    ],
+)

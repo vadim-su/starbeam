@@ -17,6 +17,7 @@ pub mod physics;
 mod player;
 mod registry;
 pub mod sets;
+pub mod trader;
 #[cfg(test)]
 mod test_helpers;
 mod ui;
@@ -68,6 +69,7 @@ fn main() {
         .add_plugins(crafting::CraftingPlugin)
         .add_plugins(combat::CombatPlugin)
         .add_plugins(enemy::EnemyPlugin)
+        .add_plugins(trader::TraderPlugin)
         .configure_sets(
             Update,
             (
