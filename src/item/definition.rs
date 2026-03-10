@@ -47,6 +47,9 @@ pub struct ItemStats {
     pub defense: Option<f32>,
     pub speed_bonus: Option<f32>,
     pub health_bonus: Option<i32>,
+    pub mining_power: Option<f32>,
+    pub attack_speed: Option<f32>,
+    pub knockback: Option<f32>,
 }
 
 fn default_max_stack() -> u16 {
