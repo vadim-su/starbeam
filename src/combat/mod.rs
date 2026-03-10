@@ -1,10 +1,12 @@
 pub mod damage;
+pub mod death;
 pub mod health;
 
 use bevy::prelude::*;
 use crate::sets::GameSet;
 
 pub use damage::*;
+pub use death::*;
 pub use health::*;
 
 pub struct CombatPlugin;
@@ -12,6 +14,7 @@ pub struct CombatPlugin;
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<DamageEvent>()
+            .add_message::<PlayerDeathEvent>()
             .add_systems(
                 Update,
                 (
@@ -19,6 +22,12 @@ impl Plugin for CombatPlugin {
                     damage::process_damage,
                     damage::apply_damage_knockback,
                 )
+                    .in_set(GameSet::Physics),
+            )
+            .add_systems(
+                Update,
+                (death::detect_player_death, death::handle_player_death)
+                    .chain()
                     .in_set(GameSet::Physics),
             );
     }
