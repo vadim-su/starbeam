@@ -6,6 +6,7 @@ pub mod health;
 pub mod liquid_damage;
 pub mod melee;
 pub mod projectile;
+pub mod ranged;
 
 use bevy::prelude::*;
 use crate::sets::GameSet;
@@ -51,7 +52,11 @@ impl Plugin for CombatPlugin {
             )
             .add_systems(
                 Update,
-                melee::melee_attack_system.in_set(GameSet::Input),
+                (
+                    melee::melee_attack_system,
+                    ranged::ranged_attack_system,
+                )
+                    .in_set(GameSet::Input),
             )
             .add_systems(
                 Update,

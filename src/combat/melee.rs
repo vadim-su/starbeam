@@ -5,6 +5,7 @@ use crate::inventory::Hotbar;
 use crate::item::ItemRegistry;
 use crate::player::Player;
 
+use super::ranged::is_ranged_weapon;
 use super::DamageEvent;
 
 #[derive(Component, Debug)]
@@ -56,6 +57,10 @@ pub fn melee_attack_system(
                 .or_else(|| hotbar.get_item_for_hand(true));
 
             if let Some(name) = item_name {
+                // Skip ranged weapons — handled by ranged_attack_system
+                if is_ranged_weapon(name) {
+                    continue;
+                }
                 if let Some(item_id) = registry.by_name(name) {
                     let def = registry.get(item_id);
                     if let Some(ref stats) = def.stats {
