@@ -1,7 +1,11 @@
 use bevy::prelude::*;
 
+use crate::combat::DamageEvent;
 use crate::cosmos::pressurization::InVacuum;
 use crate::player::Player;
+
+/// Damage per second when oxygen is fully depleted.
+const OXYGEN_DEPLETION_DPS: f32 = 10.0;
 
 /// Oxygen supply for the player. Drains in vacuum, refills in atmosphere.
 #[derive(Component, Debug)]
@@ -28,14 +32,19 @@ impl Default for Oxygen {
 /// Drains or refills oxygen based on whether the player is in vacuum.
 pub fn tick_oxygen(
     time: Res<Time>,
-    mut query: Query<(&InVacuum, &mut Oxygen), With<Player>>,
+    mut writer: bevy::ecs::message::MessageWriter<DamageEvent>,
+    mut query: Query<(Entity, &InVacuum, &mut Oxygen), With<Player>>,
 ) {
     let dt = time.delta_secs();
-    for (in_vacuum, mut oxygen) in &mut query {
+    for (entity, in_vacuum, mut oxygen) in &mut query {
         if in_vacuum.0 {
             oxygen.current = (oxygen.current - oxygen.drain_rate * dt).max(0.0);
             if oxygen.current <= 0.0 {
-                warn!("Player oxygen depleted! (damage not yet implemented)");
+                writer.write(DamageEvent {
+                    target: entity,
+                    amount: OXYGEN_DEPLETION_DPS * dt,
+                    knockback: Vec2::ZERO,
+                });
             }
         } else {
             oxygen.current = (oxygen.current + oxygen.refill_rate * dt).min(oxygen.max);

@@ -156,6 +156,7 @@ fn spawn_player(
         Visibility::default(),
     ));
     parent.insert(crate::combat::Health::new(100.0));
+    parent.insert(crate::combat::fall_damage::FallTracker::default());
 
     // Spawn child entities for each body part
     parent.with_children(|builder| {
