@@ -50,7 +50,7 @@ pub fn update_slot_icons(
     // Single query for ImageNode children — Has<T> used to distinguish icon vs frame
     mut image_query: Query<(&mut ImageNode, Has<ItemIcon>, Has<SlotFrame>)>,
     mut count_query: Query<&mut Text, With<ItemCount>>,
-    mut visibility_query: Query<&mut Visibility, Or<(With<ItemIcon>, With<SlotFrame>)>>,
+    mut visibility_query: Query<&mut Visibility, (Or<(With<ItemIcon>, With<SlotFrame>)>, Without<DurabilityBar>)>,
     mut durability_query: Query<(&mut Node, &mut BackgroundColor, &mut Visibility), With<DurabilityBar>>,
     children_query: Query<&Children>,
 ) {
