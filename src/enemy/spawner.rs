@@ -39,6 +39,7 @@ impl Default for MobSpawnConfig {
 pub fn mob_spawn_system(
     time: Res<Time>,
     mut commands: Commands,
+    asset_server: Res<AssetServer>,
     mut config: ResMut<MobSpawnConfig>,
     enemy_query: Query<(), With<Enemy>>,
     player_query: Query<&Transform, With<Player>>,
@@ -76,11 +77,11 @@ pub fn mob_spawn_system(
     // Pick a random enemy type
     let roll: f32 = rand::random();
     if roll < 0.5 {
-        spawn_slime(&mut commands, spawn_pos);
+        spawn_slime(&mut commands, &asset_server, spawn_pos);
     } else if roll < 0.8 {
-        spawn_shooter(&mut commands, spawn_pos);
+        spawn_shooter(&mut commands, &asset_server, spawn_pos);
     } else {
-        spawn_flyer(&mut commands, spawn_pos);
+        spawn_flyer(&mut commands, &asset_server, spawn_pos);
     }
 }
 
@@ -88,9 +89,10 @@ pub fn mob_spawn_system(
 // Spawn helpers
 // ---------------------------------------------------------------------------
 
-pub fn spawn_slime(commands: &mut Commands, pos: Vec2) {
+pub fn spawn_slime(commands: &mut Commands, asset_server: &AssetServer, pos: Vec2) {
     commands.spawn((
         Transform::from_xyz(pos.x, pos.y, 0.0),
+        Sprite::from_image(asset_server.load("sprites/enemies/slime/rotations/east.png")),
         Enemy,
         EnemyType::Slime,
         Health::new(30.0),
@@ -105,6 +107,7 @@ pub fn spawn_slime(commands: &mut Commands, pos: Vec2) {
         ContactDamage(8.0),
         MoveSpeed(40.0),
         PatrolAnchor(pos),
+    )).insert((
         AttackCooldown {
             duration: 1.0,
             timer: 0.0,
@@ -121,9 +124,10 @@ pub fn spawn_slime(commands: &mut Commands, pos: Vec2) {
     ));
 }
 
-pub fn spawn_shooter(commands: &mut Commands, pos: Vec2) {
+pub fn spawn_shooter(commands: &mut Commands, asset_server: &AssetServer, pos: Vec2) {
     commands.spawn((
         Transform::from_xyz(pos.x, pos.y, 0.0),
+        Sprite::from_image(asset_server.load("sprites/enemies/shooter/rotations/east.png")),
         Enemy,
         EnemyType::Shooter,
         Health::new(20.0),
@@ -138,6 +142,7 @@ pub fn spawn_shooter(commands: &mut Commands, pos: Vec2) {
         ContactDamage(5.0),
         MoveSpeed(30.0),
         PatrolAnchor(pos),
+    )).insert((
         AttackCooldown {
             duration: 2.0,
             timer: 0.0,
@@ -154,9 +159,10 @@ pub fn spawn_shooter(commands: &mut Commands, pos: Vec2) {
     ));
 }
 
-pub fn spawn_flyer(commands: &mut Commands, pos: Vec2) {
+pub fn spawn_flyer(commands: &mut Commands, asset_server: &AssetServer, pos: Vec2) {
     commands.spawn((
         Transform::from_xyz(pos.x, pos.y, 0.0),
+        Sprite::from_image(asset_server.load("sprites/enemies/flyer/rotations/east.png")),
         Enemy,
         EnemyType::Flyer,
         Health::new(15.0),
@@ -171,6 +177,7 @@ pub fn spawn_flyer(commands: &mut Commands, pos: Vec2) {
         ContactDamage(10.0),
         MoveSpeed(60.0),
         PatrolAnchor(pos),
+    )).insert((
         AttackCooldown {
             duration: 0.8,
             timer: 0.0,

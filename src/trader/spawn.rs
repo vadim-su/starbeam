@@ -15,6 +15,7 @@ pub struct TraderSpawned;
 /// Spawn a trader at the approximate center of the world, on the surface.
 pub fn spawn_trader(
     mut commands: Commands,
+    asset_server: Res<AssetServer>,
     active_world: Res<ActiveWorld>,
     noise_cache: Res<TerrainNoiseCache>,
     planet_config: Res<PlanetConfig>,
@@ -68,11 +69,7 @@ pub fn spawn_trader(
         Trader,
         trade_offers,
         Transform::from_translation(Vec3::new(world_x, world_y, 0.5)),
-        Sprite {
-            color: Color::srgb(0.8, 0.6, 0.2),
-            custom_size: Some(Vec2::new(tile_size, tile_size * 2.0)),
-            ..default()
-        },
+        Sprite::from_image(asset_server.load("sprites/npcs/merchant/rotations/east.png")),
         Visibility::default(),
     ));
 

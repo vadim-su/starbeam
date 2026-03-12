@@ -65,20 +65,38 @@ impl Plugin for CombatPlugin {
                     projectile::projectile_hit_detection,
                 )
                     .in_set(GameSet::Physics),
+            )
+            .add_systems(
+                Update,
+                invincibility_flash.in_set(GameSet::Ui),
             );
+    }
+}
+
+fn invincibility_flash(
+    mut query: Query<(&InvincibilityTimer, &mut Visibility)>,
+) {
+    for (timer, mut visibility) in &mut query {
+        // Flash every 0.1s
+        let flash = (timer.remaining * 10.0) as i32 % 2 == 0;
+        *visibility = if flash { Visibility::Visible } else { Visibility::Hidden };
     }
 }
 
 fn tick_invincibility(
     mut commands: Commands,
     time: Res<Time>,
-    mut query: Query<(Entity, &mut InvincibilityTimer)>,
+    mut query: Query<(Entity, &mut InvincibilityTimer, Option<&mut Visibility>)>,
 ) {
     let dt = time.delta_secs();
-    for (entity, mut timer) in &mut query {
+    for (entity, mut timer, visibility) in &mut query {
         timer.remaining -= dt;
         if timer.remaining <= 0.0 {
             commands.entity(entity).remove::<InvincibilityTimer>();
+            // Restore visibility when invincibility ends
+            if let Some(mut vis) = visibility {
+                *vis = Visibility::Visible;
+            }
         }
     }
 }
