@@ -53,8 +53,31 @@ fn generate_crack_image(stage: usize) -> Image {
 
     let lines = crack_sets[stage.min(3)];
 
+    // Add dark tint overlay for later stages
+    let bg_alpha: u8 = match stage {
+        0 => 0,
+        1 => 30,
+        2 => 50,
+        _ => 70,
+    };
+    if bg_alpha > 0 {
+        for y in 0..16 {
+            for x in 0..16 {
+                set_pixel(&mut data, x, y, bg_alpha);
+            }
+        }
+    }
+
+    // Crack alpha increases with stage
+    let line_alpha: u8 = match stage {
+        0 => 180,
+        1 => 200,
+        2 => 220,
+        _ => 240,
+    };
+
     for &(x0, y0, x1, y1) in lines {
-        draw_line(&mut data, x0, y0, x1, y1);
+        draw_line(&mut data, x0, y0, x1, y1, line_alpha);
     }
 
     Image::new(
@@ -70,9 +93,19 @@ fn generate_crack_image(stage: usize) -> Image {
     )
 }
 
-/// Draw a line from (x0, y0) to (x1, y1) using Bresenham's algorithm,
-/// writing semi-transparent black pixels.
-fn draw_line(data: &mut [u8], x0: i32, y0: i32, x1: i32, y1: i32) {
+/// Set a pixel with alpha blending (max alpha wins).
+fn set_pixel(data: &mut [u8], x: i32, y: i32, alpha: u8) {
+    if x >= 0 && x < 16 && y >= 0 && y < 16 {
+        let idx = (y as usize * 16 + x as usize) * 4;
+        data[idx] = 0;
+        data[idx + 1] = 0;
+        data[idx + 2] = 0;
+        data[idx + 3] = data[idx + 3].max(alpha);
+    }
+}
+
+/// Draw a thick line (2px wide) from (x0, y0) to (x1, y1) using Bresenham's algorithm.
+fn draw_line(data: &mut [u8], x0: i32, y0: i32, x1: i32, y1: i32, alpha: u8) {
     let dx = (x1 - x0).abs();
     let dy = (y1 - y0).abs();
     let sx = if x0 < x1 { 1 } else { -1 };
@@ -83,13 +116,11 @@ fn draw_line(data: &mut [u8], x0: i32, y0: i32, x1: i32, y1: i32) {
     let mut err = dx - dy;
 
     loop {
-        if x >= 0 && x < 16 && y >= 0 && y < 16 {
-            let idx = (y as usize * 16 + x as usize) * 4;
-            data[idx] = 0;       // R
-            data[idx + 1] = 0;   // G
-            data[idx + 2] = 0;   // B
-            data[idx + 3] = 160; // A — semi-transparent
-        }
+        // Draw 2x2 block for thickness
+        set_pixel(data, x, y, alpha);
+        set_pixel(data, x + 1, y, alpha);
+        set_pixel(data, x, y + 1, alpha);
+        set_pixel(data, x + 1, y + 1, alpha / 2); // softer corner
 
         if x == x1 && y == y1 {
             break;

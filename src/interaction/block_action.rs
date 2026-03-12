@@ -273,8 +273,8 @@ pub fn block_interaction_system(
                     particle_pool.spawn(
                         tile_center,
                         Vec2::new(vx, vy),
-                        0.4,   // lifetime
-                        1.5,   // size
+                        0.5,   // lifetime
+                        6.0,   // size (world pixels)
                         color,
                         1.0,   // gravity_scale
                         true,  // fade_out
