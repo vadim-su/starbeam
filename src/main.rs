@@ -21,6 +21,7 @@ pub mod trader;
 #[cfg(test)]
 mod test_helpers;
 mod ui;
+pub mod weather;
 mod world;
 
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
@@ -58,6 +59,7 @@ fn main() {
         .add_plugins(physics::PhysicsPlugin)
         .add_plugins(cosmos::pressurization::PressurizationPlugin)
         .add_plugins(particles::ParticlePlugin)
+        .add_plugins(weather::WeatherPlugin)
         .add_plugins(camera::CameraPlugin)
         .add_plugins(parallax::ParallaxPlugin)
         .add_plugins(interaction::InteractionPlugin)
