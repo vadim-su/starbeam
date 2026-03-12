@@ -10,6 +10,7 @@ pub struct BlockDamageMap {
 pub struct BlockDamageState {
     pub accumulated: f32,
     pub regen_timer: f32,
+    pub particle_timer: f32,
 }
 
 const REGEN_DELAY: f32 = 2.0;

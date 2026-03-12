@@ -3,6 +3,7 @@ use bevy::sprite_render::MeshMaterial2d;
 use bevy::window::PrimaryWindow;
 
 use crate::combat::block_damage::{BlockDamageMap, BlockDamageState};
+use crate::particles::pool::ParticlePool;
 use crate::cosmos::persistence::{DirtyChunks, DROPPED_ITEM_LIFETIME_SECS};
 use crate::cosmos::pressurization::PressureMap;
 use crate::crafting::CraftingStation;
@@ -124,9 +125,10 @@ pub fn block_interaction_system(
         Option<ResMut<crate::liquid::LiquidSimState>>,
         Res<ItemUsedThisFrame>,
         Res<crate::chat::ChatState>,
+        ResMut<ParticlePool>,
     ),
 ) {
-    let (object_entities, mut liquid_sim, item_used, chat_state) = object_params;
+    let (object_entities, mut liquid_sim, item_used, chat_state, mut particle_pool) = object_params;
 
     if chat_state.is_active {
         return;
@@ -243,9 +245,42 @@ pub fn block_interaction_system(
                 .or_insert(BlockDamageState {
                     accumulated: 0.0,
                     regen_timer: 0.0,
+                    particle_timer: 0.0,
                 });
             state.accumulated += mining_power * dt;
             state.regen_timer = 0.0;
+
+            state.particle_timer += dt;
+            if state.particle_timer >= 0.15 {
+                state.particle_timer = 0.0;
+                let tile_center = Vec2::new(
+                    tile_x as f32 * ctx_ref.config.tile_size + ctx_ref.config.tile_size / 2.0,
+                    tile_y as f32 * ctx_ref.config.tile_size + ctx_ref.config.tile_size / 2.0,
+                );
+                let albedo = ctx_ref.tile_registry.albedo(current);
+                let color = [
+                    albedo[0] as f32 / 255.0,
+                    albedo[1] as f32 / 255.0,
+                    albedo[2] as f32 / 255.0,
+                    1.0,
+                ];
+                use rand::Rng;
+                let mut rng = rand::thread_rng();
+                let count = rng.gen_range(2..=4);
+                for _ in 0..count {
+                    let vx = rng.gen_range(-30.0..30.0);
+                    let vy = rng.gen_range(20.0..60.0);
+                    particle_pool.spawn(
+                        tile_center,
+                        Vec2::new(vx, vy),
+                        0.4,   // lifetime
+                        1.5,   // size
+                        color,
+                        1.0,   // gravity_scale
+                        true,  // fade_out
+                    );
+                }
+            }
 
             if state.accumulated >= hardness {
                 // Block destroyed
