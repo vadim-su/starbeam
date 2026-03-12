@@ -27,6 +27,8 @@ pub struct BiomeDef {
     #[allow(dead_code)]
     // stored for hot-reload; parallax loaded separately via BiomeParallaxConfigs
     pub parallax_path: Option<String>,
+    pub snow_base_chance: f32,
+    pub snow_permanent: bool,
 }
 
 /// All loaded biome definitions keyed by BiomeId.
@@ -199,6 +201,8 @@ mod tests {
                 fill_block: TileId(3),
                 cave_threshold: 0.3,
                 parallax_path: Some("biomes/meadow/parallax.ron".into()),
+                snow_base_chance: 0.0,
+                snow_permanent: false,
             },
         );
         let def = reg.get(id);
@@ -221,6 +225,8 @@ mod tests {
                 fill_block: TileId(3),
                 cave_threshold: 0.3,
                 parallax_path: None,
+                snow_base_chance: 0.0,
+                snow_permanent: false,
             },
         );
         let id2 = reg.insert(
@@ -233,6 +239,8 @@ mod tests {
                 fill_block: TileId(3),
                 cave_threshold: 0.3,
                 parallax_path: None,
+                snow_base_chance: 0.0,
+                snow_permanent: false,
             },
         );
         assert_eq!(id1, id2, "re-insert must return same BiomeId");

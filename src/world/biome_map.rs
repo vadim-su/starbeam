@@ -314,6 +314,8 @@ mod tests {
                     fill_block: TileId(3),
                     cave_threshold: 0.3,
                     parallax_path: None,
+                    snow_base_chance: 0.0,
+                    snow_permanent: false,
                 },
             );
         }

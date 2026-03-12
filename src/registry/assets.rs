@@ -298,6 +298,10 @@ pub struct BiomeAsset {
     pub fill_block: String,
     pub cave_threshold: f64,
     pub parallax: Option<String>,
+    #[serde(default)]
+    pub snow_base_chance: f32,
+    #[serde(default)]
+    pub snow_permanent: bool,
     // Future fields — not implemented in MVP, kept for RON schema forward-compatibility
     #[allow(dead_code)]
     #[serde(default)]

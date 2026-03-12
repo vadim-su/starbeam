@@ -69,6 +69,8 @@ pub mod fixtures {
                     fill_block: fill,
                     cave_threshold: threshold,
                     parallax_path: None,
+                    snow_base_chance: 0.0,
+                    snow_permanent: false,
                 },
             );
         }
