@@ -50,6 +50,7 @@ pub struct ItemStats {
     pub mining_power: Option<f32>,
     pub attack_speed: Option<f32>,
     pub knockback: Option<f32>,
+    pub durability: Option<u32>,
 }
 
 fn default_max_stack() -> u16 {

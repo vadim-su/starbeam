@@ -6,6 +6,26 @@ use bevy::prelude::*;
 pub struct HotbarSlot {
     pub left_hand: Option<String>,
     pub right_hand: Option<String>,
+    pub left_durability: Option<u32>,
+    pub right_durability: Option<u32>,
+}
+
+impl HotbarSlot {
+    pub fn durability(&self, is_left: bool) -> Option<u32> {
+        if is_left {
+            self.left_durability
+        } else {
+            self.right_durability
+        }
+    }
+
+    pub fn set_durability(&mut self, is_left: bool, val: Option<u32>) {
+        if is_left {
+            self.left_durability = val;
+        } else {
+            self.right_durability = val;
+        }
+    }
 }
 
 /// Player hotbar component (Starbound-style).

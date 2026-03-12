@@ -13,5 +13,6 @@
     mining_power: Some(5.0),
     attack_speed: Some(1.0),
     knockback: Some(2.0),
+    durability: Some(200),
   )),
 )

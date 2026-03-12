@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 pub struct Stack {
     pub item_id: String,
     pub count: u16,
+    #[serde(default)]
+    pub durability: Option<u32>,
 }
 
 /// A single slot in the inventory — type alias for Stack.
@@ -106,6 +108,7 @@ impl Inventory {
                     *slot = Some(InventorySlot {
                         item_id: item_id.to_string(),
                         count: to_add,
+                        durability: None,
                     });
                     remaining -= to_add;
                 }
@@ -172,6 +175,7 @@ mod tests {
         let slot = InventorySlot {
             item_id: "dirt".into(),
             count: 50,
+            durability: None,
         };
 
         assert_eq!(slot.item_id, "dirt");
@@ -226,6 +230,7 @@ mod tests {
             *slot = Some(InventorySlot {
                 item_id: "stone".into(),
                 count: 999,
+                durability: None,
             });
         }
         // Adding to material bag should overflow into main bag
@@ -240,6 +245,7 @@ mod tests {
         inv.main_bag[0] = Some(InventorySlot {
             item_id: "dirt".into(),
             count: 50,
+            durability: None,
         });
 
         let remaining = inv.try_add_item("dirt", 30, 999, BagTarget::Main);
@@ -254,6 +260,7 @@ mod tests {
         inv.main_bag[0] = Some(InventorySlot {
             item_id: "dirt".into(),
             count: 990,
+            durability: None,
         });
 
         let remaining = inv.try_add_item("dirt", 20, 999, BagTarget::Main);
@@ -270,6 +277,7 @@ mod tests {
         inv.main_bag[0] = Some(InventorySlot {
             item_id: "dirt".into(),
             count: 999,
+            durability: None,
         });
 
         let remaining = inv.try_add_item("dirt", 10, 999, BagTarget::Main);
@@ -290,14 +298,17 @@ mod tests {
         let a = Stack {
             item_id: "dirt".into(),
             count: 10,
+            durability: None,
         };
         let b = Stack {
             item_id: "dirt".into(),
             count: 10,
+            durability: None,
         };
         let c = Stack {
             item_id: "stone".into(),
             count: 10,
+            durability: None,
         };
         assert_eq!(a, b);
         assert_ne!(a, c);
@@ -308,6 +319,7 @@ mod tests {
         let original = Stack {
             item_id: "dirt".into(),
             count: 50,
+            durability: None,
         };
         let cloned = original.clone();
         assert_eq!(original, cloned);
@@ -319,6 +331,7 @@ mod tests {
         let slot: InventorySlot = Stack {
             item_id: "dirt".into(),
             count: 10,
+            durability: None,
         };
         assert_eq!(slot.item_id, "dirt");
         assert_eq!(slot.count, 10);
@@ -332,6 +345,7 @@ mod tests {
             *slot = Some(InventorySlot {
                 item_id: "stone".into(),
                 count: 999,
+                durability: None,
             });
         }
 
@@ -345,10 +359,12 @@ mod tests {
         inv.main_bag[0] = Some(InventorySlot {
             item_id: "dirt".into(),
             count: 999,
+            durability: None,
         });
         inv.material_bag[0] = Some(InventorySlot {
             item_id: "dirt".into(),
             count: 999,
+            durability: None,
         });
         // u32 result can hold totals > u16::MAX
         assert_eq!(inv.count_item("dirt"), 1998);
@@ -360,10 +376,12 @@ mod tests {
         inv.main_bag[0] = Some(InventorySlot {
             item_id: "dirt".into(),
             count: 5,
+            durability: None,
         });
         inv.material_bag[0] = Some(InventorySlot {
             item_id: "dirt".into(),
             count: 5,
+            durability: None,
         });
         assert!(inv.remove_item("dirt", 8));
         assert_eq!(inv.count_item("dirt"), 2);
@@ -375,6 +393,7 @@ mod tests {
         inv.main_bag[0] = Some(InventorySlot {
             item_id: "dirt".into(),
             count: 3,
+            durability: None,
         });
         assert!(!inv.remove_item("dirt", 5));
         // Inventory unchanged on failure
@@ -387,6 +406,7 @@ mod tests {
         inv.main_bag[0] = Some(InventorySlot {
             item_id: "dirt".into(),
             count: 5,
+            durability: None,
         });
         assert!(inv.remove_item("dirt", 5));
         assert!(inv.main_bag[0].is_none());
