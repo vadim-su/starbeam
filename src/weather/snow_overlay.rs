@@ -178,6 +178,21 @@ pub fn update_snow_overlays(
                 continue;
             }
 
+            // Biome boundary falloff (4-tile zone)
+            if biome.snow_permanent {
+                let region_idx = biome_map.region_index_at(biome_x);
+                let region = &biome_map.regions[region_idx];
+                let dist_from_start = biome_x - region.start_x;
+                let dist_from_end = (region.start_x + region.width) - biome_x;
+                let min_dist = dist_from_start.min(dist_from_end);
+                if min_dist < 4 {
+                    let falloff = min_dist as f32 / 4.0;
+                    if rng.r#gen::<f32>() > falloff {
+                        continue;
+                    }
+                }
+            }
+
             // Random chance for gradual appearance.
             if !biome.snow_permanent {
                 if rng.r#gen::<f32>() > 0.05 {
