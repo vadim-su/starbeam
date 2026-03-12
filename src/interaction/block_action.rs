@@ -101,7 +101,7 @@ pub fn block_interaction_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
-    mut player_query: Query<(&Transform, &Hotbar, &mut Inventory), With<Player>>,
+    mut player_query: Query<(&Transform, &mut Hotbar, &mut Inventory), With<Player>>,
     ctx: WorldCtx,
     mut world_map: ResMut<WorldMap>,
     loaded_chunks: Res<LoadedChunks>,
@@ -148,7 +148,7 @@ pub fn block_interaction_system(
     let Ok((camera, camera_gt)) = camera_query.single() else {
         return;
     };
-    let Ok((player_tf, hotbar, mut inventory)) = player_query.single_mut() else {
+    let Ok((player_tf, mut hotbar, mut inventory)) = player_query.single_mut() else {
         return;
     };
 
@@ -285,6 +285,19 @@ pub fn block_interaction_system(
             if state.accumulated >= hardness {
                 // Block destroyed
                 block_damage_map.damage.remove(&(tile_x, tile_y));
+
+                // Decrement tool durability
+                {
+                    let active = hotbar.active_slot;
+                    let slot = &mut hotbar.slots[active];
+                    if let Some(ref mut dur) = slot.left_durability {
+                        *dur = dur.saturating_sub(1);
+                        if *dur == 0 {
+                            slot.left_hand = None;
+                            slot.left_durability = None;
+                        }
+                    }
+                }
 
                 let tile_center = Vec2::new(
                     tile_x as f32 * ctx_ref.config.tile_size + ctx_ref.config.tile_size / 2.0,

@@ -15,6 +15,7 @@ use bevy::window::PrimaryWindow;
 use super::components::{DragInfo, DragState, Hand, SlotType, UiSlot};
 use super::theme::UiTheme;
 use crate::inventory::{Hotbar, Inventory};
+use crate::item::ItemRegistry;
 use crate::player::Player;
 
 /// Marker component for the visual drag icon entity.
@@ -134,6 +135,7 @@ pub fn handle_drop(
     slot_query: Query<&UiSlot>,
     mut inventory_query: Query<&mut Inventory, With<Player>>,
     mut hotbar_query: Query<&mut Hotbar, With<Player>>,
+    item_registry: Res<ItemRegistry>,
     mut commands: Commands,
 ) {
     let Ok(target) = slot_query.get(trigger.event_target()) else {
@@ -157,12 +159,18 @@ pub fn handle_drop(
     // Hotbar target — assign item reference (id only) without moving from inventory
     if let SlotType::Hotbar { index, hand } = target_type {
         if let Ok(mut hotbar) = hotbar_query.single_mut() {
+            let durability = item_registry
+                .by_name(&drag.item_id)
+                .and_then(|id| item_registry.get(id).stats.as_ref())
+                .and_then(|s| s.durability);
             match hand {
                 Hand::Left => {
                     hotbar.slots[index].left_hand = Some(drag.item_id.clone());
+                    hotbar.slots[index].left_durability = durability;
                 }
                 Hand::Right => {
                     hotbar.slots[index].right_hand = Some(drag.item_id.clone());
+                    hotbar.slots[index].right_durability = durability;
                 }
             }
         }
