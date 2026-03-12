@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use bevy::ui::widget::ImageNode;
 
-use super::components::{Hand, ItemCount, ItemIcon, SlotFrame, SlotType, UiSlot};
+use super::components::{DurabilityBar, Hand, ItemCount, ItemIcon, SlotFrame, SlotType, UiSlot};
 use super::icon_registry::ItemIconRegistry;
 use super::SlotFrames;
 use crate::inventory::Hotbar;
@@ -51,6 +51,7 @@ pub fn update_slot_icons(
     mut image_query: Query<(&mut ImageNode, Has<ItemIcon>, Has<SlotFrame>)>,
     mut count_query: Query<&mut Text, With<ItemCount>>,
     mut visibility_query: Query<&mut Visibility, Or<(With<ItemIcon>, With<SlotFrame>)>>,
+    mut durability_query: Query<(&mut Node, &mut BackgroundColor, &mut Visibility), With<DurabilityBar>>,
     children_query: Query<&Children>,
 ) {
     let Ok(inventory) = inventory_query.single() else {
@@ -136,6 +137,56 @@ pub fn update_slot_icons(
                 if let Ok(mut vis) = visibility_query.get_mut(child) {
                     *vis = Visibility::Inherited;
                 }
+                // Update durability bar
+                if let Ok((mut bar_node, mut bar_bg, mut bar_vis)) = durability_query.get_mut(child) {
+                    let durability_info: Option<(u32, u32)> = match slot.slot_type {
+                        SlotType::Hotbar { index, hand } => {
+                            let slot_data = &hotbar.slots[index];
+                            let current = slot_data.durability(hand == Hand::Left);
+                            let item_id = if hand == Hand::Left {
+                                slot_data.left_hand.as_deref()
+                            } else {
+                                slot_data.right_hand.as_deref()
+                            };
+                            let max_dur = item_id
+                                .and_then(|id| item_registry.by_name(id))
+                                .and_then(|id| item_registry.get(id).stats.as_ref())
+                                .and_then(|s| s.durability);
+                            match (current, max_dur) {
+                                (Some(cur), Some(max)) => Some((cur, max)),
+                                _ => None,
+                            }
+                        }
+                        SlotType::MainBag(idx) => {
+                            let stack = inventory.main_bag.get(idx).and_then(|s| s.as_ref());
+                            resolve_stack_durability(stack, &item_registry)
+                        }
+                        SlotType::MaterialBag(idx) => {
+                            let stack = inventory.material_bag.get(idx).and_then(|s| s.as_ref());
+                            resolve_stack_durability(stack, &item_registry)
+                        }
+                        _ => None,
+                    };
+
+                    if let Some((current, max)) = durability_info {
+                        if current < max {
+                            let ratio = current as f32 / max as f32;
+                            bar_node.width = Val::Percent(ratio * 90.0);
+                            bar_bg.0 = if ratio > 0.5 {
+                                Color::srgb(0.0, 1.0, 0.0) // green
+                            } else if ratio > 0.25 {
+                                Color::srgb(1.0, 1.0, 0.0) // yellow
+                            } else {
+                                Color::srgb(1.0, 0.0, 0.0) // red
+                            };
+                            *bar_vis = Visibility::Inherited;
+                        } else {
+                            *bar_vis = Visibility::Hidden;
+                        }
+                    } else {
+                        *bar_vis = Visibility::Hidden;
+                    }
+                }
             }
         } else {
             // Hide icon and frame
@@ -146,7 +197,23 @@ pub fn update_slot_icons(
                 if let Ok(mut text) = count_query.get_mut(child) {
                     *text = Text::new("");
                 }
+                if let Ok((_, _, mut bar_vis)) = durability_query.get_mut(child) {
+                    *bar_vis = Visibility::Hidden;
+                }
             }
         }
     }
+}
+
+fn resolve_stack_durability(
+    stack: Option<&crate::inventory::components::Stack>,
+    item_registry: &ItemRegistry,
+) -> Option<(u32, u32)> {
+    let s = stack?;
+    let current = s.durability?;
+    let max = item_registry
+        .by_name(&s.item_id)
+        .and_then(|id| item_registry.get(id).stats.as_ref())
+        .and_then(|stats| stats.durability)?;
+    Some((current, max))
 }

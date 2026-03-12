@@ -277,4 +277,19 @@ pub fn spawn_slot_icon_children(parent: &mut ChildSpawnerCommands) {
         },
         Pickable::IGNORE,
     ));
+    // Durability bar
+    parent.spawn((
+        DurabilityBar,
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: Val::Px(1.0),
+            left: Val::Px(1.0),
+            width: Val::Percent(0.0),
+            height: Val::Px(2.0),
+            ..default()
+        },
+        BackgroundColor(Color::srgb(0.0, 1.0, 0.0)),
+        Visibility::Hidden,
+        Pickable::IGNORE,
+    ));
 }

@@ -90,6 +90,10 @@ pub struct SlotFrame;
 #[derive(Component)]
 pub struct ItemCount;
 
+/// Marker for the durability bar inside a slot.
+#[derive(Component)]
+pub struct DurabilityBar;
+
 /// Inventory screen visibility state.
 #[derive(Resource, Default)]
 pub struct InventoryScreenState {
