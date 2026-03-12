@@ -1,7 +1,7 @@
 (
     id: "garden",
     primary_biome: "meadow",
-    secondary_biomes: ["forest", "rocky"],
+    secondary_biomes: ["forest", "rocky", "tundra"],
     layers: (
         surface: (
             primary_biome: None,

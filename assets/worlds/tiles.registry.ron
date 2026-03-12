@@ -7,5 +7,7 @@
     ( id: "iron_ore", autotile: Some("stone"), solid: true, hardness: 4.0, friction: 0.6, viscosity: 0.0, damage_on_contact: 0.0, effects: [], light_emission: (0, 0, 0), light_opacity: 15, albedo: (160, 120, 80), drops: [( item_id: "iron_ore", min: 1, max: 1, chance: 1.0 )] ),
     ( id: "crystal", autotile: Some("stone"), solid: true, hardness: 6.0, friction: 0.5, viscosity: 0.0, damage_on_contact: 0.0, effects: [], light_emission: (80, 80, 200), light_opacity: 12, albedo: (100, 100, 220), drops: [( item_id: "crystal", min: 1, max: 1, chance: 1.0 )] ),
     ( id: "rare_ore", autotile: Some("stone"), solid: true, hardness: 10.0, friction: 0.6, viscosity: 0.0, damage_on_contact: 0.0, effects: [], light_emission: (0, 0, 0), light_opacity: 15, albedo: (180, 50, 180), drops: [( item_id: "rare_ore", min: 1, max: 1, chance: 1.0 )] ),
+    ( id: "snow_dirt", autotile: Some("dirt"), solid: true, hardness: 1.5, friction: 0.5, viscosity: 0.0, damage_on_contact: 0.0, effects: [], light_emission: (0, 0, 0), light_opacity: 13, albedo: (224, 232, 240), drops: [( item_id: "dirt", min: 1, max: 1, chance: 1.0 )] ),
+    ( id: "frozen_dirt", autotile: Some("dirt"), solid: true, hardness: 3.0, friction: 0.4, viscosity: 0.0, damage_on_contact: 0.0, effects: [], light_emission: (0, 0, 0), light_opacity: 14, albedo: (128, 144, 160), drops: [( item_id: "dirt", min: 1, max: 1, chance: 1.0 )] ),
   ]
 )
