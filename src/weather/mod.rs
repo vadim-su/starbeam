@@ -1,3 +1,4 @@
+pub mod snow_overlay;
 pub mod snow_particles;
 pub mod weather_state;
 pub mod wind;
@@ -10,6 +11,7 @@ use crate::sets::GameSet;
 pub use weather_state::WeatherState;
 pub use wind::Wind;
 
+use snow_overlay::SnowOverlayTimer;
 use snow_particles::{
     rebuild_snow_mesh, spawn_snow_particles, update_snow_particles, SharedSnowMaterial,
     SnowParticlePool,
@@ -22,7 +24,12 @@ impl Plugin for WeatherPlugin {
         app.init_resource::<Wind>()
             .init_resource::<WeatherState>()
             .init_resource::<SnowParticlePool>()
+            .init_resource::<SnowOverlayTimer>()
             .add_systems(Startup, snow_particles::init_snow_render)
+            .add_systems(
+                OnEnter(AppState::InGame),
+                snow_overlay::init_snow_overlay_texture,
+            )
             .add_systems(
                 Update,
                 (wind::update_wind, weather_state::update_weather)
@@ -36,6 +43,15 @@ impl Plugin for WeatherPlugin {
                     .in_set(GameSet::WorldUpdate)
                     .run_if(in_state(AppState::InGame))
                     .run_if(resource_exists::<SharedSnowMaterial>),
+            )
+            .add_systems(
+                Update,
+                (
+                    snow_overlay::update_snow_overlays,
+                    snow_overlay::handle_dirty_chunk_overlays,
+                )
+                    .in_set(GameSet::WorldUpdate)
+                    .run_if(in_state(AppState::InGame)),
             );
     }
 }
