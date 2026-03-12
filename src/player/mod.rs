@@ -91,7 +91,7 @@ fn spawn_player(
     let (spawn_pixel_x, spawn_pixel_y) = if is_ship {
         let cx = (world_config.width_tiles / 2) as f32 * world_config.tile_size
             + world_config.tile_size / 2.0;
-        let cy = (world_config.height_tiles / 2 + 2) as f32 * world_config.tile_size
+        let cy = (world_config.height_tiles / 2 - 2) as f32 * world_config.tile_size
             + player_config.height / 2.0;
         (cx, cy)
     } else {
@@ -256,12 +256,12 @@ pub(crate) fn respawn_player_on_warp(
         // Spawn at the center of the ship hull
         let cx = (world_config.width_tiles / 2) as f32 * world_config.tile_size
             + world_config.tile_size / 2.0;
-        let cy = (world_config.height_tiles / 2 + 2) as f32 * world_config.tile_size
+        let cy = (world_config.height_tiles / 2 - 2) as f32 * world_config.tile_size
             + player_config.height / 2.0;
         info!(
             "Player spawning at ship hull center tile ({}, {})",
             world_config.width_tiles / 2,
-            world_config.height_tiles / 2 + 2
+            world_config.height_tiles / 2 - 2
         );
         (cx, cy)
     } else if use_capsule_spawn {
