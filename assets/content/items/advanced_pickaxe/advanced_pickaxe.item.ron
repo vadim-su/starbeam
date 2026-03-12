@@ -2,7 +2,7 @@
   id: "advanced_pickaxe",
   display_name: "Advanced Pickaxe",
   description: "A high-tech pickaxe built with rare crystals. Tears through any block.",
-  icon: Some("content/items/advanced_pickaxe/icon.png"),
+  icon: Some("icon.png"),
   max_stack: 1,
   rarity: Rare,
   item_type: Tool,

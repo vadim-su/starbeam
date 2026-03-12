@@ -2,7 +2,7 @@
   id: "iron_pickaxe",
   display_name: "Iron Pickaxe",
   description: "A sturdy pickaxe forged from iron. Mines most ores with ease.",
-  icon: Some("content/items/iron_pickaxe/icon.png"),
+  icon: Some("icon.png"),
   max_stack: 1,
   rarity: Uncommon,
   item_type: Tool,

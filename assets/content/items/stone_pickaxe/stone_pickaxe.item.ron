@@ -2,7 +2,7 @@
   id: "stone_pickaxe",
   display_name: "Stone Pickaxe",
   description: "A basic pickaxe made of stone. Slow but reliable.",
-  icon: Some("content/items/stone_pickaxe/icon.png"),
+  icon: Some("icon.png"),
   max_stack: 1,
   rarity: Common,
   item_type: Tool,
