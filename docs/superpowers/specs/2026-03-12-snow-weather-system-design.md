@@ -40,24 +40,31 @@ New module: `src/weather/`
 ### `SnowParticlePool` Resource
 - Capacity: 1500 particles (separate from game `ParticlePool`)
 - Same ring-buffer architecture as existing `ParticlePool`
+- Dedicated `SnowMeshEntity` marker, `SharedSnowMaterial` resource, and `rebuild_snow_mesh()` system (mirrors `ParticlePool` render pipeline pattern from `src/particles/render.rs`)
 
 ### Particle Properties
 - **Size:** random 1-4px
-- **Fall speed:** inversely proportional to size (large=40-80 px/s, small=80-120 px/s) — depth illusion
+- **Fall speed:** constant downward velocity per particle (no gravity acceleration). Large flakes = 40-80 px/s (slow, close feel), small flakes = 80-120 px/s (fast, distant feel) — creates parallax depth illusion. Gravity scale set to 0.0; velocity stays constant.
 - **Color:** white, alpha variation 0.6-1.0, larger flakes slightly more transparent
-- **Gravity scale:** 0.1-0.3 (light, floaty)
 - **Wobble:** per-particle sine wave on X axis (random phase, small amplitude) layered on top of wind
-- **Lifetime:** dies when below camera bottom or after 8-12 seconds
+- **Lifetime:** dies when hitting a solid tile, exiting below camera bottom, or after 8-12 seconds
+- **Solid tile collision:** each frame, check if particle position overlaps a solid tile in the foreground layer. If so, kill the particle. This prevents snow from visually clipping through terrain.
 
 ### Spawning
 - Spawn zone: strip above camera top (camera.top + 16..48px), full camera width
 - Spawn rate: 30-80 particles/sec, scaled by `Snowing.intensity`
 - Only active when `WeatherState` is `Snowing`
+- On non-wrapping worlds near world edges, clamp spawn X range to valid world bounds
 
 ### Rendering
-- Separate batched mesh (same technique as game particles)
-- Z = 5.0 (above tiles and objects, below UI)
+- Separate batched mesh (same technique as game particles: `SnowMeshEntity` + `rebuild_snow_mesh()`)
+- Z = 3.0 (above tiles and objects, below liquid layer at 2.0... actually above liquid too, below UI). Note: existing Z layers are bg=-1, fg=0, overlays=0.05-0.15, objects=0.5, particles=1.0, liquid=2.0. Snow at Z=3.0 renders above all world content.
 - Per-vertex colors with alpha
+
+### Intensity Ramp
+- When `Snowing` begins: intensity ramps from 0 to target over 5 seconds (spawn rate scales linearly)
+- When `Snowing` ends: intensity ramps from current to 0 over 5 seconds before transitioning to `Clear`
+- Avoids abrupt particle appearance/disappearance
 
 ## Snow Overlay (`snow_overlay.rs`)
 
@@ -66,11 +73,12 @@ New module: `src/weather/`
 
 ### `SnowOverlayTexture` Resource
 - Single procedurally generated 16x4px white texture with irregular bottom edge (pixel art style)
+- Intentionally 16x4 (not 16x16) — covers only the top quarter of a tile as a thin snow cap
 - Created once at plugin startup
 
 ### Overlay Placement
 - Sprite positioned at block position + ~6px vertical offset
-- Z = 0.1 (just above tile layer)
+- Z = 0.05 (just above tile layer at 0.0, below crack overlay at 0.1 so cracks show through snow)
 
 ### `update_snow_overlays()` System
 - Runs on 0.5 second timer (not every frame)
@@ -79,7 +87,20 @@ New module: `src/weather/`
 - **Snowy biome (`snow_permanent: true`):** overlays spawned on chunk load, never removed
 - **Weather snow:** overlays appear gradually (random chance per tick while snowing)
 - **Melting:** when `temperature_modifier` is high enough (daytime in non-permanent biomes), overlays removed gradually (random chance per tick)
-- On tile destruction: remove overlay from destroyed block, recheck neighbors
+- **Tile modification handling:** subscribe to dirty-chunk events. When a chunk is marked dirty, re-scan affected tiles: remove overlays from destroyed blocks, add overlays to newly exposed surfaces. This piggybacks on the existing `ChunkDirty` mechanism used by mesh rebuilding.
+- **Biome boundary transitions:** at boundaries between snowy and non-snowy biomes, apply a 4-tile linear falloff zone where snow overlay probability decreases from 100% to 0%. This softens the hard biome edge.
+
+### Cleanup on Chunk Unload
+- Snow overlay entities are parented to the chunk's foreground entity via Bevy's `Parent`/`Children` hierarchy. When `despawn_chunk()` despawns the chunk entity with `despawn_recursive()`, all child overlays are automatically cleaned up. No separate despawn logic needed.
+
+### System Parameters
+- Requires: `Res<WorldMap>`, `Res<LoadedChunks>`, `Res<BiomeMap>`, `Res<BiomeRegistry>`, `Res<WeatherState>`, `Res<WorldTime>`, camera `Query`
+- To avoid Bevy query conflicts (see commit 4142eb4), overlay queries should use distinct component filters from other systems accessing the same entities.
+
+### World Wrapping
+- Use `data_chunk_x` (not `display_chunk_x`) for tile lookups in `WorldMap`
+- Use `display_chunk_x` for sprite positioning
+- Follows the same convention as `crack_overlay.rs` and `surface_objects.rs`
 
 ## Weather State (`weather_state.rs`)
 
@@ -88,9 +109,10 @@ New module: `src/weather/`
 enum WeatherKind {
     Clear,
     Snowing {
-        intensity: f32,   // 0.0-1.0, affects spawn rate
-        elapsed: f32,     // seconds since start
-        duration: f32,    // total duration (30-120 sec)
+        intensity: f32,       // 0.0-1.0, affects spawn rate
+        target_intensity: f32, // what intensity ramps toward
+        elapsed: f32,         // seconds since start
+        duration: f32,        // total duration (30-120 sec)
     },
 }
 ```
@@ -104,11 +126,19 @@ enum WeatherKind {
 - Every `check_timer` tick, roll for snowfall:
   - Probability: `biome.snow_base_chance * (1.0 - world_time.temperature_modifier)`
   - Higher chance = colder temperature, snowy biomes
-- On success: transition to `Snowing` with random duration 30-120s and intensity 0.5-1.0
-- When `elapsed >= duration`: transition to `Clear`, start cooldown
-- Biome determined by camera position
+- On success: transition to `Snowing` with random duration 30-120s and target_intensity 0.5-1.0, intensity starts at 0.0 and ramps up
+- When `elapsed >= duration`: begin ramp-down (target_intensity → 0.0), transition to `Clear` when intensity reaches ~0.0, then start cooldown
+- **Biome determination:** uses the biome at camera center position. This is a deliberate simplification — weather is a single global state. When the camera straddles a biome boundary, the biome under camera center wins. This avoids complexity of per-region weather for the MVP.
 
 ## Biome Integration
+
+### Data Pipeline
+New fields must be added to three places:
+1. **`BiomeAsset`** (`src/registry/assets.rs`): add `snow_base_chance: f32` and `snow_permanent: bool` with `#[serde(default)]`
+2. **`BiomeDef`** (`src/registry/biome.rs`): add matching fields
+3. **Loading code** (`src/registry/loading.rs`): map `BiomeAsset` fields to `BiomeDef` fields
+
+The existing `weather: Option<Vec<String>>` field on `BiomeAsset` is reserved for a future general-purpose weather tag system (rain, storms, etc.). The `snow_base_chance` / `snow_permanent` fields are explicit typed fields for snow specifically, not part of the generic `weather` tags. Both can coexist — when the generic weather system is built later, it can reference these fields or subsume them.
 
 ### BiomeDef Extension
 Two new fields with defaults:
@@ -141,9 +171,9 @@ Two new fields with defaults:
 
 ## Implementation Order
 1. `Wind` resource and system
-2. `SnowParticlePool` — pool, spawning, rendering
-3. `WeatherState` — state machine, temperature integration
-4. `SnowOverlay` — cap sprites, placement logic
-5. `BiomeDef` extension — `snow_base_chance`, `snow_permanent` fields
+2. `SnowParticlePool` — pool, spawning, rendering (including `SnowMeshEntity`, `rebuild_snow_mesh()`)
+3. `WeatherState` — state machine, temperature integration, intensity ramp
+4. `SnowOverlay` — cap sprites, placement logic, chunk parenting, dirty-chunk integration
+5. `BiomeDef` extension — `BiomeAsset` + `BiomeDef` + `loading.rs` mapping
 6. Tundra biome — definition, placeholder tiles, parallax
-7. Polish — tuning constants, visual feel
+7. Polish — tuning constants, visual feel, biome boundary transitions
