@@ -1,4 +1,5 @@
 pub mod block_action;
+pub mod crack_overlay;
 pub mod interactable;
 pub mod use_item;
 
@@ -50,5 +51,6 @@ impl Plugin for InteractionPlugin {
                 Update,
                 interactable::update_interactable_highlight.in_set(InteractionSet::BlockAction),
             );
+        crack_overlay::register(app);
     }
 }
