@@ -53,6 +53,8 @@ pub struct DayNightConfig {
     pub sky_colors: [[f32; 4]; 4],
     pub danger_multipliers: [f32; 4],
     pub temperature_modifiers: [f32; 4],
+    #[serde(default)]
+    pub temperature_celsius_offsets: [f32; 4],
 }
 
 impl DayNightConfig {
@@ -87,6 +89,7 @@ pub struct WorldTime {
     pub sky_color: Color,
     pub danger_multiplier: f32,
     pub temperature_modifier: f32,
+    pub temperature_celsius_offset: f32,
     pub paused: bool,
 }
 
@@ -102,6 +105,7 @@ impl Default for WorldTime {
             sky_color: Color::WHITE,
             danger_multiplier: 0.0,
             temperature_modifier: 0.0,
+            temperature_celsius_offset: 0.0,
             paused: false,
         }
     }
@@ -193,6 +197,8 @@ pub fn tick_world_time(
     world_time.danger_multiplier = lerp_phase_value(&config.danger_multipliers, phase, progress);
     world_time.temperature_modifier =
         lerp_phase_value(&config.temperature_modifiers, phase, progress);
+    world_time.temperature_celsius_offset =
+        lerp_phase_value(&config.temperature_celsius_offsets, phase, progress);
 }
 
 /// Tint parallax layers based on time of day.
@@ -232,6 +238,8 @@ impl WorldTime {
         wt.sky_color = lerp_phase_color4(&config.sky_colors, phase, progress);
         wt.danger_multiplier = lerp_phase_value(&config.danger_multipliers, phase, progress);
         wt.temperature_modifier = lerp_phase_value(&config.temperature_modifiers, phase, progress);
+        wt.temperature_celsius_offset =
+            lerp_phase_value(&config.temperature_celsius_offsets, phase, progress);
         wt
     }
 }
@@ -267,6 +275,7 @@ mod tests {
             ],
             danger_multipliers: [0.5, 0.0, 0.5, 1.0],
             temperature_modifiers: [-0.1, 0.0, -0.05, -0.2],
+            temperature_celsius_offsets: [-3.0, 0.0, -3.0, -8.0],
         }
     }
 

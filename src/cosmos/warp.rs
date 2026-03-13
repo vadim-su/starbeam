@@ -419,6 +419,7 @@ pub fn handle_warp_to_ship(
         sky_colors: [[0.0, 0.0, 0.0, 1.0]; 4],
         danger_multipliers: [0.0; 4],
         temperature_modifiers: [0.0; 4],
+        temperature_celsius_offsets: [0.0; 4],
     };
     let wt = WorldTime::from_config(&day_night_config);
     commands.insert_resource(day_night_config);

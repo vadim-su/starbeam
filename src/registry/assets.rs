@@ -285,6 +285,8 @@ pub struct PlanetTypeAsset {
     #[serde(default)]
     pub temperature_modifiers: Option<[f32; 4]>,
     #[serde(default)]
+    pub temperature_celsius_offsets: Option<[f32; 4]>,
+    #[serde(default)]
     pub wrap_x: Option<bool>,
 }
 

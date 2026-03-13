@@ -284,6 +284,15 @@ pub fn generate_day_night(
         let base = -0.1 * (1.0 - orbit_factor);
         [base, 0.0, base * 0.5, base * 2.0]
     });
+    let temperature_celsius_offsets = planet.temperature_celsius_offsets.unwrap_or_else(|| {
+        if orbit_factor < 0.3 {
+            [25.0, 35.0, 25.0, 15.0] // Hot zone
+        } else if orbit_factor > 0.7 {
+            [-10.0, -5.0, -10.0, -20.0] // Cold zone
+        } else {
+            [-3.0, 0.0, -3.0, -8.0] // Warm zone
+        }
+    });
 
     // Ambient mins
     let ambient_mins = [
@@ -305,6 +314,7 @@ pub fn generate_day_night(
         sky_colors,
         danger_multipliers,
         temperature_modifiers,
+        temperature_celsius_offsets,
     }
 }
 
@@ -398,6 +408,7 @@ mod tests {
             sun_intensity_modifier: None,
             danger_multipliers: Some([0.5, 0.0, 0.5, 1.0]),
             temperature_modifiers: None,
+            temperature_celsius_offsets: None,
             wrap_x: None,
         }
     }
