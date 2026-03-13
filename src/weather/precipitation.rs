@@ -51,27 +51,33 @@ pub fn resolve_precipitation_type(
 #[derive(Resource)]
 pub struct ResolvedWeatherType(pub Option<PrecipitationType>);
 
+impl Default for ResolvedWeatherType {
+    fn default() -> Self {
+        Self(None)
+    }
+}
+
 pub fn resolve_weather_type_system(
-    mut commands: Commands,
     weather: Res<WeatherState>,
     world: Res<ActiveWorld>,
     world_time: Res<WorldTime>,
     biome_map: Res<BiomeMap>,
     biome_registry: Res<BiomeRegistry>,
     camera_q: Query<&Transform, With<Camera2d>>,
+    mut resolved: ResMut<ResolvedWeatherType>,
 ) {
     if !weather.is_precipitating() {
-        commands.insert_resource(ResolvedWeatherType(None));
+        resolved.0 = None;
         return;
     }
 
     let Ok(cam_tf) = camera_q.single() else {
-        commands.insert_resource(ResolvedWeatherType(None));
+        resolved.0 = None;
         return;
     };
 
     let Some(config) = &world.weather_config else {
-        commands.insert_resource(ResolvedWeatherType(None));
+        resolved.0 = None;
         return;
     };
 
@@ -80,8 +86,7 @@ pub fn resolve_weather_type_system(
         tile_x, &world, &world_time, &biome_map, &biome_registry,
     );
 
-    let resolved = resolve_precipitation_type(local_temp, config, weather.precipitation_seed);
-    commands.insert_resource(ResolvedWeatherType(resolved));
+    resolved.0 = resolve_precipitation_type(local_temp, config, weather.precipitation_seed);
 }
 
 #[cfg(test)]

@@ -22,6 +22,7 @@ impl Plugin for WeatherPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Wind>()
             .init_resource::<WeatherState>()
+            .init_resource::<precipitation::ResolvedWeatherType>()
             .init_resource::<particles::WeatherParticlePool>()
             .init_resource::<SnowOverlayTimer>()
             .add_systems(Startup, particles::init_weather_render)

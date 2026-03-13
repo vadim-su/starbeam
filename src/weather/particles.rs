@@ -281,14 +281,14 @@ pub fn init_weather_render(
 pub fn spawn_weather_particles(
     mut pool: ResMut<WeatherParticlePool>,
     weather: Res<WeatherState>,
-    resolved: Option<Res<ResolvedWeatherType>>,
+    resolved: Res<ResolvedWeatherType>,
     wind: Res<Wind>,
     camera_query: Query<(&Transform, &Projection), With<Camera2d>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     time: Res<Time>,
 ) {
     // Determine which precipitation type is active.
-    let precip_type = match resolved.as_ref().and_then(|r| r.0) {
+    let precip_type = match resolved.0 {
         Some(PrecipitationType::Fog) | None => return,
         Some(t) => t,
     };
@@ -405,7 +405,7 @@ pub fn spawn_weather_particles(
 /// Update weather particle physics: movement, wobble, lifetime, collision.
 pub fn update_weather_particles(
     mut pool: ResMut<WeatherParticlePool>,
-    resolved: Option<Res<ResolvedWeatherType>>,
+    resolved: Res<ResolvedWeatherType>,
     wind: Res<Wind>,
     time: Res<Time>,
     camera_query: Query<(&Transform, &Projection), With<Camera2d>>,
@@ -421,8 +421,7 @@ pub fn update_weather_particles(
 
     // Determine if current weather has splash so we can spawn splash particles.
     let current_has_splash = resolved
-        .as_ref()
-        .and_then(|r| r.0)
+        .0
         .map(|t| config_for_type(t).splash)
         .unwrap_or(false);
 

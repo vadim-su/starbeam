@@ -198,6 +198,7 @@ pub fn handle_warp(
         seed: seeds.terrain_seed_u32(),
         planet_type: body.planet_type_id.clone(),
         wrap_x: body.wrap_x,
+        // Deferred: overwritten by check_biomes_loaded once PlanetTypeAsset loads.
         base_temperature: 0.0,
         weather_config: None,
     };

@@ -108,7 +108,7 @@ pub fn init_fog(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 /// System that updates the fullscreen fog overlay alpha and position.
 pub fn update_fog_overlay(
     weather: Res<WeatherState>,
-    resolved: Option<Res<ResolvedWeatherType>>,
+    resolved: Res<ResolvedWeatherType>,
     time: Res<Time>,
     camera_q: Query<&Transform, With<Camera2d>>,
     mut overlay_q: Query<(&mut Sprite, &mut Transform), (With<FogOverlay>, Without<Camera2d>)>,
@@ -117,7 +117,7 @@ pub fn update_fog_overlay(
         return;
     };
 
-    let is_fog = resolved.as_ref().and_then(|r| r.0.as_ref()) == Some(&PrecipitationType::Fog);
+    let is_fog = resolved.0.as_ref() == Some(&PrecipitationType::Fog);
     let target_alpha = if is_fog {
         weather.intensity() * 0.3
     } else {
@@ -141,13 +141,13 @@ pub fn update_fog_overlay(
 /// System that updates drifting fog cloud sprites.
 pub fn update_fog_clouds(
     weather: Res<WeatherState>,
-    resolved: Option<Res<ResolvedWeatherType>>,
+    resolved: Res<ResolvedWeatherType>,
     wind: Res<Wind>,
     time: Res<Time>,
     camera_q: Query<&Transform, (With<Camera2d>, Without<FogCloud>)>,
     mut cloud_q: Query<(&mut FogCloud, &mut Sprite, &mut Transform), Without<Camera2d>>,
 ) {
-    let is_fog = resolved.as_ref().and_then(|r| r.0.as_ref()) == Some(&PrecipitationType::Fog);
+    let is_fog = resolved.0.as_ref() == Some(&PrecipitationType::Fog);
     let dt = time.delta_secs();
 
     let cam_x = camera_q
