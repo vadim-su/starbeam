@@ -1,3 +1,4 @@
+pub mod precipitation;
 pub mod snow_overlay;
 pub mod snow_particles;
 pub mod temperature;
@@ -36,6 +37,13 @@ impl Plugin for WeatherPlugin {
                 (wind::update_wind, weather_state::update_weather)
                     .in_set(GameSet::WorldUpdate)
                     .run_if(in_state(AppState::InGame)),
+            )
+            .add_systems(
+                Update,
+                precipitation::resolve_weather_type_system
+                    .in_set(GameSet::WorldUpdate)
+                    .run_if(in_state(AppState::InGame))
+                    .after(weather_state::update_weather),
             )
             .add_systems(
                 Update,
