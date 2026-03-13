@@ -256,8 +256,6 @@ mod tests {
                 fill_block: TileId::AIR,
                 cave_threshold: 1.0,
                 parallax_path: None,
-                snow_base_chance: 0.0,
-                snow_permanent: false,
                 temperature_offset: 0.0,
             },
         );

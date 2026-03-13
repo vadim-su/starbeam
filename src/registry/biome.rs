@@ -27,8 +27,6 @@ pub struct BiomeDef {
     #[allow(dead_code)]
     // stored for hot-reload; parallax loaded separately via BiomeParallaxConfigs
     pub parallax_path: Option<String>,
-    pub snow_base_chance: f32,
-    pub snow_permanent: bool,
     pub temperature_offset: f32,
 }
 
@@ -202,8 +200,6 @@ mod tests {
                 fill_block: TileId(3),
                 cave_threshold: 0.3,
                 parallax_path: Some("biomes/meadow/parallax.ron".into()),
-                snow_base_chance: 0.0,
-                snow_permanent: false,
                 temperature_offset: 0.0,
             },
         );
@@ -227,8 +223,6 @@ mod tests {
                 fill_block: TileId(3),
                 cave_threshold: 0.3,
                 parallax_path: None,
-                snow_base_chance: 0.0,
-                snow_permanent: false,
                 temperature_offset: 0.0,
             },
         );
@@ -242,8 +236,6 @@ mod tests {
                 fill_block: TileId(3),
                 cave_threshold: 0.3,
                 parallax_path: None,
-                snow_base_chance: 0.0,
-                snow_permanent: false,
                 temperature_offset: 0.0,
             },
         );

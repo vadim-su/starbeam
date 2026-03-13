@@ -158,8 +158,6 @@ pub(crate) fn hot_reload_biomes(
                             fill_block: tile_registry.by_name(&asset.fill_block),
                             cave_threshold: asset.cave_threshold,
                             parallax_path: asset.parallax.clone(),
-                            snow_base_chance: asset.snow_base_chance,
-                            snow_permanent: asset.snow_permanent,
                             temperature_offset: asset.temperature_offset,
                         },
                     );
