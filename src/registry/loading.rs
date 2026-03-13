@@ -720,6 +720,7 @@ pub(crate) fn check_biomes_loaded(
                 parallax_path: asset.parallax.clone(),
                 snow_base_chance: asset.snow_base_chance,
                 snow_permanent: asset.snow_permanent,
+                temperature_offset: asset.temperature_offset,
             },
         );
     }

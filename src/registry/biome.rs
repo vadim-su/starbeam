@@ -29,6 +29,7 @@ pub struct BiomeDef {
     pub parallax_path: Option<String>,
     pub snow_base_chance: f32,
     pub snow_permanent: bool,
+    pub temperature_offset: f32,
 }
 
 /// All loaded biome definitions keyed by BiomeId.
@@ -203,6 +204,7 @@ mod tests {
                 parallax_path: Some("biomes/meadow/parallax.ron".into()),
                 snow_base_chance: 0.0,
                 snow_permanent: false,
+                temperature_offset: 0.0,
             },
         );
         let def = reg.get(id);
@@ -227,6 +229,7 @@ mod tests {
                 parallax_path: None,
                 snow_base_chance: 0.0,
                 snow_permanent: false,
+                temperature_offset: 0.0,
             },
         );
         let id2 = reg.insert(
@@ -241,6 +244,7 @@ mod tests {
                 parallax_path: None,
                 snow_base_chance: 0.0,
                 snow_permanent: false,
+                temperature_offset: 0.0,
             },
         );
         assert_eq!(id1, id2, "re-insert must return same BiomeId");

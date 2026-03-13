@@ -302,6 +302,8 @@ pub struct BiomeAsset {
     pub snow_base_chance: f32,
     #[serde(default)]
     pub snow_permanent: bool,
+    #[serde(default)]
+    pub temperature_offset: f32,
     // Future fields — not implemented in MVP, kept for RON schema forward-compatibility
     #[allow(dead_code)]
     #[serde(default)]

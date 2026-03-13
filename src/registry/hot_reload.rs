@@ -160,6 +160,7 @@ pub(crate) fn hot_reload_biomes(
                             parallax_path: asset.parallax.clone(),
                             snow_base_chance: asset.snow_base_chance,
                             snow_permanent: asset.snow_permanent,
+                            temperature_offset: asset.temperature_offset,
                         },
                     );
                     info!("Hot-reloaded biome: {name}");

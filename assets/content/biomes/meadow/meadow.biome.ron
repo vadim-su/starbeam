@@ -8,5 +8,6 @@
     parallax: Some("content/biomes/meadow/meadow.parallax.ron"),
     snow_base_chance: 0.8,
     snow_permanent: true,
+    temperature_offset: 0.0,
 
 )

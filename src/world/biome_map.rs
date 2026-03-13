@@ -316,6 +316,7 @@ mod tests {
                     parallax_path: None,
                     snow_base_chance: 0.0,
                     snow_permanent: false,
+                    temperature_offset: 0.0,
                 },
             );
         }
