@@ -66,7 +66,8 @@ pub fn init_fog(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     let texture_handle = handle.clone();
     commands.insert_resource(FogCloudTexture { handle });
 
-    // Spawn the fullscreen fog overlay (below particles at z=3.0)
+    // Spawn the fullscreen fog overlay (below particles at z=3.0).
+    // Starts Hidden to avoid overdraw when fog is inactive.
     commands.spawn((
         FogOverlay,
         Sprite {
@@ -75,6 +76,7 @@ pub fn init_fog(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
             ..default()
         },
         Transform::from_translation(Vec3::new(0.0, 0.0, 2.5)),
+        Visibility::Hidden,
     ));
 
     // Spawn 8 drifting fog cloud entities
@@ -101,6 +103,7 @@ pub fn init_fog(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
                 ..default()
             },
             Transform::from_translation(Vec3::new(x, y, 2.6)),
+            Visibility::Hidden,
         ));
     }
 }
@@ -111,7 +114,10 @@ pub fn update_fog_overlay(
     resolved: Res<ResolvedWeatherType>,
     time: Res<Time>,
     camera_q: Query<&Transform, With<Camera2d>>,
-    mut overlay_q: Query<(&mut Sprite, &mut Transform), (With<FogOverlay>, Without<Camera2d>)>,
+    mut overlay_q: Query<
+        (&mut Sprite, &mut Transform, &mut Visibility),
+        (With<FogOverlay>, Without<Camera2d>),
+    >,
 ) {
     let Ok(cam_tf) = camera_q.single() else {
         return;
@@ -126,7 +132,7 @@ pub fn update_fog_overlay(
 
     let dt = time.delta_secs();
 
-    for (mut sprite, mut transform) in overlay_q.iter_mut() {
+    for (mut sprite, mut transform, mut vis) in overlay_q.iter_mut() {
         // Follow camera
         transform.translation.x = cam_tf.translation.x;
         transform.translation.y = cam_tf.translation.y;
@@ -134,7 +140,15 @@ pub fn update_fog_overlay(
         // Lerp alpha toward target
         let current_alpha = sprite.color.alpha();
         let new_alpha = current_alpha + (target_alpha - current_alpha) * (0.5 * dt);
-        sprite.color.set_alpha(new_alpha);
+
+        // Hide from renderer when effectively invisible to avoid overdraw.
+        if new_alpha < 0.001 {
+            *vis = Visibility::Hidden;
+            sprite.color.set_alpha(0.0);
+        } else {
+            *vis = Visibility::Visible;
+            sprite.color.set_alpha(new_alpha);
+        }
     }
 }
 
@@ -145,7 +159,7 @@ pub fn update_fog_clouds(
     wind: Res<Wind>,
     time: Res<Time>,
     camera_q: Query<&Transform, (With<Camera2d>, Without<FogCloud>)>,
-    mut cloud_q: Query<(&mut FogCloud, &mut Sprite, &mut Transform), Without<Camera2d>>,
+    mut cloud_q: Query<(&mut FogCloud, &mut Sprite, &mut Transform, &mut Visibility), Without<Camera2d>>,
 ) {
     let is_fog = resolved.0.as_ref() == Some(&PrecipitationType::Fog);
     let dt = time.delta_secs();
@@ -155,13 +169,20 @@ pub fn update_fog_clouds(
         .map(|t| t.translation.x)
         .unwrap_or(0.0);
 
-    for (mut cloud, mut sprite, mut transform) in cloud_q.iter_mut() {
+    for (mut cloud, mut sprite, mut transform, mut vis) in cloud_q.iter_mut() {
         if !is_fog {
             // Fade out
             let current_alpha = sprite.color.alpha();
             let new_alpha = current_alpha + (0.0 - current_alpha) * (0.5 * dt);
-            sprite.color.set_alpha(new_alpha);
+            if new_alpha < 0.001 {
+                *vis = Visibility::Hidden;
+                sprite.color.set_alpha(0.0);
+            } else {
+                sprite.color.set_alpha(new_alpha);
+            }
         } else {
+            *vis = Visibility::Visible;
+
             // Drift along wind
             transform.translation.x +=
                 wind.velocity().x * 0.3 * dt + cloud.drift_speed * dt;

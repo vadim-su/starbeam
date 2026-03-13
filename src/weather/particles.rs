@@ -553,6 +553,16 @@ pub fn rebuild_weather_mesh(
 
     let alive: Vec<_> = pool.particles.iter().filter(|p| !p.is_dead()).collect();
 
+    // Skip mesh rebuild when there are no particles to render.
+    if alive.is_empty() {
+        if let Some(existing) = meshes.get_mut(&mesh_2d.0) {
+            existing.remove_attribute(Mesh::ATTRIBUTE_POSITION);
+            existing.remove_attribute(Mesh::ATTRIBUTE_COLOR);
+            existing.remove_indices();
+        }
+        return;
+    }
+
     let n = alive.len();
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(n * 4);
     let mut colors: Vec<[f32; 4]> = Vec::with_capacity(n * 4);
