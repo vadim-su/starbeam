@@ -556,7 +556,7 @@ pub(crate) fn check_biomes_loaded(
     biome_assets: Res<Assets<BiomeAsset>>,
     parallax_assets: Res<Assets<ParallaxConfigAsset>>,
     tile_registry: Res<TileRegistry>,
-    world_config: Res<ActiveWorld>,
+    mut world_config: ResMut<ActiveWorld>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
     // Check for planet type load failure
@@ -706,6 +706,10 @@ pub(crate) fn check_biomes_loaded(
         region_width_max: planet_asset.region_width_max,
         primary_region_ratio: planet_asset.primary_region_ratio,
     };
+
+    // --- Update ActiveWorld with planet type weather data ---
+    world_config.base_temperature = planet_asset.base_temperature.unwrap_or(15.0);
+    world_config.weather_config = planet_asset.weather.clone();
 
     // --- Build BiomeRegistry ---
     let mut biome_registry = BiomeRegistry::default();
