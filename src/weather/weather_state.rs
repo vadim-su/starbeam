@@ -47,11 +47,6 @@ impl WeatherState {
     pub fn is_precipitating(&self) -> bool {
         self.phase == WeatherPhase::Precipitation
     }
-
-    /// Backward compatibility -- will be removed in Task 8.
-    pub fn is_snowing(&self) -> bool {
-        self.is_precipitating()
-    }
 }
 
 pub fn update_weather(

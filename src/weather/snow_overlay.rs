@@ -11,6 +11,7 @@ use crate::object::spawn::PlacedObjectEntity;
 use crate::registry::biome::BiomeRegistry;
 use crate::registry::tile::TileId;
 use crate::registry::world::ActiveWorld;
+use crate::weather::temperature::local_temperature;
 use crate::weather::weather_state::WeatherState;
 use crate::world::biome_map::BiomeMap;
 use crate::world::chunk::{
@@ -139,7 +140,7 @@ pub fn update_snow_overlays(
     let tile_min_y = ((cam_y - visible_h / 2.0) / tile_size).floor() as i32;
     let tile_max_y = ((cam_y + visible_h / 2.0) / tile_size).ceil() as i32;
 
-    let is_snowing = weather.is_snowing();
+    let is_precipitating = weather.is_precipitating();
 
     // Collect existing overlay positions.
     let existing_positions: HashSet<(i32, i32)> = existing
@@ -150,14 +151,10 @@ pub fn update_snow_overlays(
     let mut rng = rand::thread_rng();
 
     // --- Melting ---
-    if world_time.temperature_modifier > 0.5 && !is_snowing {
-        for (entity, overlay) in existing.iter() {
-            let wrapped_x = world.wrap_tile_x(overlay.tile_x).max(0) as u32;
-            let biome_id = biome_map.biome_at(wrapped_x);
-            let biome = biome_registry.get(biome_id);
-            if !biome.snow_permanent && rng.r#gen::<f32>() < 0.10 {
-                commands.entity(entity).despawn();
-            }
+    for (entity, overlay) in existing.iter() {
+        let local_temp = local_temperature(overlay.tile_x, &world, &world_time, &biome_map, &biome_registry);
+        if local_temp > 2.0 && !is_precipitating && rng.r#gen::<f32>() < 0.10 {
+            commands.entity(entity).despawn();
         }
     }
 
@@ -172,16 +169,15 @@ pub fn update_snow_overlays(
 
             // Check biome wants snow.
             let biome_x = wrapped_tx.max(0) as u32;
-            let biome_id = biome_map.biome_at(biome_x);
-            let biome = biome_registry.get(biome_id);
 
-            let wants_snow = biome.snow_permanent || is_snowing;
+            let local_temp = local_temperature(wrapped_tx as i32, &world, &world_time, &biome_map, &biome_registry);
+            let wants_snow = local_temp < 0.0 && (is_precipitating || local_temp < -5.0);
             if !wants_snow {
                 continue;
             }
 
-            // Biome boundary falloff (4-tile zone)
-            if biome.snow_permanent {
+            // Biome boundary falloff (4-tile zone) for deeply cold biomes
+            if local_temp < -5.0 {
                 let region_idx = biome_map.region_index_at(biome_x);
                 let region = &biome_map.regions[region_idx];
                 let dist_from_start = biome_x - region.start_x;
@@ -196,7 +192,7 @@ pub fn update_snow_overlays(
             }
 
             // Random chance for gradual appearance.
-            if !biome.snow_permanent {
+            if local_temp >= -5.0 {
                 if rng.r#gen::<f32>() > 0.05 {
                     continue;
                 }
@@ -269,6 +265,7 @@ pub fn update_snow_overlays(
 #[derive(Component)]
 pub struct TreeSnowCap {
     pub tree_entity: Entity,
+    pub tile_x: i32,
 }
 
 /// Marker inserted on tree entities that already have snow caps.
@@ -292,21 +289,24 @@ pub fn update_tree_snow(
 ) {
     let Some(texture) = texture else { return };
     let tile_size = world.tile_size;
-    let is_snowing = weather.is_snowing();
+    let is_precipitating = weather.is_precipitating();
 
     let tree_id = object_registry.by_name("tree_object");
 
-    // --- Melting: remove tree snow when warm and not snowing ---
-    if world_time.temperature_modifier > 0.5 && !is_snowing {
+    // --- Melting: remove tree snow when warm and not precipitating ---
+    if !is_precipitating {
         let tick = rng_state.get_or_insert(0);
         *tick = tick.wrapping_add(1);
         // 10% chance per tick (matching ground snow melt rate)
         for (cap_entity, cap) in tree_snow_caps.iter() {
-            let hash = cap.tree_entity.to_bits().wrapping_mul(2654435761) ^ (*tick as u64);
-            if hash % 10 == 0 {
-                commands.entity(cap_entity).despawn();
-                if let Ok(tree_e) = trees_with_snow.get(cap.tree_entity) {
-                    commands.entity(tree_e).remove::<HasTreeSnow>();
+            let local_temp = local_temperature(cap.tile_x, &world, &world_time, &biome_map, &biome_registry);
+            if local_temp > 2.0 {
+                let hash = cap.tree_entity.to_bits().wrapping_mul(2654435761) ^ (*tick as u64);
+                if hash % 10 == 0 {
+                    commands.entity(cap_entity).despawn();
+                    if let Ok(tree_e) = trees_with_snow.get(cap.tree_entity) {
+                        commands.entity(tree_e).remove::<HasTreeSnow>();
+                    }
                 }
             }
         }
@@ -324,11 +324,9 @@ pub fn update_tree_snow(
 
             // Check biome wants snow at this tree's X position.
             let tree_tile_x = (transform.translation.x / tile_size).floor() as i32;
-            let wrapped_x = world.wrap_tile_x(tree_tile_x).max(0) as u32;
-            let biome_id = biome_map.biome_at(wrapped_x);
-            let biome = biome_registry.get(biome_id);
 
-            let wants_snow = biome.snow_permanent || is_snowing;
+            let local_temp = local_temperature(tree_tile_x, &world, &world_time, &biome_map, &biome_registry);
+            let wants_snow = local_temp < 0.0 && (is_precipitating || local_temp < -5.0);
             if !wants_snow {
                 continue;
             }
@@ -357,6 +355,7 @@ pub fn update_tree_snow(
                 commands.spawn((
                     TreeSnowCap {
                         tree_entity: entity,
+                        tile_x: tree_tile_x,
                     },
                     Sprite {
                         image: texture.handle.clone(),
