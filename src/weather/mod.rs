@@ -2,7 +2,6 @@ pub mod fog;
 pub mod particles;
 pub mod precipitation;
 pub mod snow_overlay;
-pub mod snow_particles;
 pub mod temperature;
 pub mod weather_state;
 pub mod wind;
@@ -16,10 +15,6 @@ pub use weather_state::WeatherState;
 pub use wind::Wind;
 
 use snow_overlay::SnowOverlayTimer;
-use snow_particles::{
-    rebuild_snow_mesh, spawn_snow_particles, update_snow_particles, SharedSnowMaterial,
-    SnowParticlePool,
-};
 
 pub struct WeatherPlugin;
 
@@ -27,9 +22,9 @@ impl Plugin for WeatherPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Wind>()
             .init_resource::<WeatherState>()
-            .init_resource::<SnowParticlePool>()
+            .init_resource::<particles::WeatherParticlePool>()
             .init_resource::<SnowOverlayTimer>()
-            .add_systems(Startup, snow_particles::init_snow_render)
+            .add_systems(Startup, particles::init_weather_render)
             .add_systems(
                 OnEnter(AppState::InGame),
                 (snow_overlay::init_snow_overlay_texture, fog::init_fog),
@@ -56,11 +51,16 @@ impl Plugin for WeatherPlugin {
             )
             .add_systems(
                 Update,
-                (spawn_snow_particles, update_snow_particles, rebuild_snow_mesh)
+                (
+                    particles::spawn_weather_particles,
+                    particles::update_weather_particles,
+                    particles::rebuild_weather_mesh,
+                )
                     .chain()
                     .in_set(GameSet::WorldUpdate)
                     .run_if(in_state(AppState::InGame))
-                    .run_if(resource_exists::<SharedSnowMaterial>),
+                    .run_if(resource_exists::<particles::WeatherParticleMaterial>)
+                    .after(precipitation::resolve_weather_type_system),
             )
             .add_systems(
                 Update,
