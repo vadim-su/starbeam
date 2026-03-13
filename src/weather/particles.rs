@@ -357,8 +357,8 @@ pub fn spawn_weather_particles(
             (x, y)
         } else {
             // Snow / rain: spawn in a strip above the camera top.
-            let x = cam_left + rng.r#gen::<f32>() * visible_w;
-            let y = cam_top + rng.gen_range(16.0..48.0);
+            let x = cam_left - 64.0 + rng.r#gen::<f32>() * (visible_w + 128.0);
+            let y = cam_top + rng.gen_range(64.0..128.0);
             (x, y)
         };
 

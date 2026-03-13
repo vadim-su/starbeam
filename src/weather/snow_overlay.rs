@@ -135,10 +135,11 @@ pub fn update_snow_overlays(
     let cam_x = cam_tf.translation.x;
     let cam_y = cam_tf.translation.y;
 
-    let tile_min_x = ((cam_x - visible_w / 2.0) / tile_size).floor() as i32;
-    let tile_max_x = ((cam_x + visible_w / 2.0) / tile_size).ceil() as i32;
-    let tile_min_y = ((cam_y - visible_h / 2.0) / tile_size).floor() as i32;
-    let tile_max_y = ((cam_y + visible_h / 2.0) / tile_size).ceil() as i32;
+    let margin = tile_size * 4.0;
+    let tile_min_x = ((cam_x - visible_w / 2.0 - margin) / tile_size).floor() as i32;
+    let tile_max_x = ((cam_x + visible_w / 2.0 + margin) / tile_size).ceil() as i32;
+    let tile_min_y = ((cam_y - visible_h / 2.0 - margin) / tile_size).floor() as i32;
+    let tile_max_y = ((cam_y + visible_h / 2.0 + margin) / tile_size).ceil() as i32;
 
     let is_precipitating = weather.is_precipitating();
 
