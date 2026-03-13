@@ -1,3 +1,4 @@
+pub mod particles;
 pub mod precipitation;
 pub mod snow_overlay;
 pub mod snow_particles;
