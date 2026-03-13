@@ -208,9 +208,27 @@ pub fn update_snow_overlays(
                 continue;
             }
             let tile_above = world_map
-                .get_tile(wrapped_tx, ty - 1, Layer::Fg, &ctx_ref)
+                .get_tile(wrapped_tx, ty + 1, Layer::Fg, &ctx_ref)
                 .unwrap_or(TileId::AIR);
             if tile_above != TileId::AIR {
+                continue;
+            }
+
+            // Must have a clear path to sky: scan upward from ty+2 to the
+            // world top. If any solid tile is found, this block is under a
+            // roof and should not receive snow.
+            let sky_limit = world.height_tiles as i32;
+            let mut has_roof = false;
+            for check_y in (ty + 2)..sky_limit {
+                let t = world_map
+                    .get_tile(wrapped_tx, check_y, Layer::Fg, &ctx_ref)
+                    .unwrap_or(TileId::AIR);
+                if t != TileId::AIR {
+                    has_roof = true;
+                    break;
+                }
+            }
+            if has_roof {
                 continue;
             }
 
@@ -222,11 +240,10 @@ pub fn update_snow_overlays(
             };
 
             // Spawn overlay sprite.
+            // Position at top of tile: tile top = (ty + 1) * tile_size.
+            // Sprite is 16x4, centered, so shift down by 2px (half height).
             let world_x = wrapped_tx as f32 * tile_size + tile_size / 2.0;
-            let world_y = ty as f32 * tile_size + tile_size;
-
-            // Position at top of tile + 2px offset. The sprite is 16x4, centered by
-            // default, so shift down by half its height (2px) from the tile top edge.
+            let world_y = (ty + 1) as f32 * tile_size - 2.0;
             let overlay_entity = commands
                 .spawn((
                     SnowOverlay {
@@ -277,7 +294,7 @@ pub fn handle_dirty_chunk_overlays(
             .get_tile(overlay.tile_x, overlay.tile_y, Layer::Fg, &ctx_ref)
             .unwrap_or(TileId::AIR);
         let tile_above = world_map
-            .get_tile(overlay.tile_x, overlay.tile_y - 1, Layer::Fg, &ctx_ref)
+            .get_tile(overlay.tile_x, overlay.tile_y + 1, Layer::Fg, &ctx_ref)
             .unwrap_or(TileId::AIR);
 
         if tile == TileId::AIR || tile_above != TileId::AIR {
