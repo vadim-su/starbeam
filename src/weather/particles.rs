@@ -273,7 +273,7 @@ pub fn init_weather_render(
         Mesh2d(empty_mesh),
         MeshMaterial2d(mat),
         Transform::from_translation(Vec3::new(0.0, 0.0, WEATHER_Z)),
-        Visibility::default(),
+        Visibility::Hidden,
     ));
 }
 
@@ -414,6 +414,11 @@ pub fn update_weather_particles(
     tile_registry: Res<TileRegistry>,
     active_world: Res<ActiveWorld>,
 ) {
+    // Early exit when pool has no particles to update.
+    if pool.particles.is_empty() {
+        return;
+    }
+
     let dt = time.delta_secs();
     let tile_size = active_world.tile_size;
     let chunk_size = active_world.chunk_size;
@@ -545,30 +550,28 @@ pub fn update_weather_particles(
 pub fn rebuild_weather_mesh(
     pool: Res<WeatherParticlePool>,
     mut meshes: ResMut<Assets<Mesh>>,
-    query: Query<&Mesh2d, With<WeatherMeshEntity>>,
+    mut query: Query<(&Mesh2d, &mut Visibility), With<WeatherMeshEntity>>,
 ) {
-    let Ok(mesh_2d) = query.single() else {
+    let Ok((mesh_2d, mut vis)) = query.single_mut() else {
         return;
     };
 
-    let alive: Vec<_> = pool.particles.iter().filter(|p| !p.is_dead()).collect();
+    // Count alive particles without allocating a Vec.
+    let alive_count = pool.particles.iter().filter(|p| !p.is_dead()).count();
 
-    // Skip mesh rebuild when there are no particles to render.
-    if alive.is_empty() {
-        if let Some(existing) = meshes.get_mut(&mesh_2d.0) {
-            existing.remove_attribute(Mesh::ATTRIBUTE_POSITION);
-            existing.remove_attribute(Mesh::ATTRIBUTE_COLOR);
-            existing.remove_indices();
-        }
+    if alive_count == 0 {
+        // Hide the mesh entity entirely — no GPU work, no mesh mutation.
+        *vis = Visibility::Hidden;
         return;
     }
+    *vis = Visibility::Visible;
 
-    let n = alive.len();
+    let n = alive_count;
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(n * 4);
     let mut colors: Vec<[f32; 4]> = Vec::with_capacity(n * 4);
     let mut indices: Vec<u32> = Vec::with_capacity(n * 6);
 
-    for (i, p) in alive.iter().enumerate() {
+    for (i, p) in pool.particles.iter().filter(|p| !p.is_dead()).enumerate() {
         let base = (i * 4) as u32;
         let x = p.position.x;
         let y = p.position.y;
