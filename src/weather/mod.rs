@@ -49,6 +49,8 @@ impl Plugin for WeatherPlugin {
                 (
                     snow_overlay::update_snow_overlays,
                     snow_overlay::handle_dirty_chunk_overlays,
+                    snow_overlay::update_tree_snow,
+                    snow_overlay::cleanup_tree_snow,
                 )
                     .in_set(GameSet::WorldUpdate)
                     .run_if(in_state(AppState::InGame)),

@@ -6,6 +6,8 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::window::PrimaryWindow;
 use rand::Rng;
 
+use crate::object::registry::ObjectRegistry;
+use crate::object::spawn::PlacedObjectEntity;
 use crate::registry::biome::BiomeRegistry;
 use crate::registry::tile::TileId;
 use crate::registry::world::ActiveWorld;
@@ -173,7 +175,7 @@ pub fn update_snow_overlays(
             let biome_id = biome_map.biome_at(biome_x);
             let biome = biome_registry.get(biome_id);
 
-            let wants_snow = biome.snow_permanent || (is_snowing && biome.snow_base_chance > 0.0);
+            let wants_snow = biome.snow_permanent || is_snowing;
             if !wants_snow {
                 continue;
             }
@@ -259,6 +261,125 @@ pub fn update_snow_overlays(
                 .id();
 
             commands.entity(chunk_entities.fg).add_child(overlay_entity);
+        }
+    }
+}
+
+/// Marker for snow cap sprites placed on tree canopies.
+#[derive(Component)]
+pub struct TreeSnowCap {
+    pub tree_entity: Entity,
+}
+
+/// Marker inserted on tree entities that already have snow caps.
+#[derive(Component)]
+pub struct HasTreeSnow;
+
+/// System that adds snow cap sprites on top of tree canopies in snowy biomes.
+pub fn update_tree_snow(
+    mut commands: Commands,
+    world: Res<ActiveWorld>,
+    biome_map: Res<BiomeMap>,
+    biome_registry: Res<BiomeRegistry>,
+    weather: Res<WeatherState>,
+    world_time: Res<WorldTime>,
+    object_registry: Res<ObjectRegistry>,
+    texture: Option<Res<SnowOverlayTexture>>,
+    trees_without_snow: Query<(Entity, &PlacedObjectEntity, &Transform), Without<HasTreeSnow>>,
+    tree_snow_caps: Query<(Entity, &TreeSnowCap)>,
+    trees_with_snow: Query<Entity, With<HasTreeSnow>>,
+    mut rng_state: Local<Option<u32>>,
+) {
+    let Some(texture) = texture else { return };
+    let tile_size = world.tile_size;
+    let is_snowing = weather.is_snowing();
+
+    let tree_id = object_registry.by_name("tree_object");
+
+    // --- Melting: remove tree snow when warm and not snowing ---
+    if world_time.temperature_modifier > 0.5 && !is_snowing {
+        let tick = rng_state.get_or_insert(0);
+        *tick = tick.wrapping_add(1);
+        // 10% chance per tick (matching ground snow melt rate)
+        for (cap_entity, cap) in tree_snow_caps.iter() {
+            let hash = cap.tree_entity.to_bits().wrapping_mul(2654435761) ^ (*tick as u64);
+            if hash % 10 == 0 {
+                commands.entity(cap_entity).despawn();
+                if let Ok(tree_e) = trees_with_snow.get(cap.tree_entity) {
+                    commands.entity(tree_e).remove::<HasTreeSnow>();
+                }
+            }
+        }
+    }
+
+    // --- Adding snow to trees ---
+    if let Some(tree_obj_id) = tree_id {
+        let tree_def = object_registry.get(tree_obj_id);
+        let tree_h = tree_def.size.1 as f32;
+
+        for (entity, placed, transform) in trees_without_snow.iter() {
+            if placed.object_id != tree_obj_id {
+                continue;
+            }
+
+            // Check biome wants snow at this tree's X position.
+            let tree_tile_x = (transform.translation.x / tile_size).floor() as i32;
+            let wrapped_x = world.wrap_tile_x(tree_tile_x).max(0) as u32;
+            let biome_id = biome_map.biome_at(wrapped_x);
+            let biome = biome_registry.get(biome_id);
+
+            let wants_snow = biome.snow_permanent || is_snowing;
+            if !wants_snow {
+                continue;
+            }
+
+            // Tree center is at transform.translation. Top of tree is
+            // center_y + tree_h * tile_size / 2.
+            let cx = transform.translation.x;
+            let top_y = transform.translation.y + tree_h * tile_size / 2.0;
+
+            // Place snow caps on the crown: top center and two side positions.
+            // Snow cap is 16x4, so custom_size matches tile width.
+            let cap_positions = [
+                // Top center
+                Vec3::new(cx, top_y - 2.0, 0.05),
+                // Left crown (1 tile lower, 1.5 tiles left)
+                Vec3::new(cx - 1.5 * tile_size, top_y - tile_size - 2.0, 0.05),
+                // Right crown (1 tile lower, 1.5 tiles right)
+                Vec3::new(cx + 1.5 * tile_size, top_y - tile_size - 2.0, 0.05),
+                // Inner left (2 tiles lower, 0.5 tile left)
+                Vec3::new(cx - 0.5 * tile_size, top_y - 0.5 * tile_size - 2.0, 0.05),
+                // Inner right (2 tiles lower, 0.5 tile right)
+                Vec3::new(cx + 0.5 * tile_size, top_y - 0.5 * tile_size - 2.0, 0.05),
+            ];
+
+            for pos in &cap_positions {
+                commands.spawn((
+                    TreeSnowCap {
+                        tree_entity: entity,
+                    },
+                    Sprite {
+                        image: texture.handle.clone(),
+                        ..default()
+                    },
+                    Transform::from_translation(*pos),
+                ));
+            }
+
+            commands.entity(entity).insert(HasTreeSnow);
+        }
+    }
+}
+
+/// Cleanup tree snow caps when their parent tree entity is despawned.
+pub fn cleanup_tree_snow(
+    mut commands: Commands,
+    caps: Query<(Entity, &TreeSnowCap)>,
+    trees: Query<Entity, With<PlacedObjectEntity>>,
+) {
+    for (cap_entity, cap) in caps.iter() {
+        if trees.get(cap.tree_entity).is_err() {
+            commands.entity(cap_entity).despawn();
         }
     }
 }
