@@ -410,6 +410,8 @@ mod tests {
             temperature_modifiers: None,
             temperature_celsius_offsets: None,
             wrap_x: None,
+            base_temperature: None,
+            weather: None,
         }
     }
 

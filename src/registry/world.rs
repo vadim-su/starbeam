@@ -17,6 +17,8 @@ pub struct ActiveWorld {
     pub seed: u32, // TEMPORARY — kept for BiomeMap/TerrainNoiseCache compat
     pub planet_type: String,
     pub wrap_x: bool,
+    pub base_temperature: f32,
+    pub weather_config: Option<crate::registry::assets::WeatherConfig>,
 }
 
 impl ActiveWorld {
@@ -72,6 +74,8 @@ mod tests {
             seed: 42,
             planet_type: "garden".into(),
             wrap_x: true,
+            base_temperature: 15.0,
+            weather_config: None,
         }
     }
 

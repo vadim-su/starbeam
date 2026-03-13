@@ -471,6 +471,8 @@ pub(crate) fn check_loading(
         seed: seeds.terrain_seed_u32(),
         planet_type: ship_planet_type.clone(),
         wrap_x: false,
+        base_temperature: 0.0,
+        weather_config: None,
     };
     commands.insert_resource(TerrainNoiseCache::new(active_world.seed));
     commands.insert_resource(active_world);

@@ -198,6 +198,8 @@ pub fn handle_warp(
         seed: seeds.terrain_seed_u32(),
         planet_type: body.planet_type_id.clone(),
         wrap_x: body.wrap_x,
+        base_temperature: 0.0,
+        weather_config: None,
     };
     commands.insert_resource(TerrainNoiseCache::new(new_active_world.seed));
     commands.insert_resource(new_active_world);
@@ -402,6 +404,8 @@ pub fn handle_warp_to_ship(
         seed: seeds.terrain_seed_u32(),
         planet_type: ship_planet_type.clone(),
         wrap_x: false,
+        base_temperature: 0.0,
+        weather_config: None,
     };
     commands.insert_resource(TerrainNoiseCache::new(new_active_world.seed));
     commands.insert_resource(new_active_world);

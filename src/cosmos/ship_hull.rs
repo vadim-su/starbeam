@@ -238,6 +238,8 @@ mod tests {
             seed: 42,
             planet_type: "ship".into(),
             wrap_x: false,
+            base_temperature: 0.0,
+            weather_config: None,
         }
     }
 

@@ -40,4 +40,15 @@
     day_ratio: Some((0.35, 0.50)),
     night_ratio: Some((0.30, 0.45)),
     danger_multipliers: Some((0.5, 0.0, 0.5, 1.0)),
+    base_temperature: Some(15.0),
+    weather: Some((
+        precipitation_chance: 0.3,
+        precipitation_duration: (60.0, 180.0),
+        cooldown: (60.0, 300.0),
+        types: [
+            (kind: "snow",      temp_max: 0.0),
+            (kind: "rain",      temp_min: 0.0, temp_max: 35.0),
+            (kind: "fog",       temp_min: 5.0, temp_max: 20.0),
+        ],
+    )),
 )

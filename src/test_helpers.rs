@@ -28,6 +28,8 @@ pub mod fixtures {
             seed: 42,
             planet_type: "garden".into(),
             wrap_x: true,
+            base_temperature: 15.0,
+            weather_config: None,
         }
     }
 

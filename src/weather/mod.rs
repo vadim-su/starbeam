@@ -1,5 +1,6 @@
 pub mod snow_overlay;
 pub mod snow_particles;
+pub mod temperature;
 pub mod weather_state;
 pub mod wind;
 

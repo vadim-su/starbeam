@@ -252,6 +252,32 @@ pub struct LayersAsset {
     pub core: LayerConfigAsset,
 }
 
+/// A single weather type entry with optional temperature constraints.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WeatherTypeEntry {
+    pub kind: String,
+    #[serde(default = "default_neg_inf")]
+    pub temp_min: f32,
+    #[serde(default = "default_pos_inf")]
+    pub temp_max: f32,
+}
+
+fn default_neg_inf() -> f32 {
+    f32::NEG_INFINITY
+}
+fn default_pos_inf() -> f32 {
+    f32::INFINITY
+}
+
+/// Weather configuration for a planet type.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WeatherConfig {
+    pub precipitation_chance: f32,
+    pub precipitation_duration: (f32, f32),
+    pub cooldown: (f32, f32),
+    pub types: Vec<WeatherTypeEntry>,
+}
+
 /// Asset loaded from *.planet.ron
 #[derive(Asset, TypePath, Debug, Deserialize)]
 pub struct PlanetTypeAsset {
@@ -288,6 +314,10 @@ pub struct PlanetTypeAsset {
     pub temperature_celsius_offsets: Option<[f32; 4]>,
     #[serde(default)]
     pub wrap_x: Option<bool>,
+    #[serde(default)]
+    pub base_temperature: Option<f32>,
+    #[serde(default)]
+    pub weather: Option<WeatherConfig>,
 }
 
 /// Asset loaded from *.biome.ron
