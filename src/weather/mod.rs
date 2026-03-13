@@ -1,3 +1,4 @@
+pub mod fog;
 pub mod particles;
 pub mod precipitation;
 pub mod snow_overlay;
@@ -31,7 +32,7 @@ impl Plugin for WeatherPlugin {
             .add_systems(Startup, snow_particles::init_snow_render)
             .add_systems(
                 OnEnter(AppState::InGame),
-                snow_overlay::init_snow_overlay_texture,
+                (snow_overlay::init_snow_overlay_texture, fog::init_fog),
             )
             .add_systems(
                 Update,
@@ -45,6 +46,13 @@ impl Plugin for WeatherPlugin {
                     .in_set(GameSet::WorldUpdate)
                     .run_if(in_state(AppState::InGame))
                     .after(weather_state::update_weather),
+            )
+            .add_systems(
+                Update,
+                (fog::update_fog_overlay, fog::update_fog_clouds)
+                    .in_set(GameSet::WorldUpdate)
+                    .run_if(in_state(AppState::InGame))
+                    .after(precipitation::resolve_weather_type_system),
             )
             .add_systems(
                 Update,
